@@ -19,9 +19,9 @@ This report covers what StockEye is built with, what each piece is for, how the 
 | News | **Google News RSS** (keyless, date-windowed, SG and US editions) plus optional **Finnhub**, **Marketaux** and **Alpha Vantage** (enabled automatically when their free API keys are set) | Two years of news history. Keyed providers add depth for recent US news. |
 | RSS parsing | **feedparser** | Parses Google News RSS. |
 | Scheduling | **APScheduler** | Post-close refresh of watchlisted US (21:30 UTC) and SGX (09:30 UTC) symbols. |
-| Auth | **argon2-cffi** (argon2id), **PyJWT**, **slowapi** | Password hashing, short-lived access tokens, and per-IP login rate limiting. |
+| Auth | **argon2-cffi** (argon2id), **PyJWT**, **limits** | Password hashing, short-lived access tokens, and fixed-window rate limits (per IP on the auth routes, per user on the data routes). |
 | Logging | **structlog** (JSON) | Structured logs with a request id on every line, and loud quota warnings. |
-| Quality tooling | **ruff**, **mypy --strict**, **import-linter**, **pytest** (+ pytest-asyncio, respx, hypothesis, time-machine) | Lint and format, strict typing, enforced layering rules, and over 600 tests including property-based tests. |
+| Quality tooling | **ruff**, **mypy --strict**, **import-linter**, **pytest** (+ pytest-asyncio, respx, hypothesis, time-machine) | Lint and format, strict typing, enforced layering rules, and over 700 tests including property-based tests. |
 
 ### Frontend (`frontend/`)
 | Concern | Choice | Why / what it does |
