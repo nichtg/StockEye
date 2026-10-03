@@ -9,12 +9,13 @@ counts retries against us too.
 import asyncio
 import random
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from functools import partial
 from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict
 
+from app.clock import utc_now
 from app.config import ProviderLimits
 from app.logging_setup import get_logger
 from app.providers.base import MarketDataProvider, NewsProvider
@@ -44,10 +45,6 @@ log = get_logger(__name__)
 MAX_HONOURED_RETRY_AFTER = 30.0  # longer vendor waits are not worth blocking a request on
 MAX_QUOTA_WAIT = 65.0  # seconds; one minute window plus a margin
 MAX_QUOTA_WAITS = 5
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 Level = Literal["ok", "warning", "blocked"]
@@ -82,7 +79,7 @@ class ProviderGuard:
         base_delay: float = 0.5,
         max_delay: float = 8.0,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._ledger = ledger
         self._limits = limits

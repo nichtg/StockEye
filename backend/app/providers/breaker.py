@@ -6,14 +6,12 @@ State is per process by design: a restart resets it, which is the safe direction
 """
 
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
+from app.clock import utc_now
+
 BreakerState = Literal["closed", "open", "half_open"]
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 class CircuitBreaker:
@@ -21,7 +19,7 @@ class CircuitBreaker:
         self,
         threshold: int = 5,
         cooldown: timedelta = timedelta(minutes=2),
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._threshold = threshold
         self._cooldown = cooldown

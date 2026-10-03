@@ -47,14 +47,18 @@ class IngestBudget:
             await self._admitted.insert_one({"_id": symbol, "user_id": user_id, "at": now})
         except DuplicateKeyError:
             return True
-        spent = await add_to_capped_set(
-            self._col,
-            {"user_id": user_id, "day": now.date().isoformat()},
-            "symbols",
-            symbol,
-            self._per_day,
-            also={"$setOnInsert": {"expires_at": now + timedelta(days=2)}},
-        )
-        if not spent:
-            await self._admitted.delete_one({"_id": symbol})
+        spent = False
+        try:
+            spent = await add_to_capped_set(
+                self._col,
+                {"user_id": user_id, "day": now.date().isoformat()},
+                "symbols",
+                symbol,
+                self._per_day,
+                also={"$setOnInsert": {"expires_at": now + timedelta(days=2)}},
+            )
+        finally:
+            # A refused or failed charge must not leave the symbol admitted for free.
+            if not spent:
+                await self._admitted.delete_one({"_id": symbol})
         return spent
