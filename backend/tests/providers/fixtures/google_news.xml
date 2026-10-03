@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <generator>NFE/5.0</generator>
+    <title>"DBS Group" after:2026-09-01 before:2026-10-01 - Google News</title>
+    <link>https://news.google.com/search?q=DBS</link>
+    <language>en-SG</language>
+    <item>
+      <title>DBS posts record quarterly profit as net interest margin holds - The Business Times</title>
+      <link>https://news.google.com/rss/articles/CBMiAAA1?oc=5</link>
+      <guid isPermaLink="false">CBMiAAA1</guid>
+      <pubDate>Tue, 15 Sep 2026 03:20:00 GMT</pubDate>
+      <description>&lt;a href="https://news.google.com/rss/articles/CBMiAAA1?oc=5" target="_blank"&gt;DBS posts record quarterly profit as net interest margin holds&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color="#6f6f6f"&gt;The Business Times&lt;/font&gt;</description>
+      <source url="https://www.businesstimes.com.sg">The Business Times</source>
+    </item>
+    <item>
+      <title>Why analysts - cautiously - upgrade DBS after wealth fee surge - The Straits Times</title>
+      <link>https://news.google.com/rss/articles/CBMiAAA2?oc=5</link>
+      <guid isPermaLink="false">CBMiAAA2</guid>
+      <pubDate>Wed, 16 Sep 2026 09:05:00 GMT</pubDate>
+      <description>&lt;p&gt;Brokerages raised targets after &lt;b&gt;fee income&lt;/b&gt; beat expectations &amp;amp; guidance improved.&lt;/p&gt;</description>
+      <source url="https://www.straitstimes.com">The Straits Times</source>
+    </item>
+    <item>
+      <title>Item with no date - Reuters</title>
+      <link>https://news.google.com/rss/articles/CBMiAAA3?oc=5</link>
+      <description>No date here</description>
+    </item>
+    <item>
+      <title>Broken link item - Reuters</title>
+      <link>not a url</link>
+      <pubDate>Wed, 16 Sep 2026 10:00:00 GMT</pubDate>
+      <description>Bad link</description>
+    </item>
+  </channel>
+</rss>
