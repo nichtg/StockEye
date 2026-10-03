@@ -1,7 +1,7 @@
 """Account use-cases: registration, login with lockout, and admin user management.
 
-``AppError`` lives here (re-exported by ``app.api.errors``) because the layering contract lets
-services raise it but forbids them from importing the API layer.
+``AppError`` lives in ``app.services.errors`` (re-exported here and by ``app.api.errors``)
+because the layering contract lets services raise it but forbids them from importing the API.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -14,18 +14,11 @@ from app.db import Database
 from app.repositories.refresh_tokens import RefreshTokensRepository
 from app.repositories.users import EmailTakenError, Role, Status, UserRecord, UsersRepository
 from app.repositories.watchlists import WatchlistsRepository
+from app.services.errors import AppError
+
+__all__ = ["AccountService", "AppError", "PasswordHasherPort"]
 
 _INVALID_LOGIN = "Incorrect email or password."
-
-
-class AppError(Exception):
-    """A domain-level failure with an HTTP status and a stable machine-readable code."""
-
-    def __init__(self, status: int, code: str, message: str) -> None:
-        super().__init__(message)
-        self.status = status
-        self.code = code
-        self.message = message
 
 
 class PasswordHasherPort(Protocol):

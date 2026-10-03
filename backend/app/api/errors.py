@@ -11,7 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException
 
 from app.logging_setup import get_logger
-from app.services.accounts import AppError
+from app.services.errors import AppError
 
 __all__ = ["AppError", "error_response", "install_error_handlers", "unhandled_response"]
 

@@ -96,7 +96,10 @@ class ProviderGuard:
                 # but a half_open trial slot must be handed back.
                 breaker.release_trial()
                 raise QuotaExhaustedError(
-                    provider, f"{decision.window_blocked} quota exhausted; call not made"
+                    provider,
+                    f"{decision.window_blocked} quota exhausted; call not made",
+                    window=decision.window_blocked,
+                    retry_at=decision.retry_at,
                 )
             try:
                 result = await operation()

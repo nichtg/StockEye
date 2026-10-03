@@ -1,0 +1,268 @@
+"""In-memory stand-ins for the vendor seams, so service tests need no network."""
+
+import zlib
+from collections.abc import Sequence
+from datetime import UTC, date, datetime, timedelta
+
+import numpy as np
+
+from app.config import ProviderLimits, Settings
+from app.providers.errors import ProviderError, QuotaExhaustedError, SymbolNotFoundError
+from app.providers.models import (
+    Bar,
+    CorporateEvent,
+    Interval,
+    NewsItem,
+    NewsQuery,
+    Quote,
+    SymbolMatch,
+)
+from app.providers.resilience import ProviderGuard
+from app.repositories.quotas import QuotaDecision, QuotaSnapshot
+from app.sentiment.scorer import SentimentScore, SentimentUnavailableError
+from app.services.calendars import exchange_for, session_calendar
+
+# Saturday: both exchanges closed, last completed session is Friday 2026-10-02.
+CLOSED_NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
+# Friday 15:00 UTC: NYSE is mid-session (open 13:30-20:00 UTC), Thursday is the last completed day.
+OPEN_NOW = datetime(2026, 10, 2, 15, 0, tzinfo=UTC)
+
+NAMES = {
+    "AAPL": "Apple Inc.",
+    "D05.SI": "DBS Group Holdings Ltd",
+    "SPY": "SPDR S&P 500 ETF Trust",
+    "^STI": "STI Index",
+    "MSFT": "Microsoft Corporation",
+}
+
+
+class FakeClock:
+    def __init__(self, now: datetime = CLOSED_NOW) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+class Sleeps:
+    """Records requested sleeps instead of waiting."""
+
+    def __init__(self) -> None:
+        self.waited: list[float] = []
+
+    async def append_sleep(self, seconds: float) -> None:
+        self.waited.append(seconds)
+
+
+class AlwaysAllowLedger:
+    """Quota ledger that never blocks and remembers errors, in memory."""
+
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    async def try_consume(
+        self, provider: str, limits: ProviderLimits, now: datetime
+    ) -> QuotaDecision:
+        return QuotaDecision(True, None, 1, limits.per_day, None)
+
+    async def snapshot(self, provider: str, limits: ProviderLimits, now: datetime) -> QuotaSnapshot:
+        return QuotaSnapshot(1, limits.per_day, now + timedelta(days=1))
+
+    async def record_error(self, provider: str, message: str, now: datetime) -> None:
+        self.errors.append(message)
+
+    async def last_error(self, provider: str) -> tuple[str, datetime] | None:
+        return (self.errors[-1], CLOSED_NOW) if self.errors else None
+
+
+async def _no_sleep(_seconds: float) -> None:
+    return None
+
+
+def make_guard(settings: Settings, clock: FakeClock) -> ProviderGuard:
+    """A guard with one attempt per call, so a failing fake fails fast."""
+    return ProviderGuard(
+        AlwaysAllowLedger(),
+        settings.provider_limits,
+        settings.quota_warning_ratio,
+        max_attempts=1,
+        sleep=_no_sleep,
+        clock=clock,
+    )
+
+
+class FakeMarketData:
+    """Deterministic random-walk prices on the real exchange calendar."""
+
+    name = "yahoo"
+
+    def __init__(self, clock: FakeClock, unknown: Sequence[str] = ("ZZZZ",)) -> None:
+        self._clock = clock
+        self._unknown = set(unknown)
+        self.fail_with: ProviderError | None = None
+        self.fail_symbols: dict[str, ProviderError] = {}
+        self.calls: dict[str, int] = {"search": 0, "quote": 0, "bars": 0, "events": 0}
+
+    def _check(self, symbol: str) -> None:
+        if symbol in self._unknown:
+            raise SymbolNotFoundError(self.name, f"unknown symbol {symbol}")
+        if symbol in self.fail_symbols:
+            raise self.fail_symbols[symbol]
+        if self.fail_with is not None:
+            raise self.fail_with
+
+    async def search(self, query: str) -> list[SymbolMatch]:
+        self.calls["search"] += 1
+        self._check(query.upper())
+        return [
+            SymbolMatch(symbol=s, name=n, exchange=exchange_for(s))
+            for s, n in NAMES.items()
+            if query.lower() in s.lower() or query.lower() in n.lower()
+        ]
+
+    async def quote(self, symbol: str) -> Quote:
+        self.calls["quote"] += 1
+        self._check(symbol)
+        bars = self._daily(symbol, date(2025, 1, 1), self._clock().date())
+        return Quote(
+            symbol=symbol,
+            name=NAMES.get(symbol, symbol),
+            exchange=exchange_for(symbol),
+            currency="SGD" if symbol.endswith(".SI") else "USD",
+            price=bars[-1].close,
+            previous_close=bars[-2].close,
+            as_of=self._clock(),
+        )
+
+    def _daily(self, symbol: str, start: date, end: date) -> list[Bar]:
+        cal = session_calendar(symbol, start, end)
+        rng = np.random.default_rng(zlib.crc32(symbol.encode()))
+        steps = rng.normal(0.0004, 0.012, len(cal.sessions))
+        price = 100.0
+        bars: list[Bar] = []
+        for session, step in zip(cal.sessions, steps, strict=True):
+            close = price * float(np.exp(step))
+            bars.append(
+                Bar(
+                    ts=datetime(session.year, session.month, session.day, tzinfo=UTC),
+                    open=price,
+                    high=max(price, close) * 1.004,
+                    low=min(price, close) * 0.996,
+                    close=close,
+                    volume=1_000_000.0,
+                )
+            )
+            price = close
+        return bars
+
+    async def bars(
+        self, symbol: str, interval: Interval, start: datetime, end: datetime
+    ) -> list[Bar]:
+        self.calls["bars"] += 1
+        self._check(symbol)
+        today = self._clock().date()  # the in-progress session's bar is included, like Yahoo
+        last_day = min(end.date(), today)
+        daily = self._daily(symbol, start.date(), last_day)
+        if interval == "1d":
+            return daily
+        cal = session_calendar(symbol, start.date(), last_day)
+        out: list[Bar] = []
+        for bar, close_at in zip(daily, cal.closes_utc, strict=True):
+            for hours_before_close in range(7, 0, -1):
+                ts = close_at - timedelta(hours=hours_before_close)
+                if ts <= self._clock():
+                    out.append(bar.model_copy(update={"ts": ts}))
+        return out
+
+    async def events(self, symbol: str, start: datetime, end: datetime) -> list[CorporateEvent]:
+        self.calls["events"] += 1
+        self._check(symbol)
+        cal = session_calendar(symbol, start.date(), end.date())
+        out: list[CorporateEvent] = []
+        for i, session in enumerate(cal.sessions):
+            if i % 63 == 10:
+                out.append(CorporateEvent(kind="earnings", date=session, label="Earnings"))
+            if i % 63 == 40:
+                out.append(
+                    CorporateEvent(
+                        kind="dividend", date=session, label="Dividend 0.25 USD", value=0.25
+                    )
+                )
+        return out
+
+
+class FakeNews:
+    """Several articles per window; some irrelevant, some duplicated across windows."""
+
+    def __init__(self, name: str = "google_news") -> None:
+        self.name = name
+        self.queries: list[NewsQuery] = []
+        self.fail_windows: set[str] = set()  # "YYYY-MM" of the window start
+        self.fail_with: ProviderError | None = None
+        self.quota_hits = 0  # next N fetches raise QuotaExhaustedError
+        self.quota_window = "minute"
+
+    async def fetch(self, query: NewsQuery) -> list[NewsItem]:
+        self.queries.append(query)
+        if self.fail_with is not None:
+            raise self.fail_with
+        if self.quota_hits:
+            self.quota_hits -= 1
+            raise QuotaExhaustedError(
+                self.name,
+                f"{self.quota_window} quota exhausted",
+                window=self.quota_window,
+                retry_at=CLOSED_NOW + timedelta(seconds=20),
+            )
+        key = query.start.strftime("%Y-%m")
+        if query.end - query.start > timedelta(days=20) and key in self.fail_windows:
+            raise ProviderError(self.name, "window failed")
+        core = query.company_name.split()[0]
+        items: list[NewsItem] = []
+        for n in range(8):
+            when = query.start + timedelta(days=3 * n + 1, hours=n)
+            if when >= query.end:
+                break
+            items.append(
+                _item(f"{core} reports update number {when:%Y%m%d%H} on strategy", when, self.name)
+            )
+        mid = query.start + timedelta(days=2)
+        items.append(_item("Local orchard harvest hits a record this autumn", mid, self.name))
+        if items:
+            # Same story re-published by the same source: must collapse into one document.
+            first = items[0]
+            items.append(_item(first.title.upper() + "!", first.published_at, self.name))
+        return items
+
+
+def _item(title: str, when: datetime, provider: str) -> NewsItem:
+    slug = abs(zlib.crc32(f"{title}{when}".encode()))
+    return NewsItem.model_validate(
+        {
+            "url": f"https://news.example.com/{slug}",
+            "title": title,
+            "summary": "Analysts weigh in on the outlook.",
+            "source": "Example Wire",
+            "published_at": when,
+            "provider": provider,
+        }
+    )
+
+
+class FakeScorer:
+    model_version = "fake-1"
+
+    def __init__(self) -> None:
+        self.available = True
+        self.batches: list[int] = []
+
+    def score(self, texts: Sequence[str]) -> list[SentimentScore]:
+        if not self.available:
+            raise SentimentUnavailableError("FinBERT model unavailable: missing model.onnx")
+        self.batches.append(len(texts))
+        out: list[SentimentScore] = []
+        for text in texts:
+            value = (zlib.crc32(text.encode()) % 100) / 100.0  # 0..0.99, stable per text
+            positive, negative = value * 0.8, (1.0 - value) * 0.8
+            out.append(SentimentScore(positive, negative, 1.0 - positive - negative))
+        return out

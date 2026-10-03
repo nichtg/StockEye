@@ -2,7 +2,7 @@
 
 import os
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from pymongo import AsyncMongoClient
@@ -43,3 +43,16 @@ async def db(
     database = mongo_client[settings.mongodb_db]
     yield database
     await mongo_client.drop_database(settings.mongodb_db)
+
+
+@pytest.fixture(autouse=True)
+def _uncache_resilience_logger() -> Iterator[None]:
+    """Undo structlog's cache-on-first-use for the guard's logger.
+
+    The app configures ``cache_logger_on_first_use``; once the guard logs in one test,
+    ``structlog.testing.capture_logs`` stops seeing its events in later tests.
+    """
+    yield
+    from app.providers import resilience  # noqa: PLC0415
+
+    vars(resilience.log).pop("bind", None)

@@ -1,5 +1,7 @@
 """Provider error taxonomy. Callers branch on the type, never on message text."""
 
+from datetime import datetime
+
 
 class ProviderError(Exception):
     """Base class. ``provider`` names the adapter that failed."""
@@ -22,7 +24,21 @@ class RateLimitedError(TransientProviderError):
 
 
 class QuotaExhaustedError(ProviderError):
-    """Our own quota ledger blocked the call before it was made."""
+    """Our own quota ledger blocked the call before it was made.
+
+    ``window`` is "minute" or "day" and ``retry_at`` is when the window reopens, when known.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        message: str,
+        window: str | None = None,
+        retry_at: datetime | None = None,
+    ) -> None:
+        super().__init__(provider, message)
+        self.window = window
+        self.retry_at = retry_at
 
 
 class CircuitOpenError(ProviderError):

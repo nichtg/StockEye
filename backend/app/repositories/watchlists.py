@@ -53,5 +53,9 @@ class WatchlistsRepository:
             {"$pull": {"symbols": symbol}, "$set": {"updated_at": datetime.now(UTC)}},
         )
 
+    async def all_symbols(self) -> list[str]:
+        """Distinct symbols across all users. For background jobs only: it carries no user ids."""
+        return sorted(await self._col.distinct("symbols"))
+
     async def delete_for_owner(self, owner_id: ObjectId) -> None:
         await self._col.delete_one({"owner_id": owner_id})

@@ -7,7 +7,9 @@ from pydantic import BaseModel
 
 from app.api.deps import DbDep, UserDep
 from app.repositories.watchlists import WatchlistFullError, WatchlistsRepository
-from app.services.accounts import AppError
+from app.services.container import ServicesDep
+from app.services.errors import AppError
+from app.services.overview import OverviewRow, build_overview
 
 router = APIRouter(tags=["watchlist"])
 
@@ -29,6 +31,13 @@ def _normalise(symbol: str) -> str:
 @router.get("/watchlist")
 async def get_watchlist(user: UserDep, db: DbDep) -> WatchlistOut:
     return WatchlistOut(symbols=await WatchlistsRepository(db).get(user.id))
+
+
+@router.get("/watchlist/overview")
+async def overview(user: UserDep, db: DbDep, services: ServicesDep) -> list[OverviewRow]:
+    """One summary row per watchlisted symbol; a failing symbol gets an "unavailable" row."""
+    symbols = await WatchlistsRepository(db).get(user.id)
+    return await build_overview(services.market, services.analysis, symbols)
 
 
 @router.put("/watchlist/{symbol}")
