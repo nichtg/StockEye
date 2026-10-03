@@ -288,12 +288,14 @@ def test_build_macro_report_distinct_scopes_put_ex_earnings_first_and_other_in_s
 
     report = _report(ex, allv, regime=regime)
 
-    assert report.primary_findings[0].text.startswith("Excluding earnings periods: Around days")
+    assert report.primary_findings[0].text.startswith("Around days")
     assert report.secondary_findings
-    assert all(f.text.startswith("Including earnings periods: ") for f in report.secondary_findings)
+    assert report.primary_scope == "excluding_earnings"
+    assert report.secondary_scope == "all_events"
+    assert not any("earnings periods" in t for t in _texts(report))
     assert report.headline_findings[:-1] == report.primary_findings
     assert "typical" in report.headline_findings[-1].text
-    assert not any(f in report.headline_findings for f in report.secondary_findings)
+    assert not any(f is g for f in report.secondary_findings for g in report.headline_findings)
 
 
 def test_build_macro_report_identical_scopes_are_emitted_once_without_prefix():
@@ -303,6 +305,8 @@ def test_build_macro_report_identical_scopes_are_emitted_once_without_prefix():
     report = _report(ex, allv)
 
     assert report.secondary_findings == []
+    assert report.primary_scope == "excluding_earnings"
+    assert report.secondary_scope is None
     assert report.primary_findings
     assert not any("earnings periods" in t for t in _texts(report))
 

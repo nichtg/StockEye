@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from typing import Literal
 
 from app.domain.macro.alignment import ScoredArticle
 from app.domain.macro.event_study import EventResult
@@ -22,6 +23,8 @@ from app.domain.macro.sentiment_stats import (
     TimelinePoint,
     reliability_label,
 )
+
+Scope = Literal["all_events", "excluding_earnings"]
 
 MAX_HEADLINES = 3
 MIN_LINK = 0.1  # |rank correlation| below this is described as no clear link
@@ -65,6 +68,8 @@ class MacroReport:
     headline_findings: list[Finding]  # primary + regime, kept for compatibility
     primary_findings: list[Finding]  # shown first: ex-earnings scope (or the only scope)
     secondary_findings: list[Finding]  # all-events scope; the UI shows it under Details
+    primary_scope: Scope  # scope is data, never prose in the finding text
+    secondary_scope: Scope | None  # None when only one scope was emitted
     stats_all: MacroStats
     stats_ex_earnings: MacroStats
     regime: Regime | None
@@ -77,7 +82,7 @@ def _pct_abs(x: float) -> str:
     return f"{abs(round(x * 100, 1)):.1f}%"
 
 
-def _reliability_finding(p: float, what: str, based_on: int, scope: str = "") -> Finding:
+def _reliability_finding(p: float, what: str, based_on: int) -> Finding:
     """Reliability sentence; ``what`` is e.g. "a gap this large". The raw p stays in the field.
 
     The label and the "about X in 100" figure come from the same rounded value, so they can
@@ -105,7 +110,7 @@ def _reliability_finding(p: float, what: str, based_on: int, scope: str = "") ->
         text = (
             f"Could be chance: {what} would appear by chance {chance}, too often to rule out luck."
         )
-    return Finding(text=f"{scope}{text}", based_on_events=based_on, reliability=label, p_value=p)
+    return Finding(text=text, based_on_events=based_on, reliability=label, p_value=p)
 
 
 def _reaction_phrase(m: float) -> str:
@@ -126,19 +131,19 @@ def _gap_sentence(mean_diff: float) -> str:
     return f"Positive-news days did {_pct_abs(mean_diff)} {side} than negative-news days."
 
 
-def _bucket_findings(label: str, bucket: BucketStats, scope: str) -> list[Finding]:
+def _bucket_findings(label: str, bucket: BucketStats) -> list[Finding]:
     """Sentence for a tested bucket, its own reliability line and a pre-move caveat."""
     assert bucket.mean_car_0_1 is not None  # noqa: S101 - callers only pass tested buckets
     assert bucket.p_value is not None  # noqa: S101
     out = [
         Finding(
             text=(
-                f"{scope}Around days with {label} news (that day and the next), the stock "
+                f"Around days with {label} news (that day and the next), the stock "
                 f"{_reaction_phrase(bucket.mean_car_0_1)}."
             ),
             based_on_events=bucket.n,
         ),
-        _reliability_finding(bucket.p_value, "a move this large", bucket.n, scope),
+        _reliability_finding(bucket.p_value, "a move this large", bucket.n),
     ]
     pre = bucket.mean_car_pre_5
     if pre is not None and abs(pre) >= PRE_MOVE_CAVEAT:
@@ -146,7 +151,7 @@ def _bucket_findings(label: str, bucket: BucketStats, scope: str) -> list[Findin
         out.append(
             Finding(
                 text=(
-                    f"{scope}Part of this move started before the news: in the 5 days before, "
+                    f"Part of this move started before the news: in the 5 days before, "
                     f"the stock had already moved {_pct_abs(pre)} ({side} than expected)."
                 ),
                 based_on_events=bucket.n,
@@ -155,32 +160,27 @@ def _bucket_findings(label: str, bucket: BucketStats, scope: str) -> list[Findin
     return out
 
 
-def _untested_finding(
-    buckets: Sequence[tuple[str, BucketStats]], min_n: int, scope: str
-) -> Finding:
+def _untested_finding(buckets: Sequence[tuple[str, BucketStats]], min_n: int) -> Finding:
     """One "not enough events" finding covering every bucket too thin to test."""
     if len(buckets) == 1:
         label, b = buckets[0]
-        text = (
-            f"{scope}Not enough {label}-news events yet to judge "
-            f"(found {b.n}; need at least {min_n})."
-        )
+        text = f"Not enough {label}-news events yet to judge (found {b.n}; need at least {min_n})."
     else:
         found = " and ".join(f"{b.n} {label}-news" for label, b in buckets)
         text = (
-            f"{scope}Not enough positive-news or negative-news events yet to judge "
+            f"Not enough positive-news or negative-news events yet to judge "
             f"(found {found}; need at least {min_n} of each)."
         )
     return Finding(text=text, based_on_events=sum(b.n for _, b in buckets))
 
 
-def _scope_findings(stats: MacroStats, scope: str) -> list[Finding]:
-    """Findings for one scope; ``scope`` is a prefix such as "Excluding earnings periods: "."""
+def _scope_findings(stats: MacroStats) -> list[Finding]:
+    """Findings for one scope. The text carries no scope wording; the report records it."""
     if stats.n_used < stats.min_n:
         return [
             Finding(
                 text=(
-                    f"{scope}Not enough news events yet to judge "
+                    f"Not enough news events yet to judge "
                     f"(found {stats.n_used}; need at least {stats.min_n})."
                 ),
                 based_on_events=stats.n_used,
@@ -194,14 +194,14 @@ def _scope_findings(stats: MacroStats, scope: str) -> list[Finding]:
         if bucket.p_value is None or bucket.mean_car_0_1 is None:
             untested.append((label, bucket))
         else:
-            out += _bucket_findings(label, bucket, scope)
+            out += _bucket_findings(label, bucket)
     if untested:
-        out.append(_untested_finding(untested, stats.min_n, scope))
+        out.append(_untested_finding(untested, stats.min_n))
     diff = stats.difference
     if diff is not None:
         total = diff.n_pos + diff.n_neg
-        out.append(Finding(text=f"{scope}{_gap_sentence(diff.mean_diff)}", based_on_events=total))
-        out.append(_reliability_finding(diff.p_value, "a gap this large", total, scope))
+        out.append(Finding(text=f"{_gap_sentence(diff.mean_diff)}", based_on_events=total))
+        out.append(_reliability_finding(diff.p_value, "a gap this large", total))
     corr = stats.correlation
     if corr is not None:
         if corr.label == "could_be_chance" or abs(corr.rho) < MIN_LINK:
@@ -210,8 +210,8 @@ def _scope_findings(stats: MacroStats, scope: str) -> list[Finding]:
             text = "More positive news tended to go with better-than-expected moves."
         else:
             text = "More positive news tended to go with worse-than-expected moves."
-        out.append(Finding(text=f"{scope}{text}", based_on_events=corr.n))
-        out.append(_reliability_finding(corr.p_value, "a pattern this strong", corr.n, scope))
+        out.append(Finding(text=f"{text}", based_on_events=corr.n))
+        out.append(_reliability_finding(corr.p_value, "a pattern this strong", corr.n))
     return out
 
 
@@ -272,15 +272,17 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
 
     The primary scope excludes earnings periods (cleaner, not confounded by results
     announcements). When that scope used exactly the same events as the all-events scope
-    (equal counts, since one is a subset of the other), only one scope is emitted and it has
-    no "Including/Excluding" prefix. ``headline_findings`` is primary plus the regime line.
+    (equal counts, since one is a subset of the other), only one scope is emitted and
+    ``secondary_scope`` is None. ``headline_findings`` is primary plus the regime line.
     """
     secondary: list[Finding] = []
+    secondary_scope: Scope | None = None
     if stats_ex_earnings.n_used == stats_all.n_used:
-        primary = _scope_findings(stats_ex_earnings, "")
+        primary = _scope_findings(stats_ex_earnings)
     else:
-        primary = _scope_findings(stats_ex_earnings, "Excluding earnings periods: ")
-        secondary = _scope_findings(stats_all, "Including earnings periods: ")
+        primary = _scope_findings(stats_ex_earnings)
+        secondary = _scope_findings(stats_all)
+        secondary_scope = "all_events"
     headline = list(primary)
     if regime is not None:
         headline.append(_regime_finding(regime))
@@ -289,6 +291,8 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
         headline_findings=headline,
         primary_findings=primary,
         secondary_findings=secondary,
+        primary_scope="excluding_earnings",
+        secondary_scope=secondary_scope,
         stats_all=stats_all,
         stats_ex_earnings=stats_ex_earnings,
         regime=regime,

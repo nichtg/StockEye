@@ -233,7 +233,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MeOut"
+                  "$ref": "#/components/schemas/UserOut"
                 }
               }
             }
@@ -1472,6 +1472,29 @@
             "type": "array",
             "title": "Secondary Findings"
           },
+          "primary_scope": {
+            "type": "string",
+            "enum": [
+              "all_events",
+              "excluding_earnings"
+            ],
+            "title": "Primary Scope"
+          },
+          "secondary_scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "all_events",
+                  "excluding_earnings"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondary Scope"
+          },
           "stats_all": {
             "$ref": "#/components/schemas/MacroStatsOut"
           },
@@ -1510,6 +1533,8 @@
           "headline_findings",
           "primary_findings",
           "secondary_findings",
+          "primary_scope",
+          "secondary_scope",
           "stats_all",
           "stats_ex_earnings",
           "regime",
@@ -1690,35 +1715,6 @@
           "label"
         ],
         "title": "Marker"
-      },
-      "MeOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "email": {
-            "type": "string",
-            "title": "Email"
-          },
-          "role": {
-            "type": "string",
-            "title": "Role"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "email",
-          "role",
-          "created_at"
-        ],
-        "title": "MeOut"
       },
       "OutlookOut": {
         "properties": {

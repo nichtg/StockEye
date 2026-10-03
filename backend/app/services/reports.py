@@ -167,6 +167,8 @@ class MacroReportOut(BaseModel):
     headline_findings: list[FindingOut]
     primary_findings: list[FindingOut]
     secondary_findings: list[FindingOut]
+    primary_scope: Literal["all_events", "excluding_earnings"]
+    secondary_scope: Literal["all_events", "excluding_earnings"] | None
     stats_all: MacroStatsOut
     stats_ex_earnings: MacroStatsOut
     regime: RegimeOut | None
