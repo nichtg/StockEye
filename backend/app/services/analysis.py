@@ -13,6 +13,7 @@ import pandas as pd
 from bson import ObjectId
 from pydantic import BaseModel
 
+from app.clock import utc_now
 from app.db import Database
 from app.domain.macro import ScoredArticle
 from app.repositories.cache import CacheRepository
@@ -42,10 +43,6 @@ MIN_HISTORY_BARS = 30
 NEW_SYMBOL_LIMIT_REASON = "Daily limit for analysing new stocks reached; try again tomorrow."
 # Bump when a cached report's shape changes, so a deploy never serves the old shape.
 CACHE_SCHEMA = 2
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def macro_cache_key(symbol: str) -> str:
@@ -85,7 +82,7 @@ class AnalysisService:
         market: MarketDataService,
         news: NewsService,
         admission: NewSymbolAdmission,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._cache = CacheRepository(db)
         self._admission = admission
@@ -98,7 +95,7 @@ class AnalysisService:
     async def _fresh[M: BaseModel](self, key: str, now: datetime, model: type[M]) -> M | None:
         """The cached report if it has not expired and still fits ``model`` (else a miss)."""
         entry = await self._cache.lookup(key)
-        return entry.parse(model, key) if entry is not None and entry.is_fresh(now) else None
+        return entry.parse(model) if entry is not None and entry.is_fresh(now) else None
 
     async def technical(self, symbol: str) -> TechnicalReport:
         """1-week outlook from daily bars; cached 15 minutes per symbol and last bar date."""

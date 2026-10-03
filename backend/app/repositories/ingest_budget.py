@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from bson import ObjectId
 from pymongo import ASCENDING
+from pymongo.errors import DuplicateKeyError
 
 from app.db import Database
 from app.repositories.capped_set import add_to_capped_set
@@ -38,9 +39,13 @@ class IngestBudget:
     async def admit(self, user_id: ObjectId, symbol: str, now: datetime) -> bool:
         """Admit ``symbol`` on ``user_id``'s budget; False if that exceeds the daily cap.
 
-        Free for a symbol already admitted by anyone, and idempotent per user and day.
+        Free for a symbol already admitted by anyone, and idempotent per user and day. The
+        symbol's record (its ``_id`` is unique) is the arbiter: whoever inserts it first is the
+        only one who spends budget, and gives the record back if the budget is exhausted.
         """
-        if await self.is_admitted(symbol):
+        try:
+            await self._admitted.insert_one({"_id": symbol, "user_id": user_id, "at": now})
+        except DuplicateKeyError:
             return True
         spent = await add_to_capped_set(
             self._col,
@@ -50,8 +55,6 @@ class IngestBudget:
             self._per_day,
             also={"$setOnInsert": {"expires_at": now + timedelta(days=2)}},
         )
-        if spent:
-            await self._admitted.update_one(
-                {"_id": symbol}, {"$setOnInsert": {"user_id": user_id, "at": now}}, upsert=True
-            )
+        if not spent:
+            await self._admitted.delete_one({"_id": symbol})
         return spent

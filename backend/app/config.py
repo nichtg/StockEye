@@ -30,6 +30,9 @@ def _parse_rate(value: object) -> object:
 type Rate = Annotated[RateLimitItem, BeforeValidator(_parse_rate)]
 
 
+type Bucket = Literal["search", "stock", "macro", "overview", "watchlist", "auth"]
+
+
 class RateLimits(BaseModel):
     """Request budgets, each a ``limits`` rate string such as "20/minute" (see app.api.limits).
 
@@ -45,6 +48,16 @@ class RateLimits(BaseModel):
     overview: Rate = parse("20/minute")
     watchlist: Rate = parse("30/minute")
     auth: Rate = parse("10/minute")
+
+    def for_bucket(self, bucket: Bucket) -> Rate:
+        return {
+            "search": self.search,
+            "stock": self.stock,
+            "macro": self.macro,
+            "overview": self.overview,
+            "watchlist": self.watchlist,
+            "auth": self.auth,
+        }[bucket]
 
 
 class Settings(BaseSettings):

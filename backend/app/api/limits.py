@@ -9,7 +9,7 @@ a trusted proxy ``request.client.host`` is already the real client). Budgets com
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import Depends, Request
 from limits import RateLimitItem
@@ -17,9 +17,9 @@ from limits.storage import MemoryStorage
 from limits.strategies import FixedWindowRateLimiter
 
 from app.api.deps import SettingsDep, UserDep
+from app.config import Bucket
 from app.services.errors import AppError
 
-type Bucket = Literal["search", "stock", "macro", "overview", "watchlist", "auth"]
 SEARCH: Bucket = "search"
 STOCK: Bucket = "stock"
 MACRO: Bucket = "macro"
@@ -54,7 +54,7 @@ def limited(bucket: Bucket) -> Callable[..., Awaitable[None]]:
     """A route dependency that counts the signed-in user's request against ``bucket``."""
 
     async def check(user: UserDep, limiter: LimiterDep, settings: SettingsDep) -> None:
-        limiter.hit(getattr(settings.rate_limits, bucket), bucket, str(user.id))
+        limiter.hit(settings.rate_limits.for_bucket(bucket), bucket, str(user.id))
 
     return check
 
@@ -64,6 +64,6 @@ def limited_by_ip(bucket: Bucket) -> Callable[..., Awaitable[None]]:
 
     async def check(request: Request, limiter: LimiterDep, settings: SettingsDep) -> None:
         host = request.client.host if request.client else "unknown"
-        limiter.hit(getattr(settings.rate_limits, bucket), bucket, host)
+        limiter.hit(settings.rate_limits.for_bucket(bucket), bucket, host)
 
     return check

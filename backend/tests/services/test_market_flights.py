@@ -1,4 +1,4 @@
-"""One vendor call per series however many callers ask at once, and self-healing saved data."""
+"""One vendor call per series however many callers ask at once, duplicates or not."""
 
 import asyncio
 from datetime import timedelta
@@ -10,6 +10,8 @@ from app.db import Database
 from app.repositories.cache import CacheRepository
 from app.services.analysis import macro_cache_key
 from app.services.container import Services
+from app.services.errors import AppError
+from app.services.market_data import MarketDataService
 from tests.services.fakes import CLOSED_NOW, FakeClock, FakeMarketData
 
 pytestmark = pytest.mark.integration
@@ -78,41 +80,48 @@ async def test_search_concurrent_calls_make_one_vendor_call(
     assert provider.calls["search"] == 1
 
 
-async def test_duplicated_saved_bars_heal_with_one_refetch(
-    services: Services, provider: FakeMarketData, db: Database
-) -> None:
-    first, _ = await services.market.daily_history("AAPL")
-    doc = await db["price_bars"].find_one({"meta.symbol": "AAPL", "meta.interval": "1d"})
-    assert doc is not None
-    del doc["_id"]
-    await db["price_bars"].insert_many([dict(doc), dict(doc)])  # damage: repeated timestamps
-    calls_before = provider.calls["bars"]
+class DuplicatingVendor(FakeMarketData):
+    """A vendor that repeats the newest bar in every answer."""
 
-    healed, status = await services.market.daily_history("AAPL")
+    async def bars(self, symbol, interval, start, end):  # type: ignore[no-untyped-def]
+        fetched = await super().bars(symbol, interval, start, end)
+        return fetched + fetched[-1:]
+
+
+async def test_vendor_duplicate_timestamps_are_stored_once(clock: FakeClock, db: Database) -> None:
+    market = MarketDataService(db, DuplicatingVendor(clock), clock)
+
+    await market.daily_history("AAPL")
 
     stamps = await _timestamps(db, "1d")
-    assert provider.calls["bars"] == calls_before + 1
+    assert stamps
     assert len(stamps) == len(set(stamps))
-    assert status.state == "ok"
-    assert healed.equals(first)
 
 
-async def test_damaged_history_with_the_vendor_down_is_served_as_stale(
+async def test_vendor_duplicates_do_not_cause_refetches(clock: FakeClock, db: Database) -> None:
+    vendor = DuplicatingVendor(clock)
+    market = MarketDataService(db, vendor, clock)
+
+    for _ in range(5):
+        await market.daily_history("AAPL")
+
+    assert vendor.calls["bars"] == 1
+
+
+async def test_fetch_state_without_bars_in_the_window_neither_loops_nor_fails_with_503(
     services: Services, provider: FakeMarketData, db: Database
 ) -> None:
     await services.market.daily_history("AAPL")
-    doc = await db["price_bars"].find_one({"meta.symbol": "AAPL", "meta.interval": "1d"})
-    assert doc is not None
-    del doc["_id"]
-    await db["price_bars"].insert_one(doc)
-    from app.providers.errors import RateLimitedError  # noqa: PLC0415
+    await db["price_bars"].delete_many({})  # the state still says there is a newest bar
+    calls_before = provider.calls["bars"]
 
-    provider.fail_with = RateLimitedError("yahoo")
+    for _ in range(3):
+        try:
+            await services.market.daily_history("AAPL")
+        except AppError as exc:
+            assert exc.status != 503
 
-    frame, status = await services.market.daily_history("AAPL")
-
-    assert not frame.empty
-    assert status.state == "stale"
+    assert provider.calls["bars"] - calls_before <= 1
 
 
 async def test_macro_with_an_old_shape_cache_entry_recomputes_instead_of_failing(

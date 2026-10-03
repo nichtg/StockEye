@@ -61,6 +61,7 @@ class BarsRepository:
         (which readers de-duplicate) rather than a hole in the saved history. With no ``bars``
         nothing is deleted.
         """
+        bars = list({b.ts: b for b in bars}.values())  # one row per timestamp, the last wins
         if bars:  # an empty answer is not evidence that the range is bare, so it deletes nothing
             in_range = {
                 "meta.symbol": symbol,

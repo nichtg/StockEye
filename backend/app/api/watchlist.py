@@ -7,11 +7,13 @@ from pydantic import BaseModel
 
 from app.api.deps import DbDep, UserDep
 from app.api.limits import OVERVIEW, WATCHLIST, limited
+from app.logging_setup import get_logger
 from app.repositories.watchlists import WatchlistFullError, WatchlistsRepository
 from app.services.container import ServicesDep
 from app.services.errors import AppError
 from app.services.overview import OverviewRow, build_overview
 
+log = get_logger(__name__)
 router = APIRouter(tags=["watchlist"])
 
 MAX_SYMBOLS = 50
@@ -58,7 +60,10 @@ async def add_symbol(symbol: str, user: UserDep, db: DbDep, services: ServicesDe
         raise AppError(
             409, "conflict", f"Your watchlist is full ({MAX_SYMBOLS} symbols maximum)."
         ) from exc
-    await services.admission.admit(user.id, wanted)
+    try:
+        await services.admission.admit(user.id, wanted)
+    except Exception:  # the add already succeeded; admission can be retried by a later request
+        log.warning("admission_failed", symbol=wanted, exc_info=True)
     return WatchlistOut(symbols=await repo.get(user.id))
 
 

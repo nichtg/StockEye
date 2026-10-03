@@ -8,12 +8,12 @@ scorer, clock) in one place while the routers stay untouched.
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Annotated
 
 import httpx
 from fastapi import Depends, Request
 
+from app.clock import utc_now
 from app.config import Settings
 from app.db import Database
 from app.providers.google_news import GoogleNewsRss
@@ -45,10 +45,6 @@ class Services:
             await self.http.aclose()
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 type ServicesFactory = Callable[[Settings, Database], Awaitable[Services]]
 
 
@@ -75,7 +71,7 @@ async def build_services(settings: Settings, db: Database) -> Services:
         max_concurrent=settings.max_concurrent_ingestions,
     )
     admission = NewSymbolAdmission(
-        IngestBudget(db, settings.max_new_symbols_per_user_per_day), news, _utc_now
+        IngestBudget(db, settings.max_new_symbols_per_user_per_day), news, utc_now
     )
     analysis = AnalysisService(db, market, news, admission)
     return Services(market, news, analysis, admission, guard, http)

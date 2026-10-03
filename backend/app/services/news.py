@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
+from app.clock import utc_now
 from app.db import Database
 from app.domain.macro import ScoredArticle
 from app.logging_setup import get_logger
@@ -83,10 +84,6 @@ class IngestProgress:
     in_progress: bool
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 def _month_start(moment: datetime) -> datetime:
     return moment.astimezone(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -112,7 +109,7 @@ class NewsService:
         scorer: SentimentScorer,
         *,
         max_concurrent: int = 2,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._repo = NewsRepository(db)
         self._backfill = backfill  # the one adapter that can reach far back

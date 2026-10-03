@@ -1,6 +1,8 @@
 import httpx
 import pytest
+from fastapi import FastAPI
 from limits import parse
+from structlog.testing import capture_logs
 
 from app.config import RateLimits, Settings
 from tests.integration.conftest import ClientFactory, register
@@ -146,3 +148,20 @@ async def test_watchlist_add_known_symbol_resolves_it_cache_first(
     await client.put("/api/watchlist/AAPL")
 
     assert provider.calls["quote"] == 1
+
+
+async def test_watchlist_add_succeeds_and_warns_when_admission_fails(
+    client: httpx.AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken(*_: object) -> bool:
+        raise RuntimeError("database down")
+
+    monkeypatch.setattr(app.state.services.admission, "admit", broken)
+    await register(client, "alice@example.com")
+
+    with capture_logs() as logs:
+        resp = await client.put("/api/watchlist/AAPL")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"symbols": ["AAPL"]}
+    assert any(e["event"] == "admission_failed" and e["log_level"] == "warning" for e in logs)

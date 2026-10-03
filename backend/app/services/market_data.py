@@ -9,26 +9,25 @@ prices (503).
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from app.clock import utc_now
 from app.db import Database
 from app.logging_setup import get_logger
 from app.providers.base import MarketDataProvider
 from app.providers.errors import ProviderDataError, ProviderError, SymbolNotFoundError
 from app.providers.models import Bar, CorporateEvent, Interval, Quote, SymbolMatch
 from app.repositories.bars import BarsRepository, FetchState
-from app.repositories.cache import CacheRepository, Payload
+from app.repositories.cache import CacheEntry, CacheRepository
 from app.repositories.events import EventsFetchState, EventsRepository
+from app.services.bar_policy import COVERAGE_SLACK, completed, needs_refresh, window_start
 from app.services.calendars import (
     exchange_tz,
-    is_session_open,
-    last_completed_session,
     root_ticker,
-    session_close,
 )
 from app.services.errors import AppError
 from app.services.singleflight import SingleFlight
@@ -36,25 +35,12 @@ from app.services.status import DataStatus, describe_failure, ok, stale_status
 
 log = get_logger(__name__)
 
-DAILY_HISTORY_DAYS = 1100  # 3 years plus slack: covers 2 years of sessions + 200 warm-up sessions
-HOURLY_HISTORY_DAYS = 60  # enough for the 1M chart (22 sessions) plus indicator warm-up
-# How far back each series is kept. One window per series (never per caller) is what lets
-# concurrent callers share a single fetch.
-HISTORY_DAYS: dict[Interval, int] = {"1d": DAILY_HISTORY_DAYS, "1h": HOURLY_HISTORY_DAYS}
 EVENTS_START_DAYS = 760  # one shared start so the events cache is reused across endpoints
-REFRESH_AFTER = timedelta(minutes=15)
 EVENTS_REFRESH_AFTER = timedelta(hours=24)
 QUOTE_TTL = timedelta(seconds=60)
 UNKNOWN_SYMBOL_TTL = timedelta(hours=6)  # how long "no such stock" is remembered
 SEARCH_TTL = timedelta(hours=1)
-# Callers ask for a start date relative to "today", so the requested start creeps forward by a
-# day each day. Without slack the stored coverage would look insufficient every morning.
-COVERAGE_SLACK = timedelta(days=7)
 _COLUMNS = ["open", "high", "low", "close", "volume"]
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def bars_to_frame(bars: list[Bar], interval: Interval, tz: ZoneInfo) -> pd.DataFrame:
@@ -74,20 +60,6 @@ def bars_to_frame(bars: list[Bar], interval: Interval, tz: ZoneInfo) -> pd.DataF
     # The domain functions reject NaN prices, so incomplete rows are dropped here.
     frame = frame.dropna(subset=["open", "high", "low", "close"])
     return frame[~frame.index.duplicated(keep="last")].sort_index()
-
-
-def _window_start(interval: Interval, now: datetime) -> datetime:
-    """Start of the standard history for ``interval``: midnight UTC for daily bars."""
-    start = now - timedelta(days=HISTORY_DAYS[interval])
-    if interval == "1d":
-        return start.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    return start
-
-
-def _damaged(stored: list[Bar], state: FetchState) -> bool:
-    """Saved bars that contradict themselves: repeated timestamps, or none despite a newest bar."""
-    repeated = len({b.ts for b in stored}) != len(stored)
-    return repeated or (not stored and state.last_bar_at is not None)
 
 
 def _unavailable(what: str, symbol: str, exc: ProviderError) -> AppError:
@@ -124,10 +96,29 @@ class _Matches(BaseModel):
     matches: list[SymbolMatch]
 
 
-_UNKNOWN_SYMBOL = {"unknown_symbol": True}  # cached in place of a payload
+# A cache entry holds {"found": payload} or _NOT_FOUND, so "no such stock" is never mistaken for
+# a payload of the wrong shape.
+_NOT_FOUND: dict[str, Any] = {"not_found": True}
 
 _QUOTE = _CacheKind(QUOTE_TTL, "price quote", "quote")
 _SEARCH = _CacheKind(SEARCH_TTL, "stock search", "search results")
+
+
+def _saved[M: BaseModel](entry: CacheEntry | None, model: type[M]) -> M | None:
+    """The saved payload as ``model``; None if absent or in a shape an old build wrote."""
+    try:
+        return None if entry is None else model.model_validate(entry.payload["found"])
+    except (KeyError, ValidationError):
+        return None
+
+
+def _fresh_hit[M: BaseModel](entry: CacheEntry | None, now: datetime, model: type[M]) -> M | None:
+    """The saved value if usable now; raises the 404 if a fresh entry says the symbol is unknown."""
+    if entry is None or not entry.is_fresh(now):
+        return None
+    if entry.payload == _NOT_FOUND:
+        raise _not_found()
+    return _saved(entry, model)
 
 
 def _status(
@@ -144,7 +135,7 @@ class MarketDataService:
         self,
         db: Database,
         provider: MarketDataProvider,
-        clock: Callable[[], datetime] = _utc_now,
+        clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._bars = BarsRepository(db)
         self._events = EventsRepository(db)
@@ -154,7 +145,7 @@ class MarketDataService:
         # Cold requests fan out (quote, chart, outlook, overview all want the same bars at once);
         # one fetch per series serves them all instead of racing to write duplicate rows.
         self._bar_flights = SingleFlight[tuple[FetchState, ProviderError | None]]()
-        self._cache_flights = SingleFlight[Payload]()
+        self._cache_flights = SingleFlight[Any]()
         self._event_flights = SingleFlight[tuple[EventsFetchState, ProviderError | None]]()
 
     # --- quote and search ------------------------------------------------------------------
@@ -194,24 +185,20 @@ class MarketDataService:
         """
         now = self._clock()
         entry = await self._cache.lookup(key)
-        if entry is not None and entry.payload == _UNKNOWN_SYMBOL:
-            if entry.is_fresh(now):
-                raise _not_found()
-            entry = None  # an expired "unknown" is no fallback for a failed refresh
-        saved = entry.parse(model, key) if entry is not None else None
-        if entry is not None and saved is not None and entry.is_fresh(now):
-            return saved, None
+        if (hit := _fresh_hit(entry, now, model)) is not None:
+            return hit, None
         try:
-            payload = await self._cache_flights.run(
+            value = await self._cache_flights.run(
                 key, lambda: self._fetch_and_store(kind, key, model, fetch)
             )
         except ProviderError as exc:
+            saved = _saved(entry, model)  # an expired "unknown" is no fallback
             if entry is None or saved is None:
                 raise _unavailable(f"The {kind.what}", subject, exc) from exc
             log.warning("cache_stale_fallback", key=key, error=str(exc))
             status = stale_status(kind.what.capitalize(), kind.noun, entry.created_at, now, exc)
             return saved, status
-        return model.model_validate(payload), None
+        return value, None
 
     async def _fetch_and_store[M: BaseModel](
         self,
@@ -219,20 +206,19 @@ class MarketDataService:
         key: str,
         model: type[M],
         fetch: Callable[[], Awaitable[M]],
-    ) -> Payload:
+    ) -> M:
         """The body of one single flight per cache key: fetch and save (unless just saved)."""
         now = self._clock()
-        entry = await self._cache.lookup(key)  # a concurrent flight may have finished already
-        if entry is not None and entry.is_fresh(now) and entry.parse(model, key) is not None:
-            return entry.payload
+        # a concurrent flight may have finished since the caller looked
+        if (hit := _fresh_hit(await self._cache.lookup(key), now, model)) is not None:
+            return hit
         try:
             value = await fetch()
         except SymbolNotFoundError as exc:
-            await self._cache.put(key, _UNKNOWN_SYMBOL, UNKNOWN_SYMBOL_TTL, now)
+            await self._cache.put(key, _NOT_FOUND, UNKNOWN_SYMBOL_TTL, now)
             raise _not_found() from exc
-        payload = value.model_dump(mode="json")
-        await self._cache.put(key, payload, kind.ttl, now)
-        return payload
+        await self._cache.put(key, {"found": value.model_dump(mode="json")}, kind.ttl, now)
+        return value
 
     # --- bars ------------------------------------------------------------------------------
 
@@ -248,31 +234,18 @@ class MarketDataService:
         bars, status = await self._load(symbol, interval)
         return bars_to_frame(bars, interval, exchange_tz(symbol)), status
 
-    async def _run_bar_flight(
-        self, symbol: str, interval: Interval, *, repair: bool
-    ) -> tuple[FetchState, ProviderError | None]:
-        # One flight per series. A repair is its own flight so it cannot be swallowed by an
-        # ordinary refresh that decides nothing is needed.
-        return await self._bar_flights.run(
-            (symbol, interval, repair), lambda: self._refresh_bars(symbol, interval, repair)
-        )
-
     async def _load(self, symbol: str, interval: Interval) -> tuple[list[Bar], DataStatus]:
         now = self._clock()
-        start = _window_start(interval, now)
+        start = window_start(interval, now)
         end = now + timedelta(days=1)
         try:
-            state, failure = await self._run_bar_flight(symbol, interval, repair=False)
-            stored = await self._bars.get_range(symbol, interval, start, end)
-            if _damaged(stored, state):
-                # Saved history that contradicts itself heals by re-fetching the whole window,
-                # which replaces the range. Only if the vendor fails too do we fall back below.
-                log.warning("bars_history_repaired", symbol=symbol, interval=interval)
-                state, failure = await self._run_bar_flight(symbol, interval, repair=True)
-                stored = await self._bars.get_range(symbol, interval, start, end)
+            state, failure = await self._bar_flights.run(
+                (symbol, interval), lambda: self._refresh_bars(symbol, interval)
+            )
         except ProviderError as exc:
             raise _unavailable("Price data", symbol, exc) from exc
-        bars = self._completed(symbol, interval, stored, now)
+        stored = await self._bars.get_range(symbol, interval, start, end)
+        bars = completed(symbol, interval, stored, now)
         if not bars:
             if failure is not None:
                 raise _unavailable("Price data", symbol, failure)
@@ -280,7 +253,7 @@ class MarketDataService:
         return bars, _status("Price data", "prices", state, now, failure)
 
     async def _refresh_bars(
-        self, symbol: str, interval: Interval, repair: bool
+        self, symbol: str, interval: Interval
     ) -> tuple[FetchState, ProviderError | None]:
         """Bring the saved bars up to date if they need it (the body of one single flight).
 
@@ -289,7 +262,7 @@ class MarketDataService:
         no caller can decide on a state that a concurrent fetch is about to replace.
         """
         now = self._clock()
-        start = _window_start(interval, now)
+        start = window_start(interval, now)
         end = now + timedelta(days=1)
         state = await self._bars.get_state(symbol, interval)
 
@@ -306,43 +279,8 @@ class MarketDataService:
                 symbol, interval, fetched, start=start, end=end, fetched_at=now
             )
 
-        refresh = repair or self._needs_refresh(symbol, interval, state, start, now)
+        refresh = needs_refresh(symbol, interval, state, start, now)
         return await self._refresh(f"bars {interval}", symbol, state, refresh, fetch)
-
-    def _needs_refresh(
-        self,
-        symbol: str,
-        interval: Interval,
-        state: FetchState | None,
-        start: datetime,
-        now: datetime,
-    ) -> bool:
-        if state is None or state.covered_start > start + COVERAGE_SLACK:
-            return True
-        last_done = last_completed_session(symbol, now)
-        close = session_close(symbol, last_done)
-        if close is not None and state.last_fetched_at < close:
-            return True  # fetched before the last session finished, so its final bar is missing
-        if now - state.last_fetched_at < REFRESH_AFTER:
-            return False  # also stops us hammering the vendor when it lags behind
-        if state.last_bar_at is None or state.last_bar_at.date() < last_done:
-            return True
-        # Daily bars never include the in-progress session, so only hourly data goes stale
-        # while the market is open.
-        return interval == "1h" and is_session_open(symbol, now)
-
-    @staticmethod
-    def _completed(symbol: str, interval: Interval, bars: list[Bar], now: datetime) -> list[Bar]:
-        """Drop the bar still being formed: today's daily bar, or the current hour."""
-        last_done = last_completed_session(symbol, now)
-        if interval == "1d":
-            return [b for b in bars if b.ts.date() <= last_done]
-        tz = exchange_tz(symbol)
-        return [
-            b
-            for b in bars
-            if b.ts + timedelta(hours=1) <= now or b.ts.astimezone(tz).date() <= last_done
-        ]
 
     # --- corporate events ------------------------------------------------------------------
 

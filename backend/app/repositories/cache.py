@@ -30,6 +30,7 @@ async def install_indexes(db: Database) -> None:
 
 @dataclass(frozen=True)
 class CacheEntry:
+    key: str
     payload: Payload
     created_at: datetime
     expires_at: datetime
@@ -37,12 +38,12 @@ class CacheEntry:
     def is_fresh(self, now: datetime) -> bool:
         return self.expires_at > now
 
-    def parse[M: BaseModel](self, model: type[M], key: str) -> M | None:
+    def parse[M: BaseModel](self, model: type[M]) -> M | None:
         """The payload as ``model``, or None (a miss) if an older build saved another shape."""
         try:
             return model.model_validate(self.payload)
         except ValidationError:
-            log.warning("cache_entry_invalid", key=key)
+            log.warning("cache_entry_invalid", key=self.key)
             return None
 
 
@@ -55,7 +56,7 @@ class CacheRepository:
         doc = await self._col.find_one({"key": key})
         if doc is None:
             return None
-        return CacheEntry(doc["payload"], doc["created_at"], doc["expires_at"])
+        return CacheEntry(key, doc["payload"], doc["created_at"], doc["expires_at"])
 
     async def put(
         self, key: str, payload: Payload, ttl: timedelta, now: datetime | None = None

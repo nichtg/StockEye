@@ -71,7 +71,7 @@ plugins = ["pydantic.mypy"]
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["yfinance.*", "feedparser.*", "exchange_calendars.*", "onnxruntime.*", "slowapi.*", "apscheduler.*", "scipy.*"]
+module = ["yfinance.*", "feedparser.*", "exchange_calendars.*", "onnxruntime.*", "apscheduler.*", "scipy.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

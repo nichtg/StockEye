@@ -149,3 +149,27 @@ async def test_admission_is_recorded_at_admit_time_so_a_queued_symbol_is_free_fo
 
     assert await services.admission.admit(BOB, "AAPL")  # free
     assert await services.admission.admit(BOB, "MSFT")  # Bob's own budget untouched
+
+
+async def test_two_users_admitting_the_same_new_symbol_at_once_are_charged_once(
+    db: Database,
+) -> None:
+    await install_indexes(db)
+    budget = IngestBudget(db, 5)
+
+    results = await asyncio.gather(
+        budget.admit(ALICE, "NEWX", CLOSED_NOW), budget.admit(BOB, "NEWX", CLOSED_NOW)
+    )
+
+    docs = [d async for d in db["ingest_budget"].find({})]
+    assert results == [True, True]
+    assert sum("NEWX" in d["symbols"] for d in docs) == 1
+
+
+async def test_a_refused_admission_leaves_the_symbol_unadmitted(db: Database) -> None:
+    await install_indexes(db)
+    budget = IngestBudget(db, 1)
+    await budget.admit(ALICE, "AAPL", CLOSED_NOW)
+
+    assert not await budget.admit(ALICE, "MSFT", CLOSED_NOW)
+    assert not await budget.is_admitted("MSFT")
