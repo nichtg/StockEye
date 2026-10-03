@@ -78,3 +78,39 @@ def test_pipeline_future_price_shock_does_not_change_earlier_event():
 
     assert base == after
     assert isinstance(index, pd.DatetimeIndex)
+
+
+def _scored(positions: list[int], scores: list[float]) -> list[ScoredArticle]:
+    return [
+        ScoredArticle(
+            datetime.combine(CAL.sessions[pos], time(11, 0), tzinfo=NY),
+            score,
+            f"headline {pos}",
+            f"https://x/{pos}",
+            "s",
+        )
+        for pos, score in zip(positions, scores, strict=True)
+    ]
+
+
+def test_pipeline_clustered_news_closed_windows_are_unchanged_by_appended_news():
+    # A 20-day chain (spacing <= 5) with rising salience, then another chain just before as_of.
+    chain = [100, 104, 108, 112, 116, 120, 200, 203, 207, 211, 215, 380, 384, 388, 392, 396]
+    scores = [0.2 + 0.03 * (i % 6) for i in range(len(chain))]
+    future = [402, 405, 409, 412]
+    future_scores = [0.95, 0.99, 0.97, 0.9]
+    jumps = {pos + 1: 0.01 * ((pos % 3) - 1) for pos in chain + future}
+    stock, bench, _ = build_market(n=N, jumps=jumps)
+
+    def run(n_days: int, articles: list[ScoredArticle]):
+        frame, _ = daily_sentiment(articles, CAL)
+        return run_event_study(stock.iloc[:n_days], bench.iloc[:n_days], frame, [])
+
+    cut = run(AS_OF_POS + 1, _scored(chain, scores))
+    full = run(N, _scored(chain + future, scores + future_scores))
+
+    def settled(events):
+        return [e for e in events if CAL.sessions.index(e.date) + 5 < AS_OF_POS]
+
+    assert len(settled(cut)) >= 5  # guards against a vacuous comparison
+    assert settled(cut) == settled(full)

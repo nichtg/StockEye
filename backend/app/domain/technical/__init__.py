@@ -8,6 +8,7 @@ from app.domain.technical.candlesticks import (
     PatternSpec,
     PatternThresholds,
     detect_patterns,
+    trend_context,
 )
 from app.domain.technical.indicators import (
     anchored_vwap,
@@ -43,5 +44,6 @@ __all__ = [
     "rsi",
     "session_vwap",
     "sma",
+    "trend_context",
     "wilson_interval",
 ]

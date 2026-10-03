@@ -5,9 +5,10 @@ Guards against four classic errors:
 * look-ahead: the market model for an event at position t uses only positions <= t - 20,
   and nothing after an event is ever used to judge an earlier one;
 * overlapping windows: events are thinned so no two are within ``exclusion`` sessions;
-* confounding: events within one session of an earnings date are flagged so the statistics
+* confounding: events within five sessions of an earnings date are flagged so the statistics
   can exclude them;
-* contaminated baselines: estimation windows skip the post-event windows of selected events.
+* contaminated baselines: estimation windows skip the post-event windows of selected events
+  and the sessions around earnings announcements.
 """
 
 from __future__ import annotations
@@ -25,6 +26,10 @@ EventStatus = Literal["ok", "insufficient_estimation"]
 
 # Length of the post-event window [0, +5] that is kept out of estimation windows.
 POST_WINDOW = 5
+# An event is flagged near earnings when an earnings session is within this many positions.
+EARNINGS_NEAR = 5
+# Earnings sessions [e-1, e+1] are masked out of estimation windows.
+EARNINGS_MASK = 1
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -49,35 +54,53 @@ class EventResult:
 def select_events(
     daily_sent: pd.DataFrame, trading_index: pd.DatetimeIndex, exclusion: int = 5
 ) -> list[pd.Timestamp]:
-    """Pick non-overlapping event sessions, most salient first, returned sorted by date.
+    """Pick non-overlapping event sessions causally, returned sorted by date.
 
-    Salience is ``|mean_score| * log1p(article_count)``. A session is skipped when its position
-    in ``trading_index`` is within ``exclusion`` sessions of an already picked event.
-    Heavily covered stocks have news almost every day, so per-day windows would overlap and
-    the same price move would be counted many times, overstating significance. Sessions that
-    are not in ``trading_index`` cannot be evaluated and are ignored.
+    Salience is ``|mean_score| * log1p(article_count)``. Sessions are walked in date order
+    using bounded-horizon windows:
+
+    1. When a news session at trading position ``p`` arrives with
+       ``p > last_selected + exclusion``, a candidate window covering positions
+       ``[p, p + exclusion]`` opens.
+    2. The most salient session in that window is selected (ties go to the earliest).
+    3. ``last_selected`` becomes the chosen position and the walk resumes after
+       ``last_selected + exclusion``.
+
+    Selected [0, +5] windows therefore stay disjoint. A global greedy rule ("take the most
+    salient session anywhere, then block its neighbours") was wrong because a salient news
+    day arriving *later* could displace an event chosen earlier, so earlier results would
+    change as history grew, which is look-ahead. Here a window closes ``exclusion`` sessions
+    after it opens, so only the final, still-open window (which contains ``as_of``) can be
+    altered by future news. Heavily covered stocks have news almost every day, so per-day
+    windows would otherwise overlap and the same price move would be counted many times.
+    Sessions that are not in ``trading_index`` cannot be evaluated and are ignored.
     """
     if daily_sent.empty:
         return []
-    positions = trading_index.get_indexer(pd.DatetimeIndex(daily_sent.index))
-    salience = np.abs(daily_sent["mean_score"].to_numpy(dtype=float)) * np.log1p(
+    raw = trading_index.get_indexer(pd.DatetimeIndex(daily_sent.index))
+    salience_all = np.abs(daily_sent["mean_score"].to_numpy(dtype=float)) * np.log1p(
         daily_sent["article_count"].to_numpy(dtype=float)
     )
-    # Ties broken by date so the result is deterministic.
-    order = sorted(
-        (i for i in range(len(daily_sent)) if positions[i] >= 0),
-        key=lambda i: (-salience[i], positions[i]),
-    )
-    blocked = np.zeros(len(trading_index), dtype=bool)
+    rows = sorted((int(raw[i]), float(salience_all[i]), i) for i in range(len(raw)) if raw[i] >= 0)
     picked: list[int] = []
-    for i in order:
-        pos = int(positions[i])
-        if blocked[pos]:
+    last = -exclusion - 1  # sentinel: no earlier event, so position 0 is eligible
+    i = 0
+    while i < len(rows):
+        pos = rows[i][0]
+        if pos <= last + exclusion:
+            i += 1
             continue
-        picked.append(i)
-        blocked[max(0, pos - exclusion) : pos + exclusion + 1] = True
+        best = i
+        j = i
+        while j < len(rows) and rows[j][0] <= pos + exclusion:
+            if rows[j][1] > rows[best][1]:  # strict: ties keep the earliest
+                best = j
+            j += 1
+        picked.append(rows[best][2])
+        last = rows[best][0]
+        i = j
     picked.sort()
-    return [pd.Timestamp(daily_sent.index[i]) for i in picked]
+    return [pd.Timestamp(daily_sent.index[k]) for k in picked]
 
 
 def _car(ar: FloatArray, t: int, start: int, end: int) -> float | None:
@@ -164,10 +187,12 @@ def run_event_study(
     for p in sel_pos:
         excluded[p : p + POST_WINDOW + 1] = True
     earn_pos = _earnings_positions(earnings_dates, index)
+    for e in earn_pos:
+        excluded[max(0, e - EARNINGS_MASK) : e + EARNINGS_MASK + 1] = True
 
     results: list[EventResult] = []
     for ts, t in zip(selected, sel_pos, strict=True):
-        near = any(abs(e - t) <= 1 for e in earn_pos)
+        near = any(abs(e - t) <= EARNINGS_NEAR for e in earn_pos)
         fit = _fit_market_model(r_s, r_m, excluded, t, est_window=est_window, min_obs=min_est_obs)
         if fit is None:
             alpha = beta = car_00 = car_01 = car_05 = car_pre = None

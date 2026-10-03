@@ -15,11 +15,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 
-from app.domain.technical.indicators import atr, sma
+from app.domain.technical.indicators import _validate_ohlcv, atr, sma
 
 
 class Bias(StrEnum):
@@ -46,34 +47,61 @@ class PatternKey(StrEnum):
     THREE_BLACK_CROWS = "three_black_crows"
 
 
+# Trend context a pattern requires before its first candle ("none" = no clear trend).
+TrendNeed = Literal["any", "up", "down", "up_or_none", "down_or_none"]
+Trend = Literal["up", "down", "none"]
+
+_ALLOWED: Mapping[TrendNeed, frozenset[str]] = MappingProxyType(
+    {
+        "any": frozenset({"up", "down", "none"}),
+        "up": frozenset({"up"}),
+        "down": frozenset({"down"}),
+        "up_or_none": frozenset({"up", "none"}),
+        "down_or_none": frozenset({"down", "none"}),
+    }
+)
+
+
+def context_allows(need: TrendNeed, trend: object) -> bool:
+    """Whether a trend-context value (``"up"``/``"down"``/``"none"``/NA) satisfies ``need``.
+
+    ``"any"`` accepts everything, including unknown (warm-up) context; every other
+    requirement needs a *known* trend.
+    """
+    if need == "any":
+        return True
+    return isinstance(trend, str) and trend in _ALLOWED[need]
+
+
 @dataclass(frozen=True, slots=True)
 class PatternSpec:
     key: PatternKey
     label: str
     bias: Bias
     candles: int
+    context: TrendNeed = "any"
 
 
 def _specs() -> dict[PatternKey, PatternSpec]:
     k, b = PatternKey, Bias
-    rows = [
-        (k.DOJI, "Doji", b.NEUTRAL, 1),
-        (k.HAMMER, "Hammer", b.BULLISH, 1),
-        (k.HANGING_MAN, "Hanging man", b.BEARISH, 1),
-        (k.INVERTED_HAMMER, "Inverted hammer", b.BULLISH, 1),
-        (k.SHOOTING_STAR, "Shooting star", b.BEARISH, 1),
-        (k.BULLISH_ENGULFING, "Bullish engulfing", b.BULLISH, 2),
-        (k.BEARISH_ENGULFING, "Bearish engulfing", b.BEARISH, 2),
-        (k.BULLISH_HARAMI, "Bullish harami", b.BULLISH, 2),
-        (k.BEARISH_HARAMI, "Bearish harami", b.BEARISH, 2),
-        (k.PIERCING_LINE, "Piercing line", b.BULLISH, 2),
-        (k.DARK_CLOUD_COVER, "Dark cloud cover", b.BEARISH, 2),
-        (k.MORNING_STAR, "Morning star", b.BULLISH, 3),
-        (k.EVENING_STAR, "Evening star", b.BEARISH, 3),
-        (k.THREE_WHITE_SOLDIERS, "Three white soldiers", b.BULLISH, 3),
-        (k.THREE_BLACK_CROWS, "Three black crows", b.BEARISH, 3),
+    rows: list[tuple[PatternKey, str, Bias, int, TrendNeed]] = [
+        (k.DOJI, "Doji", b.NEUTRAL, 1, "any"),
+        (k.HAMMER, "Hammer", b.BULLISH, 1, "down"),
+        (k.HANGING_MAN, "Hanging man", b.BEARISH, 1, "up"),
+        (k.INVERTED_HAMMER, "Inverted hammer", b.BULLISH, 1, "down"),
+        (k.SHOOTING_STAR, "Shooting star", b.BEARISH, 1, "up"),
+        (k.BULLISH_ENGULFING, "Bullish engulfing", b.BULLISH, 2, "down"),
+        (k.BEARISH_ENGULFING, "Bearish engulfing", b.BEARISH, 2, "up"),
+        (k.BULLISH_HARAMI, "Bullish harami", b.BULLISH, 2, "down"),
+        (k.BEARISH_HARAMI, "Bearish harami", b.BEARISH, 2, "up"),
+        (k.PIERCING_LINE, "Piercing line", b.BULLISH, 2, "down"),
+        (k.DARK_CLOUD_COVER, "Dark cloud cover", b.BEARISH, 2, "up"),
+        (k.MORNING_STAR, "Morning star", b.BULLISH, 3, "down"),
+        (k.EVENING_STAR, "Evening star", b.BEARISH, 3, "up"),
+        (k.THREE_WHITE_SOLDIERS, "Three white soldiers", b.BULLISH, 3, "down_or_none"),
+        (k.THREE_BLACK_CROWS, "Three black crows", b.BEARISH, 3, "up_or_none"),
     ]
-    return {key: PatternSpec(key, label, bias, n) for key, label, bias, n in rows}
+    return {key: PatternSpec(key, label, bias, n, ctx) for key, label, bias, n, ctx in rows}
 
 
 PATTERNS: Mapping[PatternKey, PatternSpec] = MappingProxyType(_specs())
@@ -345,32 +373,51 @@ def _evaluate_at(
     return hits
 
 
-def _contexts(df: pd.DataFrame, th: PatternThresholds) -> list[_Ctx]:
-    """``ctxs[s]`` is the context for a pattern whose first candle is ``s``: bars ``<= s-1``."""
+def trend_context(
+    df: pd.DataFrame, thresholds: PatternThresholds = DEFAULT_THRESHOLDS
+) -> pd.Series:
+    """Trend before each bar, as an object Series of ``"up"``/``"down"``/``"none"``/NA.
+
+    The value at position ``s`` is the context for a pattern whose first candle is ``s``: it
+    uses only bars ``<= s - 1`` (uptrend: close > sma10 and sma10 rising over 5 bars; downtrend
+    is the mirror). NA while the moving average is still in warm-up, and at position 0.
+    """
+    th = thresholds
     close = df["close"].astype(float)
     ma = sma(close, th.trend_sma_period).to_numpy(dtype=float)
     cl = close.to_numpy(dtype=float)
+    out: list[object] = [pd.NA] * len(df)
+    for s in range(1, len(df)):
+        p = s - 1
+        then_i = p - th.trend_lookback
+        now = ma[p]
+        then = ma[then_i] if then_i >= 0 else np.nan
+        if np.isnan(now) or np.isnan(then):
+            continue
+        if cl[p] > now > then:
+            out[s] = "up"
+        elif cl[p] < now < then:
+            out[s] = "down"
+        else:
+            out[s] = "none"
+    return pd.Series(out, index=df.index, dtype=object)
+
+
+_TREND_INT: Mapping[str, int] = MappingProxyType({"up": _UP, "down": _DOWN, "none": 0})
+
+
+def _contexts(df: pd.DataFrame, th: PatternThresholds) -> list[_Ctx]:
+    """``ctxs[s]`` is the context for a pattern whose first candle is ``s``: bars ``<= s-1``."""
+    trend = trend_context(df, th).to_numpy(dtype=object)
     atr_v = atr(df, th.atr_period).to_numpy(dtype=float)
     nan = float("nan")
-    ctxs: list[_Ctx] = []
-    for s in range(len(df)):
-        p = s - 1
-        if p < 0:
-            ctxs.append(_Ctx(None, nan))
-            continue
-        now = ma[p]
-        then = ma[p - th.trend_lookback] if p - th.trend_lookback >= 0 else nan
-        trend: int | None
-        if np.isnan(now) or np.isnan(then):
-            trend = None
-        elif cl[p] > now > then:
-            trend = _UP
-        elif cl[p] < now < then:
-            trend = _DOWN
-        else:
-            trend = 0
-        ctxs.append(_Ctx(trend, float(atr_v[p])))
-    return ctxs
+    return [
+        _Ctx(
+            _TREND_INT[trend[s]] if isinstance(trend[s], str) else None,
+            float(atr_v[s - 1]) if s > 0 else nan,
+        )
+        for s in range(len(df))
+    ]
 
 
 def detect_patterns(
@@ -380,7 +427,9 @@ def detect_patterns(
 
     A hit's ``index`` is the position of the pattern's last candle; its trend/ATR context uses
     only bars strictly before the pattern's first candle. Sorted by index, then registry order.
+    Raises ``ValueError`` on NaN prices or a non-increasing index.
     """
+    _validate_ohlcv(df)
     o = df["open"].to_numpy(dtype=float)
     h = df["high"].to_numpy(dtype=float)
     low = df["low"].to_numpy(dtype=float)

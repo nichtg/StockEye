@@ -4,6 +4,15 @@ This is a heuristic summary of what the indicators say today, NOT a forecast. Ev
 carries its direction, weight and a plain-English reason so the score can be audited.
 
 score = sum(weight * direction) / sum(weight) over signals with weight > 0 (0 if none).
+
+Ties (EMAs equal, close equal to VWAP, MACD histogram unchanged) give direction 0 but the
+signal keeps its weight, so a flat market pulls the score towards neutral instead of being
+read as bearish.
+
+Pattern rule: a recent pattern counts only if its history is sufficient AND the Wilson lower
+bound of its success rate exceeds the matching conditional base rate (it is credibly better
+than a typical week in the same trend). Strength = min((hit_rate - base_rate) / 0.2, 1); the
+signal is the mean of signed strengths. Doji and other neutral patterns carry no direction.
 """
 
 from __future__ import annotations
@@ -17,7 +26,7 @@ from typing import Literal
 import pandas as pd
 
 from app.domain.technical.candlesticks import PATTERNS, Bias, PatternHit, PatternKey
-from app.domain.technical.indicators import atr, ema, macd, rsi
+from app.domain.technical.indicators import _validate_ohlcv, atr, ema, macd, rsi
 from app.domain.technical.reliability import PatternStats
 
 Lean = Literal["bullish", "bearish", "neutral"]
@@ -34,6 +43,7 @@ _W_RSI = 0.75
 _W_EMA = 0.75
 _W_VWAP = 0.5
 _W_MACD = 0.5
+_TIE_REL = 1e-9  # relative tolerance below which two prices/indicators count as equal
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,45 +61,74 @@ class Outlook:
     lean: Lean
     score: float  # in [-1, 1]
     signals: tuple[Signal, ...]
-    expected_range: tuple[float, float] | None  # None while ATR is in warm-up
+    # Typical 1-week range (about 9 in 10 weeks fall inside): last_close +/- ATR14 * sqrt(5).
+    # None while ATR is in warm-up. Not a forecast or a confidence interval.
+    expected_range: tuple[float, float] | None
     last_close: float
+    # Coverage measured in the fix-round-1 logic audit simulation of 1-week ranges.
+    expected_range_coverage: float = 0.9
+
+    @property
+    def typical_week_range(self) -> tuple[float, float] | None:
+        """Alias of ``expected_range``: the typical 1-week range (about 9 in 10 weeks inside)."""
+        return self.expected_range
+
+
+def _pct(x: float) -> str:
+    return f"{round(x * 100)}%"
+
+
+def _pattern_line(hit: PatternHit, stats: PatternStats | None) -> tuple[float | None, str]:
+    """(signed strength if the pattern counts, plain-English sentence) for one recent hit."""
+    name = PATTERNS[hit.key].label
+    if hit.bias is Bias.NEUTRAL:
+        return None, f"{name}: indecision pattern, no directional signal"
+    if stats is None or not stats.sufficient:
+        seen = 0 if stats is None else stats.n
+        return None, (
+            f"{name}: not enough past occurrences to judge reliability "
+            f"(seen {seen} times), so it is ignored"
+        )
+    if stats.hit_rate is None or stats.base_rate is None or stats.success_count is None:
+        return None, f"{name}: no comparable typical week to judge it against, so it is ignored"
+    word = "higher" if hit.bias is Bias.BULLISH else "lower"
+    credible = stats.wilson_low is not None and stats.wilson_low > stats.base_rate
+    if not credible:
+        return None, (
+            f"{name} has been seen {stats.n} times, but not clearly better than a typical week"
+        )
+    sign = 1 if hit.bias is Bias.BULLISH else -1
+    strength = min((stats.hit_rate - stats.base_rate) / EDGE_FULL_STRENGTH, 1.0)
+    return sign * strength, (
+        f"{name} has been reliable for this stock ({word} a week later "
+        f"{stats.success_count} of {stats.n} times vs {_pct(stats.base_rate)} normally)"
+    )
 
 
 def _pattern_signal(
     recent_hits: Sequence[PatternHit], reliability: Mapping[PatternKey, PatternStats]
 ) -> Signal:
+    """Patterns count only when sufficient AND credibly (Wilson low bound) above their base rate.
+
+    Requiring more than a positive point estimate keeps a lucky 9-of-15 streak from moving the
+    score; the Wilson bound accounts for how few samples a one-stock history provides.
+    """
     label = "Candlestick patterns"
     if not recent_hits:
         return Signal("patterns", label, 0, 0.0, "No candlestick patterns in the last 3 sessions.")
     signed: list[float] = []
-    names: list[str] = []
-    thin: list[str] = []
+    lines: list[str] = []
     for hit in recent_hits:
-        name = PATTERNS[hit.key].label
-        stats = reliability.get(hit.key)
-        if stats is None or not stats.sufficient or stats.edge is None:
-            thin.append(name)
-            continue
-        if stats.edge <= 0:
-            continue
-        sign = {Bias.BULLISH: 1, Bias.BEARISH: -1, Bias.NEUTRAL: 0}[hit.bias]
-        signed.append(sign * min(stats.edge / EDGE_FULL_STRENGTH, 1.0))
-        names.append(name)
+        strength, line = _pattern_line(hit, reliability.get(hit.key))
+        lines.append(line)
+        if strength is not None:
+            signed.append(strength)
+    detail = "; ".join(lines) + "."
     if not signed:
-        if thin:
-            detail = (
-                f"{', '.join(thin)}: not enough past occurrences to judge reliability, "
-                "so it is ignored."
-            )
-        else:
-            detail = "Recent patterns have not beaten the base rate historically."
         return Signal("patterns", label, 0, 0.0, detail)
     mean = sum(signed) / len(signed)
     # weight * direction == mean signed strength, so opposing patterns offset one another.
     direction = 1 if mean > 0 else -1 if mean < 0 else 0
-    detail = f"{', '.join(names)} historically beat the base rate on this stock."
-    if thin:
-        detail += f" Ignored for thin history: {', '.join(thin)}."
     return Signal("patterns", label, direction, abs(mean), detail)
 
 
@@ -100,7 +139,16 @@ def _rsi_signal(value: float) -> Signal:
         d, why = 1, "below 30 (oversold), which often precedes a bounce"
     else:
         d, why = 0, "between 30 and 70, so momentum is neither stretched up nor down"
-    return Signal("rsi14", "RSI (14)", d, _W_RSI, f"RSI is {value:.0f}, {why}.")
+    return Signal("rsi14", "RSI (14)", d, _W_RSI, f"RSI is {value:.1f}, {why}.")
+
+
+def _tie_tolerance(scale: float) -> float:
+    """Differences below this are float noise, i.e. a tie (constant prices give exact ties)."""
+    return _TIE_REL * max(abs(scale), 1.0)
+
+
+def _sign(x: float, tol: float) -> int:
+    return 0 if abs(x) <= tol else 1 if x > 0 else -1
 
 
 def _ema_signal(fast: pd.Series, slow: pd.Series) -> Signal | None:
@@ -108,45 +156,48 @@ def _ema_signal(fast: pd.Series, slow: pd.Series) -> Signal | None:
     now = diff[-1]
     if math.isnan(now):
         return None
+    tol = _tie_tolerance(float(slow.iloc[-1]))
     fresh = False
     for k in range(max(1, len(diff) - FRESH_CROSS_SESSIONS), len(diff)):
-        if not math.isnan(diff[k - 1]) and (diff[k] > 0) != (diff[k - 1] > 0):
+        if not math.isnan(diff[k - 1]) and _sign(diff[k], tol) != _sign(diff[k - 1], tol):
             fresh = True
-    up = now > 0
-    detail = (
-        "9-day EMA is above the 21-day EMA" if up else "9-day EMA is at or below the 21-day EMA"
-    )
+    d = _sign(now, tol)
+    detail = {
+        1: "9-day EMA is above the 21-day EMA",
+        0: "9-day EMA equals the 21-day EMA",
+        -1: "9-day EMA is below the 21-day EMA",
+    }[d]
     detail += (
         ", and the cross happened within the last 3 sessions."
         if fresh
         else ", with no fresh cross in the last 3 sessions."
     )
-    return Signal("ema_cross", "EMA 9/21", 1 if up else -1, _W_EMA, detail)
+    return Signal("ema_cross", "EMA 9/21", d, _W_EMA, detail)
 
 
-def _macd_signal(hist: pd.Series) -> Signal | None:
+def _macd_signal(hist: pd.Series, scale: float) -> Signal | None:
     if len(hist) < _MIN_HIST:
         return None
     prev, now = float(hist.iloc[-2]), float(hist.iloc[-1])
     if math.isnan(prev) or math.isnan(now):
         return None
-    rising = now > prev
-    detail = (
-        "MACD histogram is rising, so upward momentum is building."
-        if rising
-        else "MACD histogram is not rising, so momentum is fading or falling."
-    )
-    return Signal("macd_momentum", "MACD momentum", 1 if rising else -1, _W_MACD, detail)
+    d = _sign(now - prev, _tie_tolerance(scale))
+    detail = {
+        1: "MACD histogram is rising, so upward momentum is building.",
+        0: "MACD histogram is unchanged, so momentum is steady.",
+        -1: "MACD histogram is falling, so momentum is fading or reversing.",
+    }[d]
+    return Signal("macd_momentum", "MACD momentum", d, _W_MACD, detail)
 
 
 def _vwap_signal(close: float, vwap_value: float) -> Signal:
-    above = close > vwap_value
-    detail = (
-        f"Close {close:.2f} is above the 1-week VWAP {vwap_value:.2f}."
-        if above
-        else f"Close {close:.2f} is at or below the 1-week VWAP {vwap_value:.2f}."
-    )
-    return Signal("vwap", "Weekly VWAP", 1 if above else -1, _W_VWAP, detail)
+    d = _sign(close - vwap_value, _tie_tolerance(vwap_value))
+    detail = {
+        1: f"Close {close:.2f} is above the 1-week VWAP {vwap_value:.2f}.",
+        0: f"Close {close:.2f} is at the 1-week VWAP {vwap_value:.2f}.",
+        -1: f"Close {close:.2f} is below the 1-week VWAP {vwap_value:.2f}.",
+    }[d]
+    return Signal("vwap", "Weekly VWAP", d, _W_VWAP, detail)
 
 
 def build_outlook(
@@ -163,6 +214,7 @@ def build_outlook(
     """
     if daily.empty:
         raise ValueError("daily history is empty")
+    _validate_ohlcv(daily)
     close = daily["close"].astype(float)
     last_close = float(close.iloc[-1])
 
@@ -174,7 +226,7 @@ def build_outlook(
         signals.append(s)
     if vwap_value is not None:
         signals.append(_vwap_signal(last_close, vwap_value))
-    if (s := _macd_signal(macd(close)["histogram"])) is not None:
+    if (s := _macd_signal(macd(close)["histogram"], last_close)) is not None:
         signals.append(s)
 
     total = sum(s.weight for s in signals if s.weight > 0)

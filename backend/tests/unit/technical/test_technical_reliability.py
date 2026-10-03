@@ -15,6 +15,12 @@ def _hit(key: PatternKey, index: int, df: pd.DataFrame) -> PatternHit:
     return PatternHit(key, PATTERNS[key].bias, index, df.index[index].to_pydatetime())
 
 
+def _ctx(df: pd.DataFrame, value: str) -> pd.Series:
+    """A trend-context series that is the same everywhere (the hand fixtures are too short
+    for a real 10-bar SMA trend)."""
+    return pd.Series(value, index=df.index, dtype=object)
+
+
 def _fixture() -> pd.DataFrame:
     # open is 100 everywhere, so with horizon 3: ret[t] = close[t+3] / 100 - 1
     closes = [100, 101, 102, 99, 98, 103, 104, 97, 105, 106, 95, 107]
@@ -53,7 +59,9 @@ def test_pattern_reliability_bullish_non_overlapping_walk_counts_hand_values() -
     # t4, t5 skipped; t9 and t11 have no t+3 bar -> dropped.
     hits = [_hit(K.HAMMER, t, df) for t in (0, 1, 2, 3, 4, 5, 9, 11)]
 
-    stats = pattern_reliability(df, hits, horizon=3, min_samples=2)[K.HAMMER]
+    stats = pattern_reliability(df, hits, horizon=3, min_samples=2, trend=_ctx(df, "down"))[
+        K.HAMMER
+    ]
 
     assert stats.n == 2  # returns -0.01 and +0.04
     assert stats.up_count == 1
@@ -73,7 +81,7 @@ def test_pattern_reliability_bearish_success_means_negative_return() -> None:
     # t0 -.01 (counted), t3 +.04 (3 - 0 = 3, counted), t6 +.06 (counted), t7 skipped.
     hits = [_hit(K.EVENING_STAR, t, df) for t in (0, 3, 6, 7)]
 
-    stats = pattern_reliability(df, hits, horizon=3)[K.EVENING_STAR]
+    stats = pattern_reliability(df, hits, horizon=3, trend=_ctx(df, "up"))[K.EVENING_STAR]
 
     assert stats.n == 3
     assert stats.up_count == 2
@@ -81,9 +89,10 @@ def test_pattern_reliability_bearish_success_means_negative_return() -> None:
     assert stats.hit_rate == pytest.approx(1 / 3)
     assert stats.mean_return == pytest.approx(0.03)
     assert stats.median_return == pytest.approx(0.04)
-    assert stats.base_rate == pytest.approx(1 - BASE_UP)
-    assert stats.edge == pytest.approx(1 / 3 - (1 - BASE_UP))
-    assert stats.sufficient is False  # 3 < default min_samples 8
+    assert stats.base_down_rate == pytest.approx(4 / 9)  # t0, t1, t4, t7 are negative
+    assert stats.base_rate == pytest.approx(4 / 9)
+    assert stats.edge == pytest.approx(1 / 3 - 4 / 9)
+    assert stats.sufficient is False  # 3 < default min_samples 15
 
 
 def test_pattern_reliability_neutral_has_no_success_metrics() -> None:
@@ -142,7 +151,7 @@ def test_pattern_reliability_entry_is_next_open_and_zero_return_is_not_up() -> N
     )
     hits = [_hit(K.HAMMER, 0, df), _hit(K.INVERTED_HAMMER, 1, df)]
 
-    result = pattern_reliability(df, hits, horizon=2, min_samples=1)
+    result = pattern_reliability(df, hits, horizon=2, min_samples=1, trend=_ctx(df, "down"))
 
     assert result[K.HAMMER].mean_return == pytest.approx(0.10)
     assert result[K.INVERTED_HAMMER].mean_return == pytest.approx(0.0)

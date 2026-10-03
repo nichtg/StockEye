@@ -1,7 +1,11 @@
 """Technical indicators. Every function returns a Series/DataFrame aligned to the input index.
 
 Warm-up rows are NaN. Value at row ``t`` depends only on rows ``<= t`` (no look-ahead).
-Smoothing conventions match TA-Lib / TradingView (SMA-seeded EMA, Wilder RSI/ATR).
+Smoothing conventions follow TradingView (SMA-seeded EMA, Wilder RSI/ATR). TA-Lib agrees for
+EMA and RSI; its MACD and ATR seeding differ slightly in the first rows (see those functions).
+
+Functions that take a whole OHLCV frame reject NaN prices and non-increasing indexes via
+``_validate_ohlcv`` instead of silently computing on gaps.
 """
 
 from __future__ import annotations
@@ -12,6 +16,25 @@ import numpy as np
 import pandas as pd
 
 FloatArray = np.ndarray[tuple[int], np.dtype[np.float64]]
+
+
+_OHLC = ("open", "high", "low", "close")
+_MAX_LISTED = 5  # dates named in the missing-values error message
+
+
+def _validate_ohlcv(df: pd.DataFrame) -> None:
+    """Raise ``ValueError`` if any OHLC value is NaN or the index is not strictly increasing.
+
+    The one input check shared by every function that consumes a whole frame, so a gap in the
+    price history fails loudly at the boundary instead of turning into a wrong signal.
+    """
+    missing = df[list(_OHLC)].isna().any(axis=1)
+    if bool(missing.any()):
+        dates = ", ".join(str(d) for d in df.index[missing.to_numpy()][:5])
+        more = "" if int(missing.sum()) <= _MAX_LISTED else ", ..."
+        raise ValueError(f"price history contains missing values at {dates}{more}")
+    if not df.index.is_monotonic_increasing or df.index.has_duplicates:
+        raise ValueError("price history index must be strictly increasing")
 
 
 def _check_period(period: int) -> None:
@@ -61,7 +84,10 @@ def sma(close: pd.Series, period: int) -> pd.Series:
 
 
 def ema(close: pd.Series, period: int) -> pd.Series:
-    """Exponential moving average, alpha = 2/(period+1), seeded with the first-period SMA."""
+    """Exponential moving average, alpha = 2/(period+1), seeded with the first-period SMA.
+
+    Matches TradingView's ``ta.ema`` and TA-Lib's ``EMA``; NaN before the seed row.
+    """
     _check_period(period)
     return pd.Series(_ema_array(_as_array(close), period), index=close.index)
 
@@ -69,7 +95,9 @@ def ema(close: pd.Series, period: int) -> pd.Series:
 def rsi(close: pd.Series, period: int = 14) -> pd.Series:
     """Wilder RSI in [0, 100]; the first ``period`` rows are NaN.
 
-    Flat windows (no gains, no losses) give 50; gains with no losses give 100.
+    Flat windows (no gains, no losses) give 50; gains with no losses give 100. A NaN price makes
+    the change NaN and, through Wilder smoothing, every later value NaN: gaps are never read
+    as "no change".
     """
     _check_period(period)
     x = _as_array(close)
@@ -77,8 +105,9 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
     if x.size <= period:
         return pd.Series(out, index=close.index)
     delta = np.diff(x)
-    gain = np.where(delta > 0, delta, 0.0)
-    loss = np.where(delta < 0, -delta, 0.0)
+    gap = np.isnan(delta)
+    gain = np.where(gap, np.nan, np.where(delta > 0, delta, 0.0))
+    loss = np.where(gap, np.nan, np.where(delta < 0, -delta, 0.0))
     avg_gain = float(gain[:period].mean())
     avg_loss = float(loss[:period].mean())
     for i in range(period, x.size):
@@ -93,7 +122,13 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
 
 
 def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
-    """MACD line (fast EMA - slow EMA), signal line (EMA of the MACD line) and histogram."""
+    """MACD line (fast EMA - slow EMA), signal line (EMA of the MACD line) and histogram.
+
+    Follows TradingView's ``ta.macd``: each EMA is seeded with the SMA of its own first
+    ``period`` values and the signal line is an SMA-seeded EMA of the MACD line. TA-Lib seeds
+    the fast EMA at the slow EMA's start bar instead, so its values differ slightly in the first
+    ~30 bars and converge afterwards.
+    """
     _check_period(fast)
     _check_period(slow)
     _check_period(signal)
@@ -121,9 +156,12 @@ def bollinger(close: pd.Series, period: int = 20, k: float = 2.0) -> pd.DataFram
 def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     """Average true range with Wilder smoothing; first ``period - 1`` rows are NaN.
 
-    The first bar's true range is high - low (no previous close exists).
+    The first bar's true range is high - low (no previous close exists), seeded by the mean of
+    the first ``period`` true ranges, as in TradingView's ``ta.atr``. TA-Lib leaves the first
+    bar's true range out of the seed, so it differs slightly in the first rows.
     """
     _check_period(period)
+    _validate_ohlcv(df)
     high = _as_array(df["high"])
     low = _as_array(df["low"])
     close = _as_array(df["close"])
@@ -153,13 +191,23 @@ def session_vwap(df: pd.DataFrame) -> pd.Series:
     The index must be exchange-local naive timestamps so that "date" is the session date.
     NaN while cumulative session volume is zero.
     """
+    _validate_ohlcv(df)
     groups = pd.Series(pd.DatetimeIndex(df.index).normalize(), index=df.index)
     return _cum_vwap(df, groups)
 
 
 def anchored_vwap(df: pd.DataFrame, anchor: datetime | pd.Timestamp) -> pd.Series:
-    """VWAP accumulated from the first row at or after ``anchor``; NaN before it."""
-    mask = df.index >= pd.Timestamp(anchor)
+    """VWAP accumulated from the first row at or after ``anchor``; NaN before it.
+
+    ``anchor`` must be naive, like the frame's index (exchange-local time).
+    """
+    _validate_ohlcv(df)
+    stamp = pd.Timestamp(anchor)
+    if stamp.tzinfo is not None:
+        raise ValueError(
+            "anchor must be a naive exchange-local timestamp; got a timezone-aware value"
+        )
+    mask = df.index >= stamp
     out = pd.Series(np.nan, index=df.index, dtype=float)
     if mask.any():
         out[mask] = _cum_vwap(df.loc[mask], None)

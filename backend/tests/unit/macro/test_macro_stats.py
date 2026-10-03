@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from macro_helpers import make_event
+from scipy import stats as stats_lib
 
 from app.domain.macro import (
     bucket_of,
@@ -199,31 +200,57 @@ def _weekly_frame(means: list[float]) -> pd.DataFrame:
     )
 
 
-def test_sentiment_regime_z_score_matches_hand_calculation():
-    means = [0.1 if i % 2 == 0 else -0.1 for i in range(19)] + [0.9]
-    frame = _weekly_frame(means)
-    as_of = (frame.index[-1] + pd.Timedelta(days=2)).date()  # the Friday of the last week
+AS_OF = date(2024, 12, 31)
 
-    regime = sentiment_regime(frame, as_of)
+
+def _block_frame(means: list[float], counts: list[int] | None = None) -> pd.DataFrame:
+    """One row per 30-day block, oldest first; the last row is inside the recent window."""
+    n = len(means)
+    idx = pd.DatetimeIndex(
+        [pd.Timestamp(AS_OF) - pd.Timedelta(days=30 * (n - 1 - i) + 10) for i in range(n)]
+    )
+    cnt = counts or [1] * n
+    return pd.DataFrame(
+        {"mean_score": means, "article_count": cnt, "max_abs_score": np.abs(means)}, index=idx
+    )
+
+
+def test_sentiment_regime_z_score_matches_hand_calculation():
+    baseline_blocks = [0.1, -0.1, 0.2, 0.0, -0.2, 0.1, 0.0, 0.1, -0.1]
+    frame = _block_frame([*baseline_blocks, 0.25])
+
+    regime = sentiment_regime(frame, AS_OF)
 
     assert regime is not None
-    # Window (as_of - 30d, as_of] holds the last four Wednesdays: 0.1, -0.1, 0.1, 0.9.
     assert regime.recent_mean == pytest.approx(0.25)
-    assert regime.recent_articles == 4
-    baseline = float(np.mean(means))
-    assert regime.baseline_mean == pytest.approx(baseline)
-    assert regime.z == pytest.approx((0.25 - baseline) / float(np.std(means, ddof=1)))
-    assert regime.label == "typical"  # z is about 1.0 - 0.0x; check bounds below
-    assert abs(regime.z) < 1
+    assert regime.recent_articles == 1
+    assert regime.baseline_mean == pytest.approx(float(np.mean(baseline_blocks)))
+    expected = (0.25 - np.mean(baseline_blocks)) / np.std(baseline_blocks, ddof=1)
+    assert regime.z == pytest.approx(float(expected))
+    assert regime.label == "more_positive_than_usual"
+
+
+def test_sentiment_regime_recent_window_is_thirty_days_and_blocks_do_not_overlap():
+    base = [0.1 if i % 2 == 0 else -0.1 for i in range(8)]
+    frame = _block_frame([*base, 0.9])
+    # Two extra rows inside the recent window (age 0 and 29 days) join its weighted mean;
+    # a row aged exactly 30 days falls into the first baseline block instead.
+    extra = pd.DataFrame(
+        {"mean_score": [0.5, 0.5, 0.3], "article_count": [1, 1, 1], "max_abs_score": 0.5},
+        index=pd.DatetimeIndex([pd.Timestamp(AS_OF) - pd.Timedelta(days=d) for d in (0, 29, 30)]),
+    )
+
+    regime = sentiment_regime(pd.concat([frame, extra]).sort_index(), AS_OF)
+
+    assert regime is not None
+    assert regime.recent_articles == 3
+    assert regime.recent_mean == pytest.approx((0.9 + 0.5 + 0.5) / 3)
 
 
 def test_sentiment_regime_labels_more_positive_and_more_negative():
-    base = [0.1 if i % 2 == 0 else -0.1 for i in range(16)]
-    up = _weekly_frame([*base, 0.9, 0.9, 0.9, 0.9])
-    down = _weekly_frame([*base, -0.9, -0.9, -0.9, -0.9])
-
-    r_up = sentiment_regime(up, (up.index[-1] + pd.Timedelta(days=2)).date())
-    r_down = sentiment_regime(down, (down.index[-1] + pd.Timedelta(days=2)).date())
+    base = [0.1 if i % 2 == 0 else -0.1 for i in range(10)]
+    r_up = sentiment_regime(_block_frame([*base, 0.9]), AS_OF)
+    r_down = sentiment_regime(_block_frame([*base, -0.9]), AS_OF)
 
     assert r_up is not None
     assert r_down is not None
@@ -233,48 +260,97 @@ def test_sentiment_regime_labels_more_positive_and_more_negative():
     assert r_down.z <= -1
 
 
-def test_sentiment_regime_none_with_fewer_than_twelve_weeks():
-    frame = _weekly_frame([0.1, -0.1, 0.2, 0.0, 0.3, -0.2, 0.1, 0.0, 0.2, -0.1, 0.4])
-    assert sentiment_regime(frame, (frame.index[-1]).date()) is None
+def test_sentiment_regime_typical_when_recent_is_near_baseline():
+    base = [0.1 if i % 2 == 0 else -0.1 for i in range(10)]
+    regime = sentiment_regime(_block_frame([*base, 0.0]), AS_OF)
+
+    assert regime is not None
+    assert regime.label == "typical"
+    assert abs(regime.z) < 1
+
+
+def test_sentiment_regime_none_with_fewer_than_eight_baseline_blocks():
+    seven = [0.1 if i % 2 == 0 else -0.1 for i in range(7)]
+    eight = [*seven, 0.1]
+
+    assert sentiment_regime(_block_frame([*seven, 0.3]), AS_OF) is None
+    assert sentiment_regime(_block_frame([*eight, 0.3]), AS_OF) is not None
+
+
+def test_sentiment_regime_skips_empty_blocks_but_still_needs_eight_with_news():
+    base = [0.1 if i % 2 == 0 else -0.1 for i in range(9)]
+    frame = _block_frame([*base, 0.3])
+    gappy = frame.drop(frame.index[2])  # an empty block is skipped, 8 remain
+
+    assert sentiment_regime(gappy, AS_OF) is not None
+    assert sentiment_regime(gappy.drop(gappy.index[2]), AS_OF) is None
 
 
 def test_sentiment_regime_none_without_recent_news():
-    frame = _weekly_frame([0.1 if i % 2 == 0 else -0.1 for i in range(20)])
-    far_future = (frame.index[-1] + pd.Timedelta(days=60)).date()
-    assert sentiment_regime(frame, far_future) is None
+    frame = _block_frame([0.1 if i % 2 == 0 else -0.1 for i in range(11)])
+    assert sentiment_regime(frame.iloc[:-1], AS_OF) is None
 
 
 def test_sentiment_regime_none_for_empty_or_pre_history_as_of():
-    frame = _weekly_frame([0.1 if i % 2 == 0 else -0.1 for i in range(20)])
+    frame = _block_frame([0.1 if i % 2 == 0 else -0.1 for i in range(11)])
     assert sentiment_regime(frame, date(2020, 1, 1)) is None
-    assert sentiment_regime(frame.iloc[0:0], date(2024, 6, 1)) is None
+    assert sentiment_regime(frame.iloc[0:0], AS_OF) is None
 
 
-def test_sentiment_regime_none_when_weekly_sentiment_is_constant():
-    frame = _weekly_frame([0.2] * 20)
-    assert sentiment_regime(frame, (frame.index[-1]).date()) is None
+def test_sentiment_regime_none_when_block_sentiment_is_constant():
+    assert sentiment_regime(_block_frame([0.2] * 11), AS_OF) is None
 
 
 def test_sentiment_regime_ignores_news_after_as_of():
-    means = [0.1 if i % 2 == 0 else -0.1 for i in range(20)]
-    frame = _weekly_frame(means)
-    as_of = frame.index[15].date()
-    future_junk = _weekly_frame([0.1 if i % 2 == 0 else -0.1 for i in range(16)] + [0.9] * 10)
+    base = [0.1 if i % 2 == 0 else -0.1 for i in range(10)]
+    frame = _block_frame([*base, 0.2])
+    future = pd.DataFrame(
+        {"mean_score": [0.9, 0.9], "article_count": [5, 5], "max_abs_score": 0.9},
+        index=pd.DatetimeIndex([pd.Timestamp(AS_OF) + pd.Timedelta(days=d) for d in (1, 40)]),
+    )
 
-    assert sentiment_regime(frame, as_of) == sentiment_regime(future_junk, as_of)
+    assert sentiment_regime(frame, AS_OF) == sentiment_regime(pd.concat([frame, future]), AS_OF)
 
 
 def test_sentiment_regime_weights_by_article_count():
-    means = [0.1 if i % 2 == 0 else -0.1 for i in range(16)] + [0.0, 0.0, 0.0, 0.0]
-    frame = _weekly_frame(means)
+    base = [0.1 if i % 2 == 0 else -0.1 for i in range(9)]
+    frame = _block_frame([*base, 0.0], [1] * 9 + [1])
     frame.loc[frame.index[-1], ["mean_score", "article_count"]] = [0.8, 9]
-    as_of = (frame.index[-1] + pd.Timedelta(days=2)).date()
+    extra = pd.DataFrame(
+        {"mean_score": [0.0], "article_count": [3], "max_abs_score": 0.0},
+        index=pd.DatetimeIndex([pd.Timestamp(AS_OF)]),
+    )
 
-    regime = sentiment_regime(frame, as_of)
+    regime = sentiment_regime(pd.concat([frame, extra]), AS_OF)
 
     assert regime is not None
     assert regime.recent_articles == 12
     assert regime.recent_mean == pytest.approx(0.8 * 9 / 12)
+
+
+def test_sentiment_regime_null_simulation_flags_a_plausible_share_as_unusual():
+    # With i.i.d. news the label should fire about a third of the time (|z| >= 1). A recent
+    # 30-day mean compared with weekly spread would almost never fire.
+    rng = np.random.default_rng(11)
+    days = pd.date_range(end=pd.Timestamp(AS_OF), periods=720, freq="D")
+    labels = []
+    for _ in range(300):
+        keep = rng.random(len(days)) < 0.5
+        idx = days[keep]
+        frame = pd.DataFrame(
+            {
+                "mean_score": rng.normal(0.0, 0.4, len(idx)),
+                "article_count": rng.integers(1, 6, len(idx)),
+                "max_abs_score": 0.4,
+            },
+            index=idx,
+        )
+        regime = sentiment_regime(frame, AS_OF)
+        assert regime is not None
+        labels.append(regime.label != "typical")
+
+    share = float(np.mean(labels))
+    assert 0.2 <= share <= 0.45
 
 
 def test_weekly_timeline_weights_by_article_count_and_labels_week_end_friday():
@@ -307,3 +383,27 @@ def test_compute_stats_single_observation_groups_give_no_welch_test():
 
     assert stats.difference is None  # variance of one observation is undefined
     assert stats.correlation is not None
+
+
+def test_compute_stats_bucket_gets_its_own_one_sample_t_test_against_zero():
+    cars = [0.01, 0.02, 0.015, 0.03, -0.005, 0.02, 0.01, 0.025, 0.012, 0.018]
+    events = [make_event(_day(i), 0.6, c) for i, c in enumerate(cars)]
+
+    bucket = compute_stats(events, exclude_near_earnings=False).buckets["positive"]
+
+    expected = stats_lib.ttest_1samp(cars, 0.0)
+    assert bucket.t == pytest.approx(float(expected.statistic))
+    assert bucket.p_value == pytest.approx(float(expected.pvalue))
+    assert bucket.label == "likely_real"
+
+
+def test_compute_stats_bucket_test_is_none_below_min_n_or_without_spread():
+    thin = [make_event(_day(i), 0.6, 0.01 * i) for i in range(9)]
+    flat = [make_event(_day(i), -0.6, 0.01) for i in range(12)]
+
+    stats = compute_stats([*thin, *flat], exclude_near_earnings=False)
+
+    assert stats.buckets["positive"].p_value is None  # 9 < min_n
+    assert stats.buckets["positive"].label is None
+    assert stats.buckets["negative"].p_value is None  # constant: t undefined
+    assert stats.buckets["neutral"].t is None

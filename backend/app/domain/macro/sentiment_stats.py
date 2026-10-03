@@ -22,7 +22,7 @@ Reliability = Literal["likely_real", "weak_evidence", "could_be_chance"]
 RegimeLabel = Literal["more_positive_than_usual", "more_negative_than_usual", "typical"]
 
 BUCKETS: tuple[Bucket, ...] = ("positive", "neutral", "negative")
-MIN_WEEKS = 12
+MIN_BLOCKS = 8  # non-overlapping 30-day baseline blocks needed for the regime z-score
 POSITIVE_ABOVE = 0.3
 LIKELY_REAL_BELOW = 0.05
 WEAK_EVIDENCE_BELOW = 0.2
@@ -70,6 +70,10 @@ class BucketStats:
     mean_car_0_5: float | None
     median_car_0_5: float | None
     mean_car_pre_5: float | None
+    # One-sample t-test of car_0_1 against zero; None below min_n or with no spread.
+    t: float | None = None
+    p_value: float | None = None
+    label: Reliability | None = None
 
 
 @dataclass(frozen=True)
@@ -104,10 +108,22 @@ def _median(values: Sequence[float]) -> float | None:
     return float(np.median(values)) if values else None
 
 
-def _bucket_stats(bucket: Bucket, events: Sequence[EventResult]) -> BucketStats:
+def _bucket_test(car01: Sequence[float], min_n: int) -> tuple[float, float] | None:
+    """One-sample t-test against zero; each bucket claim needs its own evidence."""
+    if len(car01) < min_n or len(car01) < MIN_DISTINCT or np.ptp(car01) == 0:
+        return None
+    res = stats.ttest_1samp(car01, 0.0)
+    t, p = float(res.statistic), float(res.pvalue)
+    if math.isnan(t) or math.isnan(p):
+        return None
+    return t, p
+
+
+def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> BucketStats:
     car01 = [e.car_0_1 for e in events if e.car_0_1 is not None]
     car05 = [e.car_0_5 for e in events if e.car_0_5 is not None]
     pre = [e.car_pre_5 for e in events if e.car_pre_5 is not None]
+    test = _bucket_test(car01, min_n)
     return BucketStats(
         bucket=bucket,
         n=len(events),
@@ -117,6 +133,9 @@ def _bucket_stats(bucket: Bucket, events: Sequence[EventResult]) -> BucketStats:
         mean_car_0_5=_mean(car05),
         median_car_0_5=_median(car05),
         mean_car_pre_5=_mean(pre),
+        t=None if test is None else test[0],
+        p_value=None if test is None else test[1],
+        label=None if test is None else reliability_label(test[1]),
     )
 
 
@@ -176,14 +195,14 @@ def compute_stats(
         correlation=_correlation(
             [e.sentiment for e in used], [e.car_0_1 for e in used if e.car_0_1 is not None], min_n
         ),
-        buckets={b: _bucket_stats(b, grouped[b]) for b in BUCKETS},
+        buckets={b: _bucket_stats(b, grouped[b], min_n) for b in BUCKETS},
         difference=_difference(car01("positive"), car01("negative"), min_n),
     )
 
 
 @dataclass(frozen=True)
 class Regime:
-    """Recent article-weighted sentiment against the stock's own weekly history."""
+    """Recent article-weighted sentiment against the stock's own 30-day-block history."""
 
     recent_mean: float
     baseline_mean: float
@@ -210,26 +229,43 @@ def _weekly(daily_sent: pd.DataFrame) -> pd.DataFrame:
     return out[out["article_count"] > 0]
 
 
-def sentiment_regime(daily_sent: pd.DataFrame, as_of: date, recent_days: int = 30) -> Regime | None:
-    """z-score of recent sentiment against weekly history; None without enough data.
+def _window_mean(frame: pd.DataFrame) -> float | None:
+    """Article-weighted mean score of ``frame``; None without articles."""
+    articles = int(frame["article_count"].sum())
+    if articles == 0:
+        return None
+    return float((frame["mean_score"] * frame["article_count"]).sum() / articles)
 
-    Only sessions up to ``as_of`` are used (no look-ahead). Needs at least 12 weekly points,
-    some news in (as_of - recent_days, as_of], and a non-degenerate weekly spread.
+
+def sentiment_regime(daily_sent: pd.DataFrame, as_of: date, recent_days: int = 30) -> Regime | None:
+    """z-score of recent sentiment against the stock's own 30-day history; None if unavailable.
+
+    Recent = article-weighted mean over (as_of - recent_days, as_of]. The baseline is the
+    article-weighted means of the non-overlapping ``recent_days`` blocks before that window,
+    stepping back from ``as_of - recent_days``; blocks without news are skipped and at least
+    ``MIN_BLOCKS`` are needed. Comparing like with like matters: a 30-day mean is much
+    smoother than a weekly one, so a z-score against weekly spread would label far too few
+    periods as unusual. Only sessions up to ``as_of`` are used (no look-ahead).
     """
     end = pd.Timestamp(as_of)
     hist = daily_sent.loc[daily_sent.index <= end]
     if hist.empty:
         return None
-    weekly = _weekly(hist)
-    if len(weekly) < MIN_WEEKS:
+    age = (end - pd.DatetimeIndex(hist.index)).days.to_numpy()
+    block = age // recent_days  # 0 = recent window, 1 = the 30 days before it, ...
+    recent = hist.loc[block == 0]
+    recent_mean = _window_mean(recent)
+    if recent_mean is None:
         return None
-    recent = hist.loc[hist.index > end - pd.Timedelta(days=recent_days)]
-    recent_articles = int(recent["article_count"].sum())
-    if recent_articles == 0:
+    block_means: list[float] = []
+    for k in sorted({int(b) for b in block if b > 0}):
+        mean = _window_mean(hist.loc[block == k])
+        if mean is not None:
+            block_means.append(mean)
+    if len(block_means) < MIN_BLOCKS:
         return None
-    recent_mean = float((recent["mean_score"] * recent["article_count"]).sum() / recent_articles)
-    baseline = float(weekly["mean_score"].mean())
-    spread = float(weekly["mean_score"].std(ddof=1))
+    baseline = float(np.mean(block_means))
+    spread = float(np.std(block_means, ddof=1))
     if not spread > MIN_SPREAD:  # (near-)zero or NaN: z is undefined
         return None
     z = (recent_mean - baseline) / spread
@@ -242,7 +278,7 @@ def sentiment_regime(daily_sent: pd.DataFrame, as_of: date, recent_days: int = 3
         recent_mean=recent_mean,
         baseline_mean=baseline,
         z=z,
-        recent_articles=recent_articles,
+        recent_articles=int(recent["article_count"].sum()),
         label=label,
     )
 

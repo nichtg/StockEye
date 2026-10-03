@@ -35,19 +35,22 @@ def _hit(key: PatternKey, index: int = 0) -> PatternHit:
     return PatternHit(key, PATTERNS[key].bias, index, datetime(2024, 1, 1))
 
 
-def _stats(key: PatternKey, edge: float | None, *, sufficient: bool = True) -> PatternStats:
+def _stats(
+    key: PatternKey, edge: float | None, *, sufficient: bool = True, credible: bool = True
+) -> PatternStats:
+    """Stats with base rate 0.5, hit rate 0.5 + edge and a Wilson bound above/below the base."""
     return PatternStats(
         key=key,
         n=10 if sufficient else 2,
         up_count=5,
-        success_count=5,
-        hit_rate=0.5,
-        wilson_low=0.2,
+        success_count=None if edge is None else round(10 * (0.5 + edge)),
+        hit_rate=None if edge is None else 0.5 + edge,
+        wilson_low=(0.51 if credible else 0.3) if edge is not None else None,
         wilson_high=0.8,
         mean_return=0.01,
         median_return=0.01,
         base_up_rate=0.5,
-        base_rate=0.5,
+        base_rate=None if edge is None else 0.5,
         edge=edge,
         sufficient=sufficient,
     )
@@ -172,7 +175,7 @@ def test_build_outlook_vwap_above_and_below_and_equal() -> None:
 
     assert (above.direction, above.weight) == (1, 0.5)
     assert below.direction == -1
-    assert equal.direction == -1  # strictly greater is required for +1
+    assert (equal.direction, equal.weight) == (0, 0.5)  # a tie votes 0 but keeps its weight
     assert "130.00" in above.detail
 
 
@@ -241,7 +244,7 @@ def test_build_outlook_pattern_missing_from_reliability_counts_as_insufficient()
 
 
 def test_build_outlook_pattern_without_edge_is_ignored() -> None:
-    rel = {K.HAMMER: _stats(K.HAMMER, -0.1), K.DOJI: _stats(K.DOJI, None)}
+    rel = {K.HAMMER: _stats(K.HAMMER, -0.1, credible=False), K.DOJI: _stats(K.DOJI, None)}
 
     sig = _sig(
         build_outlook(_daily(_growth()), [_hit(K.HAMMER), _hit(K.DOJI)], rel, None, AS_OF),
@@ -252,12 +255,12 @@ def test_build_outlook_pattern_without_edge_is_ignored() -> None:
 
 
 def test_build_outlook_sufficient_pattern_with_non_positive_edge_gets_zero_weight() -> None:
-    rel = {K.HAMMER: _stats(K.HAMMER, -0.1)}
+    rel = {K.HAMMER: _stats(K.HAMMER, -0.1, credible=False)}
 
     sig = _sig(build_outlook(_daily(_growth()), [_hit(K.HAMMER)], rel, None, AS_OF), "patterns")
 
     assert sig.weight == 0.0
-    assert "base rate" in sig.detail
+    assert "not clearly better than a typical week" in sig.detail
 
 
 def test_build_outlook_mixed_sufficient_and_thin_patterns_notes_ignored_ones() -> None:

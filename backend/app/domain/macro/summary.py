@@ -14,14 +14,19 @@ from datetime import date
 from app.domain.macro.alignment import ScoredArticle
 from app.domain.macro.event_study import EventResult
 from app.domain.macro.sentiment_stats import (
+    Bucket,
     BucketStats,
     MacroStats,
     Regime,
     Reliability,
     TimelinePoint,
+    reliability_label,
 )
 
 MAX_HEADLINES = 3
+MIN_LINK = 0.1  # |rank correlation| below this is described as no clear link
+VERY_OFTEN_AT = 95  # "in 100" figure from which chance is described as "very often"
+PRE_MOVE_CAVEAT = 0.01  # a mean pre-event move this large (1%) gets a caveat sentence
 
 
 @dataclass(frozen=True)
@@ -57,7 +62,9 @@ class Finding:
 @dataclass(frozen=True)
 class MacroReport:
     top_events: list[TopEvent]
-    headline_findings: list[Finding]
+    headline_findings: list[Finding]  # primary + regime, kept for compatibility
+    primary_findings: list[Finding]  # shown first: ex-earnings scope (or the only scope)
+    secondary_findings: list[Finding]  # all-events scope; the UI shows it under Details
     stats_all: MacroStats
     stats_ex_earnings: MacroStats
     regime: Regime | None
@@ -66,64 +73,109 @@ class MacroReport:
     events_insufficient: int
 
 
-def _pct(x: float) -> str:
-    """Signed percentage with one decimal; avoids a negative zero."""
-    value = round(x * 100, 1)
-    if value == 0:
-        value = 0.0
-    return f"{value:+.1f}%"
-
-
 def _pct_abs(x: float) -> str:
     return f"{abs(round(x * 100, 1)):.1f}%"
 
 
-def _chance_phrase(p: float) -> str:
-    in_100 = round(p * 100)
-    if in_100 < 1:
-        return "fewer than 1 in 100 times"
-    return f"about {in_100} in 100 times"
+def _reliability_finding(p: float, what: str, based_on: int, scope: str = "") -> Finding:
+    """Reliability sentence; ``what`` is e.g. "a gap this large". The raw p stays in the field.
 
-
-def _reliability_text(label: Reliability, p: float, what: str) -> str:
-    """Reliability sentence; ``what`` is e.g. "a gap this large"."""
-    chance = _chance_phrase(p)
+    The label and the "about X in 100" figure come from the same rounded value, so they can
+    never disagree (for example "likely a real effect ... about 5 in 100").
+    """
+    raw = round(p * 100)
+    below_floor = raw < 1
+    in_100 = max(1, raw)
+    label = reliability_label(in_100 / 100)
+    chance = "fewer than 1 in 100 times" if below_floor else f"about {in_100} in 100 times"
     if label == "likely_real":
-        only = "" if chance.startswith("fewer") else "only "
-        return (
+        only = "" if below_floor else "only "
+        text = (
             f"Likely a real effect: if news had no influence, {what} would appear "
             f"by chance {only}{chance}."
         )
-    if label == "weak_evidence":
-        return f"Weak evidence: {what} would appear by chance {chance}."
-    return f"Could be chance: {what} would appear by chance {chance}, too often to rule out luck."
+    elif label == "weak_evidence":
+        text = f"Weak evidence: {what} would appear by chance {chance}."
+    elif in_100 >= VERY_OFTEN_AT:
+        text = (
+            f"Could be chance: {what} would very often appear by chance, "
+            "too often to rule out luck."
+        )
+    else:
+        text = (
+            f"Could be chance: {what} would appear by chance {chance}, too often to rule out luck."
+        )
+    return Finding(text=f"{scope}{text}", based_on_events=based_on, reliability=label, p_value=p)
 
 
-def _beat_or_lag(x: float) -> str:
-    return "beat" if x >= 0 else "lagged"
+def _reaction_phrase(m: float) -> str:
+    """How the stock moved against its market-model expectation, in plain words."""
+    rounded = round(m * 100, 1)
+    if rounded == 0:
+        return "moved in line with what the market predicted"
+    side = "better" if rounded > 0 else "worse"
+    return f"did {_pct_abs(m)} {side} than its usual relationship with the market would predict"
 
 
-def _bucket_finding(label: str, bucket: BucketStats, min_n: int, scope: str) -> Finding:
-    if bucket.n < min_n or bucket.mean_car_0_1 is None:
-        return Finding(
+def _gap_sentence(mean_diff: float) -> str:
+    """Positive-versus-negative comparison; a gap that rounds to zero has no direction."""
+    rounded = round(mean_diff * 100, 1)
+    if rounded == 0:
+        return "Positive-news days did about the same as negative-news days."
+    side = "better" if rounded > 0 else "worse"
+    return f"Positive-news days did {_pct_abs(mean_diff)} {side} than negative-news days."
+
+
+def _bucket_findings(label: str, bucket: BucketStats, scope: str) -> list[Finding]:
+    """Sentence for a tested bucket, its own reliability line and a pre-move caveat."""
+    assert bucket.mean_car_0_1 is not None  # noqa: S101 - callers only pass tested buckets
+    assert bucket.p_value is not None  # noqa: S101
+    out = [
+        Finding(
             text=(
-                f"{scope}Not enough {label}-news events yet to judge "
-                f"(found {bucket.n}; need at least {min_n})."
+                f"{scope}Around days with {label} news (that day and the next), the stock "
+                f"{_reaction_phrase(bucket.mean_car_0_1)}."
             ),
             based_on_events=bucket.n,
-        )
-    m = bucket.mean_car_0_1
-    return Finding(
-        text=(
-            f"{scope}After {label} news, the stock {_beat_or_lag(m)} the market by "
-            f"{_pct_abs(m)} on average over the next 2 days."
         ),
-        based_on_events=bucket.n,
-    )
+        _reliability_finding(bucket.p_value, "a move this large", bucket.n, scope),
+    ]
+    pre = bucket.mean_car_pre_5
+    if pre is not None and abs(pre) >= PRE_MOVE_CAVEAT:
+        side = "better" if pre > 0 else "worse"
+        out.append(
+            Finding(
+                text=(
+                    f"{scope}Part of this move started before the news: in the 5 days before, "
+                    f"the stock had already moved {_pct_abs(pre)} ({side} than expected)."
+                ),
+                based_on_events=bucket.n,
+            )
+        )
+    return out
 
 
-def _scope_findings(stats: MacroStats, scope_label: str) -> list[Finding]:
-    scope = f"{scope_label}: "
+def _untested_finding(
+    buckets: Sequence[tuple[str, BucketStats]], min_n: int, scope: str
+) -> Finding:
+    """One "not enough events" finding covering every bucket too thin to test."""
+    if len(buckets) == 1:
+        label, b = buckets[0]
+        text = (
+            f"{scope}Not enough {label}-news events yet to judge "
+            f"(found {b.n}; need at least {min_n})."
+        )
+    else:
+        found = " and ".join(f"{b.n} {label}-news" for label, b in buckets)
+        text = (
+            f"{scope}Not enough positive-news or negative-news events yet to judge "
+            f"(found {found}; need at least {min_n} of each)."
+        )
+    return Finding(text=text, based_on_events=sum(b.n for _, b in buckets))
+
+
+def _scope_findings(stats: MacroStats, scope: str) -> list[Finding]:
+    """Findings for one scope; ``scope`` is a prefix such as "Excluding earnings periods: "."""
     if stats.n_used < stats.min_n:
         return [
             Finding(
@@ -134,50 +186,32 @@ def _scope_findings(stats: MacroStats, scope_label: str) -> list[Finding]:
                 based_on_events=stats.n_used,
             )
         ]
-    out = [
-        _bucket_finding("positive", stats.buckets["positive"], stats.min_n, scope),
-        _bucket_finding("negative", stats.buckets["negative"], stats.min_n, scope),
-    ]
+    out: list[Finding] = []
+    untested: list[tuple[str, BucketStats]] = []
+    labels: tuple[Bucket, Bucket] = ("positive", "negative")
+    for label in labels:
+        bucket = stats.buckets[label]
+        if bucket.p_value is None or bucket.mean_car_0_1 is None:
+            untested.append((label, bucket))
+        else:
+            out += _bucket_findings(label, bucket, scope)
+    if untested:
+        out.append(_untested_finding(untested, stats.min_n, scope))
     diff = stats.difference
     if diff is not None:
         total = diff.n_pos + diff.n_neg
-        out.append(
-            Finding(
-                text=(
-                    f"{scope}The gap between positive-news and negative-news reactions was "
-                    f"{_pct(diff.mean_diff)} over the next 2 days."
-                ),
-                based_on_events=total,
-            )
-        )
-        out.append(
-            Finding(
-                text=_reliability_text(diff.label, diff.p_value, "a gap this large"),
-                based_on_events=total,
-                reliability=diff.label,
-                p_value=diff.p_value,
-            )
-        )
+        out.append(Finding(text=f"{scope}{_gap_sentence(diff.mean_diff)}", based_on_events=total))
+        out.append(_reliability_finding(diff.p_value, "a gap this large", total, scope))
     corr = stats.correlation
     if corr is not None:
-        direction = "better" if corr.rho > 0 else "worse"
-        out.append(
-            Finding(
-                text=(
-                    f"{scope}Across {corr.n} news events, more positive sentiment tended to go "
-                    f"with {direction} market-adjusted moves (rank correlation {corr.rho:+.2f})."
-                ),
-                based_on_events=corr.n,
-            )
-        )
-        out.append(
-            Finding(
-                text=_reliability_text(corr.label, corr.p_value, "a pattern this strong"),
-                based_on_events=corr.n,
-                reliability=corr.label,
-                p_value=corr.p_value,
-            )
-        )
+        if corr.label == "could_be_chance" or abs(corr.rho) < MIN_LINK:
+            text = "No clear link between how positive the news was and how the stock moved."
+        elif corr.rho > 0:
+            text = "More positive news tended to go with better-than-expected moves."
+        else:
+            text = "More positive news tended to go with worse-than-expected moves."
+        out.append(Finding(text=f"{scope}{text}", based_on_events=corr.n))
+        out.append(_reliability_finding(corr.p_value, "a pattern this strong", corr.n, scope))
     return out
 
 
@@ -236,16 +270,25 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
 ) -> MacroReport:
     """Combine events, statistics and context into the report shown to the user.
 
-    Findings lead with the earnings-excluded scope (cleaner, not confounded by results
-    announcements), then the all-events scope, then the recent-sentiment regime.
+    The primary scope excludes earnings periods (cleaner, not confounded by results
+    announcements). When that scope used exactly the same events as the all-events scope
+    (equal counts, since one is a subset of the other), only one scope is emitted and it has
+    no "Including/Excluding" prefix. ``headline_findings`` is primary plus the regime line.
     """
-    findings = _scope_findings(stats_ex_earnings, "Excluding earnings periods")
-    findings += _scope_findings(stats_all, "Including earnings periods")
+    secondary: list[Finding] = []
+    if stats_ex_earnings.n_used == stats_all.n_used:
+        primary = _scope_findings(stats_ex_earnings, "")
+    else:
+        primary = _scope_findings(stats_ex_earnings, "Excluding earnings periods: ")
+        secondary = _scope_findings(stats_all, "Including earnings periods: ")
+    headline = list(primary)
     if regime is not None:
-        findings.append(_regime_finding(regime))
+        headline.append(_regime_finding(regime))
     return MacroReport(
         top_events=_top_events(events, session_articles, top_n),
-        headline_findings=findings,
+        headline_findings=headline,
+        primary_findings=primary,
+        secondary_findings=secondary,
         stats_all=stats_all,
         stats_ex_earnings=stats_ex_earnings,
         regime=regime,

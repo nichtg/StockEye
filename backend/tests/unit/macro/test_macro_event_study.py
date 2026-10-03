@@ -147,18 +147,39 @@ def test_run_event_study_clustered_news_yields_single_event_per_cluster():
     assert len(res) < 10
 
 
-def test_run_event_study_flags_earnings_within_one_session():
+def test_run_event_study_flags_earnings_within_five_sessions():
     stock, bench, index = build_market()
     sent = sent_frame(index, {200: (0.9, 3), 250: (0.8, 3), 300: (0.7, 3), 350: (0.6, 3)})
     earnings = [
-        index[201].date(),  # next session -> within +/-1
-        index[248].date(),  # two sessions before event 250 -> not near
-        index[299].date(),  # one session before -> near
+        index[201].date(),  # one after event 200 -> near
+        index[243].date(),  # seven before event 250 -> not near
+        index[295].date(),  # five before event 300 -> near (boundary)
+        index[356].date(),  # six after event 350 -> not near (boundary)
     ]
 
     res = run_event_study(stock, bench, sent, earnings)
 
     assert [r.near_earnings for r in res] == [True, False, True, False]
+
+
+def test_run_event_study_masks_earnings_sessions_out_of_estimation_window():
+    # A +20% earnings-day jump inside the estimation window would bias beta if it were kept.
+    stock, bench, index = build_market(jumps={100: 0.2})
+    sent = sent_frame(index, {200: (0.9, 3)})
+
+    (res,) = run_event_study(stock, bench, sent, [index[100].date()])
+
+    assert res.beta == pytest.approx(1.5, abs=TOL)
+    assert res.alpha == pytest.approx(0.0002, abs=TOL)
+
+
+def test_run_event_study_masks_day_after_earnings_too():
+    stock, bench, index = build_market(jumps={101: -0.2})
+    sent = sent_frame(index, {200: (0.9, 3)})
+
+    (res,) = run_event_study(stock, bench, sent, [index[100].date()])
+
+    assert res.beta == pytest.approx(1.5, abs=TOL)
 
 
 def test_run_event_study_maps_weekend_earnings_to_next_session():
@@ -280,3 +301,38 @@ def test_run_event_study_window_with_non_finite_return_is_none():
 
     assert res.car_0_1 is not None
     assert res.car_0_5 is None
+
+
+def test_select_events_chain_is_causal_so_later_news_cannot_change_earlier_picks():
+    idx = _index(120)
+    # A 20-day chain with spacing <= 5 and rising salience: global greedy would favour the end.
+    chain = {10: (0.2, 1), 14: (0.3, 1), 18: (0.4, 1), 22: (0.5, 1), 26: (0.6, 1), 30: (0.7, 1)}
+    later = {**chain, 33: (0.95, 9), 36: (0.99, 9), 60: (0.5, 2)}
+
+    short = [idx.get_loc(p) for p in select_events(sent_frame(idx, chain), idx)]
+    full = [idx.get_loc(p) for p in select_events(sent_frame(idx, later), idx)]
+
+    assert short == [14, 26]  # windows [10,15] and [22,27]; 30 is inside 26's exclusion
+    assert full[:2] == short  # appended news only adds events after the closed windows
+    assert full[2:] == [36, 60]
+
+
+def test_select_events_picks_peak_of_each_bounded_window_and_keeps_windows_disjoint():
+    idx = _index(120)
+    sent = sent_frame(idx, {10: (0.2, 1), 14: (0.3, 1), 18: (0.4, 1), 22: (0.5, 1), 26: (0.6, 1)})
+
+    picks = [idx.get_loc(p) for p in select_events(sent, idx)]
+
+    # Window [10,15] -> 14; next candidate must be > 19: window [22,27] -> 26.
+    assert picks == [14, 26]
+    assert all(b - a > 5 for a, b in itertools.pairwise(picks))
+
+
+def test_select_events_ignores_sessions_missing_from_trading_index():
+    idx = _index(60)
+    sent = sent_frame(idx, {10: (0.9, 3), 20: (0.5, 2)})
+    sent.index = pd.DatetimeIndex([idx[10], pd.Timestamp("2023-02-04")])  # a Saturday
+
+    picks = select_events(sent, idx)
+
+    assert [idx.get_loc(p) for p in picks] == [10]
