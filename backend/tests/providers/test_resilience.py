@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,14 +20,15 @@ from app.providers.errors import (
 from app.providers.models import (
     Bar,
     CorporateEvent,
+    Exchange,
     Interval,
     NewsItem,
     NewsQuery,
     Quote,
     SymbolMatch,
 )
-from app.providers.quota import QuotaDecision, QuotaSnapshot
-from app.providers.resilience import ProviderGuard
+from app.providers.quota import Priority, QuotaDecision, QuotaSnapshot, scheduled_calls
+from app.providers.resilience import MAX_QUOTA_WAITS, ProviderGuard
 from app.repositories.quotas import QuotaLedger, install_indexes
 
 NOW = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
@@ -42,10 +44,12 @@ class FakeLedger:
         self._used = used
         self._minute_blocks = minute_blocks  # the next N calls hit the per-minute throttle
         self.errors: list[str] = []
+        self.priorities: list[Priority] = []  # one entry per attempt to consume
 
     async def try_consume(
-        self, provider: str, limits: ProviderLimits, now: datetime
+        self, provider: str, limits: ProviderLimits, now: datetime, priority: Priority
     ) -> QuotaDecision:
+        self.priorities.append(priority)
         if self._minute_blocks:
             self._minute_blocks -= 1
             retry_at = NOW + timedelta(seconds=20)
@@ -82,7 +86,9 @@ class Harness:
 
 
 def _harness(
-    ledger: FakeLedger | None = None, limits: dict[str, ProviderLimits] = LIMITS
+    ledger: FakeLedger | None = None,
+    limits: dict[str, ProviderLimits] = LIMITS,
+    warning_ratio: float = 0.8,
 ) -> Harness:
     sleeps: list[float] = []
     clock = Clock()
@@ -91,7 +97,7 @@ def _harness(
     async def fake_sleep(seconds: float) -> None:
         sleeps.append(seconds)
 
-    guard = ProviderGuard(fake, limits, 0.8, sleep=fake_sleep, clock=clock)
+    guard = ProviderGuard(fake, limits, warning_ratio, sleep=fake_sleep, clock=clock)
     return Harness(guard, fake, sleeps, clock)
 
 
@@ -259,12 +265,13 @@ async def test_statuses_level_follows_usage_ratio(used: int, level: str) -> None
 
 
 async def test_statuses_warning_message_is_human_readable() -> None:
-    h = _harness(FakeLedger(used=21), {"p": ProviderLimits(per_minute=5, per_day=25)})
+    h = _harness(FakeLedger(used=60), warning_ratio=0.5)
 
     [status] = await h.guard.statuses({"p": True})
 
     assert status.message == (
-        "Approaching free-tier limit: 21 of 25 calls used today; resets 00:00 UTC."
+        "Approaching free-tier limit: 60 of 100 calls used today; resets 00:00 UTC. "
+        "The last 20 calls are reserved for scheduled refreshes."
     )
 
 
@@ -341,6 +348,7 @@ class _Market:
 
 class _News:
     name = "p"
+    exchanges: frozenset[Exchange] = frozenset({"US"})
 
     def __init__(self) -> None:
         self.fetches = 0
@@ -439,7 +447,8 @@ async def test_wrap_news_waiting_gives_up_after_five_pauses() -> None:
     with pytest.raises(QuotaExhaustedError):
         await news.fetch(QUERY)
 
-    assert len(h.sleeps) == 5
+    assert len(h.sleeps) == MAX_QUOTA_WAITS
+    assert len(h.ledger.priorities) == MAX_QUOTA_WAITS + 1  # every pause is followed by a try
 
 
 async def test_wrap_news_waiting_does_not_wait_out_a_daily_quota() -> None:
@@ -451,3 +460,34 @@ async def test_wrap_news_waiting_does_not_wait_out_a_daily_quota() -> None:
 
     assert caught.value.window == "day"
     assert h.sleeps == []
+
+
+async def test_call_asks_the_ledger_as_interactive_unless_inside_scheduled_calls() -> None:
+    h = _harness()
+
+    await h.guard.call("p", _flaky("a"))
+    with scheduled_calls():
+        await h.guard.call("p", _flaky("b"))
+    await h.guard.call("p", _flaky("c"))
+
+    assert h.ledger.priorities == ["interactive", "scheduled", "interactive"]
+
+
+async def test_tasks_started_inside_scheduled_calls_inherit_the_priority() -> None:
+    h = _harness()
+
+    with scheduled_calls():
+        task = asyncio.create_task(h.guard.call("p", _flaky("a")))
+    await task
+
+    assert h.ledger.priorities == ["scheduled"]
+
+
+async def test_statuses_reserve_in_use_says_user_requests_are_paused() -> None:
+    h = _harness(FakeLedger(used=80))  # 80 of 100 is the interactive share
+
+    [status] = await h.guard.statuses({"p": True})
+
+    assert status.level == "warning"
+    assert "reserve" in status.message.lower()
+    assert "20" in status.message

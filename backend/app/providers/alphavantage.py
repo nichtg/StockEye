@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.providers.collect import collect_items
 from app.providers.errors import ProviderDataError, RateLimitedError
 from app.providers.http import get_json
-from app.providers.models import NewsItem, NewsQuery
+from app.providers.models import Exchange, NewsItem, NewsQuery
 
 URL = "https://www.alphavantage.co/query"
 _EASTERN = ZoneInfo("America/New_York")
@@ -26,14 +26,13 @@ class _Article(BaseModel):
 
 class AlphaVantageNews:
     name = "alphavantage"
+    exchanges: frozenset[Exchange] = frozenset({"US"})
 
     def __init__(self, client: httpx.AsyncClient, api_key: str) -> None:
         self._client = client
         self._key = api_key
 
     async def fetch(self, query: NewsQuery) -> list[NewsItem]:
-        if query.exchange == "SGX":
-            return []  # NEWS_SENTIMENT tickers are US-listed only
         params = {
             "function": "NEWS_SENTIMENT",
             "tickers": query.symbol,

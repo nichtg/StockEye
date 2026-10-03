@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from bson import ObjectId
@@ -7,6 +7,8 @@ from app.db import Database
 from app.jobs.ingest import refresh_exchange
 from app.jobs.scheduler import build_scheduler
 from app.providers.errors import TransientProviderError
+from app.providers.models import Bar, Interval
+from app.providers.quota import current_priority
 from app.repositories.cache import CacheRepository
 from app.repositories.watchlists import WatchlistsRepository
 from app.services.container import Services
@@ -93,6 +95,27 @@ async def test_refresh_job_only_touches_symbols_of_its_exchange_and_counts_failu
     assert await services.news.progress("AAPL") is not None
     assert (await services.news.progress("AAPL")).months_done == 24
     assert (await services.news.progress("D05.SI")).months_done == 0  # other exchange untouched
+
+
+async def test_refresh_job_makes_its_vendor_calls_as_scheduled_work(
+    services: Services, db: Database, provider: FakeMarketData
+) -> None:
+    await WatchlistsRepository(db).add(ObjectId(), "AAPL", 50)
+    seen: list[str] = []
+    real_bars = provider.bars
+
+    async def spying_bars(
+        symbol: str, interval: Interval, start: datetime, end: datetime
+    ) -> list[Bar]:
+        seen.append(current_priority())
+        return await real_bars(symbol, interval, start, end)
+
+    provider.bars = spying_bars  # type: ignore[method-assign]  # test spy
+
+    await refresh_exchange(services, db, "US")
+    await services.market.daily_history("MSFT")  # a user-driven call afterwards
+
+    assert seen == ["scheduled", "interactive"]
 
 
 async def test_scheduler_has_one_weekday_job_per_exchange(services: Services, db: Database) -> None:

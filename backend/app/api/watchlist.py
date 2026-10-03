@@ -2,10 +2,11 @@
 
 import re
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.api.deps import DbDep, UserDep
+from app.api.limits import OVERVIEW, limited
 from app.repositories.watchlists import WatchlistFullError, WatchlistsRepository
 from app.services.container import ServicesDep
 from app.services.errors import AppError
@@ -33,7 +34,7 @@ async def get_watchlist(user: UserDep, db: DbDep) -> WatchlistOut:
     return WatchlistOut(symbols=await WatchlistsRepository(db).get(user.id))
 
 
-@router.get("/watchlist/overview")
+@router.get("/watchlist/overview", dependencies=[Depends(limited(OVERVIEW))])
 async def overview(user: UserDep, db: DbDep, services: ServicesDep) -> list[OverviewRow]:
     """One summary row per watchlisted symbol; a failing symbol gets an "unavailable" row."""
     symbols = await WatchlistsRepository(db).get(user.id)
@@ -41,10 +42,13 @@ async def overview(user: UserDep, db: DbDep, services: ServicesDep) -> list[Over
 
 
 @router.put("/watchlist/{symbol}")
-async def add_symbol(symbol: str, user: UserDep, db: DbDep) -> WatchlistOut:
+async def add_symbol(symbol: str, user: UserDep, db: DbDep, services: ServicesDep) -> WatchlistOut:
+    """Add a stock the vendor knows (looked up cache-first, so repeats cost nothing)."""
+    wanted = _normalise(symbol)
+    await services.market.quote(wanted)  # unknown symbol: 404, nothing is saved
     repo = WatchlistsRepository(db)
     try:
-        await repo.add(user.id, _normalise(symbol), MAX_SYMBOLS)
+        await repo.add(user.id, wanted, MAX_SYMBOLS)
     except WatchlistFullError as exc:
         raise AppError(
             409, "conflict", f"Your watchlist is full ({MAX_SYMBOLS} symbols maximum)."

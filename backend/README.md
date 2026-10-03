@@ -10,6 +10,12 @@ uv sync                      # installs runtime and dev dependencies into .venv
 cp .env.example .env         # then edit; see the comments in the file
 ```
 
+`STOCKEYE_JWT_SECRET` has no default and the API will not start without it (outside `STOCKEYE_ENVIRONMENT=test`). It must be at least 32 characters and not a placeholder such as `replace-me...`, `changeme` or `secret`:
+
+```bash
+uv run python -c "import secrets; print(secrets.token_urlsafe(48))"   # paste into .env
+```
+
 The FinBERT sentiment model is not committed. Fetch it once with `uv run python scripts/download_finbert.py` (this script is delivered by a separate task and may not exist yet on your branch).
 
 ## MongoDB
@@ -30,7 +36,7 @@ Registration only ever creates regular users. Create an admin from the command l
 uv run python -m app.cli create-admin --email you@example.com
 ```
 
-The password is read from `STOCKEYE_ADMIN_PASSWORD` if set, otherwise you are prompted. It must follow the password policy (12-128 characters, not blank, not your email). If the email already exists, that user is promoted to admin.
+The password is read from `STOCKEYE_ADMIN_PASSWORD` if set, otherwise you are prompted. It must follow the password policy (12-128 characters, not blank, not your email, not one of the 10,000 most common passwords). If the email already exists, that user is promoted to admin.
 
 ## Run the API
 
@@ -58,3 +64,9 @@ uv run ruff format --check app tests
 uv run mypy app
 uv run lint-imports          # architecture contracts (layering, admin cannot reach watchlists)
 ```
+
+## Docker Compose
+
+`docker-compose.yml` at the repository root runs MongoDB, the API and the web proxy. It refuses to start unless these are set (in the shell or a `.env` file next to it): `STOCKEYE_JWT_SECRET`, `MONGO_ROOT_USERNAME` and `MONGO_ROOT_PASSWORD` (a URL-safe password, because it goes into the connection string).
+
+The API only believes `X-Forwarded-For` from the addresses in `FORWARDED_ALLOW_IPS` (uvicorn's `--forwarded-allow-ips`). The compose file pins the stack's network to `172.28.0.0/16` and passes the same range, so the nginx in `web` is the one trusted proxy and the per-IP rate limits see real client addresses. If you run the API behind a different proxy, set `FORWARDED_ALLOW_IPS` to that proxy's address and never to `*`. In `prod` the API also serves no `/docs` or `/openapi.json`.

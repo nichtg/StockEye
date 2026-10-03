@@ -11,9 +11,11 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
+from bson import ObjectId
 
 from app.db import Database
 from app.repositories.cache import CacheRepository
+from app.repositories.ingest_budget import IngestBudget
 from app.services import compute
 from app.services.calendars import session_calendar, spec_for
 from app.services.charts import INDICATORS, RANGES
@@ -36,6 +38,7 @@ TECHNICAL_TTL = timedelta(minutes=15)
 MACRO_TTL = timedelta(hours=1)
 NEWS_WINDOW_DAYS = 730  # two years of news
 MIN_HISTORY_BARS = 30
+NEW_SYMBOL_LIMIT_REASON = "Daily limit for analysing new stocks reached; try again tomorrow."
 
 
 def _utc_now() -> datetime:
@@ -81,8 +84,11 @@ class AnalysisService:
         market: MarketDataService,
         news: NewsService,
         clock: Callable[[], datetime] = _utc_now,
+        *,
+        max_new_symbols_per_user_per_day: int,
     ) -> None:
         self._cache = CacheRepository(db)
+        self._budget = IngestBudget(db, max_new_symbols_per_user_per_day)
         self._market = market
         self._news = news
         self._clock = clock
@@ -119,11 +125,13 @@ class AnalysisService:
 
     # --- macro -----------------------------------------------------------------------------
 
-    async def macro(self, symbol: str) -> MacroResponse:
+    async def macro(self, symbol: str, user_id: ObjectId) -> MacroResponse:
         """News-sentiment event study. Starts background news ingestion when needed.
 
         Returns whatever can be computed now plus ingestion progress, so the UI can poll. Only a
-        complete, fully healthy result is cached (1 hour).
+        complete, fully healthy result is cached (1 hour). Starting ingestion for a symbol nobody
+        has analysed yet counts against ``user_id``'s daily budget; past it the report is built
+        without news and says why.
         """
         now = self._clock()
         key = macro_cache_key(symbol)
@@ -142,8 +150,16 @@ class AnalysisService:
             self._benchmark(symbol),
             self._market.standard_events(symbol),
         )
-        progress = await self._news.ensure_ingested(symbol, name)
+        admitted = await self._news.has_history(symbol) or await self._budget.try_spend(
+            user_id, symbol, now
+        )
+        if admitted:
+            progress = await self._news.ensure_ingested(symbol, name)
+        else:
+            progress = await self._news.progress(symbol)
         articles, news_status = await self._news.scored_articles(symbol, news_start, now)
+        if not admitted:
+            news_status = DataStatus(state="unavailable", reason=NEW_SYMBOL_LIMIT_REASON)
         report: MacroReportOut | None = None
         if bench is not None:
             cal = session_calendar(symbol, news_start.date(), today + timedelta(days=14))

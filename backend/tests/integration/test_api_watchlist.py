@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from tests.integration.conftest import ClientFactory, register
+from tests.services.fakes import FakeMarketData
 
 pytestmark = pytest.mark.integration
 
@@ -101,3 +102,37 @@ async def test_watchlist_is_private_per_user(new_client: ClientFactory) -> None:
     await alice.put("/api/watchlist/AAPL")
 
     assert (await bob.get("/api/watchlist")).json() == {"symbols": []}
+
+
+async def test_watchlist_add_unknown_symbol_returns_404_and_saves_nothing(
+    client: httpx.AsyncClient,
+) -> None:
+    await register(client, "alice@example.com")
+
+    resp = await client.put("/api/watchlist/ZZZZ")
+
+    assert resp.status_code == 404
+    assert resp.json()["error"]["message"] == "We couldn't find that stock."
+    assert (await client.get("/api/watchlist")).json() == {"symbols": []}
+
+
+async def test_watchlist_add_repeated_unknown_symbol_costs_no_vendor_call(
+    client: httpx.AsyncClient, provider: FakeMarketData
+) -> None:
+    await register(client, "alice@example.com")
+
+    for _ in range(3):
+        assert (await client.put("/api/watchlist/ZZZZ")).status_code == 404
+
+    assert provider.calls["quote"] == 1  # the not-found answer is remembered for 6 hours
+
+
+async def test_watchlist_add_known_symbol_resolves_it_cache_first(
+    client: httpx.AsyncClient, provider: FakeMarketData
+) -> None:
+    await register(client, "alice@example.com")
+
+    await client.put("/api/watchlist/AAPL")
+    await client.put("/api/watchlist/AAPL")
+
+    assert provider.calls["quote"] == 1

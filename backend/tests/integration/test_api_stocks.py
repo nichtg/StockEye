@@ -1,69 +1,19 @@
-from collections.abc import AsyncIterator
 from datetime import timedelta
 
 import httpx
 import pytest
-from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 
-from app.config import Settings
 from app.db import Database
-from app.main import create_app
 from app.providers.errors import RateLimitedError, TransientProviderError
-from app.providers.resilience import ProviderGuard
-from app.repositories.quotas import QuotaLedger
-from app.services.analysis import AnalysisService
-from app.services.container import Services
-from app.services.market_data import MarketDataService
-from app.services.news import NewsService
 from tests.integration.conftest import ClientFactory, login, make_admin, register
 from tests.services.fakes import (
     CLOSED_NOW,
     FakeClock,
     FakeMarketData,
-    FakeNews,
-    FakeScorer,
 )
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture
-def clock() -> FakeClock:
-    return FakeClock()
-
-
-@pytest.fixture
-def provider(clock: FakeClock) -> FakeMarketData:
-    return FakeMarketData(clock)
-
-
-@pytest.fixture
-def news_provider() -> FakeNews:
-    return FakeNews()
-
-
-@pytest.fixture
-async def app(
-    settings: Settings,
-    db: Database,
-    clock: FakeClock,
-    provider: FakeMarketData,
-    news_provider: FakeNews,
-) -> AsyncIterator[FastAPI]:
-    """The real app, with its services built around fake vendors."""
-
-    async def factory(cfg: Settings, database: Database) -> Services:
-        guard = ProviderGuard(
-            QuotaLedger(database), cfg.provider_limits, cfg.quota_warning_ratio, clock=clock
-        )
-        market = MarketDataService(database, provider, clock)
-        news = NewsService(database, news_provider, [news_provider], FakeScorer(), clock=clock)
-        return Services(market, news, AnalysisService(database, market, news, clock), guard)
-
-    application = create_app(settings, services_factory=factory)
-    async with LifespanManager(application):
-        yield application
 
 
 @pytest.fixture
@@ -153,7 +103,7 @@ async def test_unknown_symbol_returns_404_envelope(user: httpx.AsyncClient) -> N
     assert resp.status_code == 404
     error = resp.json()["error"]
     assert error["code"] == "not_found"
-    assert "ZZZZ" in error["message"]
+    assert error["message"] == "We couldn't find that stock."
 
 
 async def test_prices_unavailable_with_empty_cache_returns_503_not_500(
@@ -200,20 +150,21 @@ async def test_macro_reports_ingestion_progress_then_completes(
 
 
 async def test_watchlist_overview_one_failing_symbol_does_not_fail_the_list(
-    user: httpx.AsyncClient,
+    user: httpx.AsyncClient, provider: FakeMarketData
 ) -> None:
-    for symbol in ("AAPL", "ZZZZ", "D05.SI"):
+    for symbol in ("AAPL", "MSFT", "D05.SI"):
         assert (await user.put(f"/api/watchlist/{symbol}")).status_code == 200
+    provider.fail_symbols["MSFT"] = TransientProviderError("yahoo", "down")
 
     resp = await user.get("/api/watchlist/overview")
 
     assert resp.status_code == 200
     rows = {r["symbol"]: r for r in resp.json()}
-    assert set(rows) == {"AAPL", "ZZZZ", "D05.SI"}
+    assert set(rows) == {"AAPL", "MSFT", "D05.SI"}
     assert rows["AAPL"]["status"] == "ok"
     assert len(rows["AAPL"]["sparkline"]) == 20
-    assert rows["ZZZZ"]["status"] == "unavailable"
-    assert rows["ZZZZ"]["last_price"] is None
+    assert rows["MSFT"]["status"] == "unavailable"
+    assert rows["MSFT"]["last_price"] is None
     assert rows["D05.SI"]["exchange"] == "SGX"
 
 

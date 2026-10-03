@@ -115,6 +115,10 @@ An independent audit (by a separate reviewer model) checked all of the above for
   - An import-linter contract forbids the admin module from importing the watchlist modules.
   - Integration tests assert both.
 - Admins cannot demote, disable or delete themselves or the last admin. The first admin is created only through the CLI (`uv run python -m app.cli create-admin`).
+- **Accepted trade-off: 15-minute access tokens.** A stolen access JWT cannot be revoked by itself and works until it expires, at most 15 minutes. The API re-reads the user on every request, so disabling a user or changing a role still applies immediately, and a lockout deliberately does not end sessions. A shorter TTL would only add refresh traffic, so it stays at 15 minutes.
+- Passwords from the 10,000 most common list (SecLists, MIT) are rejected. Hashing and verifying run off the event loop, and failed-login attempts are reserved atomically, so concurrent guessing cannot exceed the cap.
+- Secrets never reach logs: `httpx`/`httpcore` are quiet, every log line is scrubbed of `token=`/`apikey=` values, and Finnhub's key travels in a header. The JWT secret has no default and must be strong outside tests.
+- The API trusts `X-Forwarded-For` only from the compose subnet, nginx overwrites it with the real peer address and rate-limits `/api/auth/`, and the SPA is served with a Content-Security-Policy. MongoDB requires a login in compose, the FinBERT download is pinned to a commit and checksummed, and CI audits Python and npm dependencies.
 
 ## 5. Code-quality process
 - **Implementation.** Each clearly scoped module was built by a focused implementer agent (Sonnet 5.5) from a written brief, then reviewed.

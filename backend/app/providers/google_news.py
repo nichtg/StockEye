@@ -11,7 +11,7 @@ import httpx
 
 from app.providers.collect import collect_items
 from app.providers.http import get_text
-from app.providers.models import NewsItem, NewsQuery
+from app.providers.models import Exchange, NewsItem, NewsQuery
 
 URL = "https://news.google.com/rss/search"
 _TAGS = re.compile(r"<[^>]+>")
@@ -50,6 +50,7 @@ def _split_title(title: str) -> tuple[str, str] | None:
 
 class GoogleNewsRss:
     name = "google_news"
+    exchanges: frozenset[Exchange] = frozenset({"US", "SGX"})
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client

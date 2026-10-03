@@ -5,7 +5,7 @@ admins manage accounts, not what users watch.
 """
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -13,7 +13,7 @@ from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import AccountsDep, AdminDep
-from app.repositories.users import UserRecord
+from app.repositories.users import Role, Status, UserRecord
 from app.services.accounts import AppError
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -22,8 +22,8 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 class AdminUserOut(BaseModel):
     id: str
     email: str
-    role: str
-    status: str
+    role: Role
+    status: Status
     created_at: datetime
     last_login_at: datetime | None
 
@@ -36,8 +36,8 @@ class AdminUserPage(BaseModel):
 class UserPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["active", "disabled"] | None = None
-    role: Literal["user", "admin"] | None = None
+    status: Status | None = None
+    role: Role | None = None
 
 
 def _out(user: UserRecord) -> AdminUserOut:
@@ -62,7 +62,7 @@ def _object_id(raw: str) -> ObjectId:
 async def list_users(
     _admin: AdminDep,
     accounts: AccountsDep,
-    query: str | None = None,
+    query: Annotated[str | None, Query(max_length=100)] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> AdminUserPage:

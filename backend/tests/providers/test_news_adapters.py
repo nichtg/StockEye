@@ -1,5 +1,6 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
+from functools import partial
 from itertools import pairwise
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import respx
 
 from app.config import Settings
 from app.providers.alphavantage import AlphaVantageNews
+from app.providers.base import NewsProvider
 from app.providers.errors import ProviderDataError, ProviderError, RateLimitedError
 from app.providers.finnhub import FinnhubNews
 from app.providers.google_news import GoogleNewsRss, monthly_windows
@@ -68,14 +70,20 @@ async def test_finnhub_parses_articles_and_skips_bad_items(client: httpx.AsyncCl
     assert (params["symbol"], params["from"], params["to"]) == ("AAPL", "2026-09-01", "2026-10-01")
 
 
-@respx.mock
-async def test_finnhub_singapore_symbol_returns_empty_without_calling(
-    client: httpx.AsyncClient,
+@pytest.mark.parametrize(
+    ("make", "expected"),
+    [
+        (partial(FinnhubNews, api_key="K"), {"US"}),
+        (partial(AlphaVantageNews, api_key="K"), {"US"}),
+        (partial(MarketauxNews, api_key="K"), {"US", "SGX"}),
+        (GoogleNewsRss, {"US", "SGX"}),
+    ],
+    ids=["finnhub", "alphavantage", "marketaux", "google_news"],
+)
+def test_news_adapter_declares_the_exchanges_it_covers(
+    client: httpx.AsyncClient, make: Callable[[httpx.AsyncClient], NewsProvider], expected: set[str]
 ) -> None:
-    route = respx.get("https://finnhub.io/api/v1/company-news")
-
-    assert await FinnhubNews(client, "KEY").fetch(_query("D05.SI", "DBS")) == []
-    assert not route.called
+    assert make(client).exchanges == expected
 
 
 @respx.mock

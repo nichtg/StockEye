@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from app.db import Database
 from app.logging_setup import get_logger
 from app.providers.models import Exchange
+from app.providers.quota import scheduled_calls
 from app.repositories.watchlists import WatchlistsRepository
 from app.services.calendars import exchange_for
 from app.services.container import Services
@@ -23,8 +24,14 @@ class RefreshSummary:
 async def refresh_exchange(services: Services, db: Database, exchange: Exchange) -> RefreshSummary:
     """Refresh daily bars, events and news for the distinct watchlisted symbols of ``exchange``.
 
-    Never raises: a failing symbol is logged and counted, and the rest carry on.
+    Never raises: a failing symbol is logged and counted, and the rest carry on. Its vendor calls
+    (and those of the ingestion tasks it starts) draw on the quota reserved for scheduled work.
     """
+    with scheduled_calls():
+        return await _refresh_all(services, db, exchange)
+
+
+async def _refresh_all(services: Services, db: Database, exchange: Exchange) -> RefreshSummary:
     try:
         everything = await WatchlistsRepository(db).all_symbols()
     except Exception:

@@ -2,12 +2,17 @@ from datetime import timedelta
 
 import pytest
 
+from app.config import ProviderLimits
 from app.db import Database
 from app.providers.errors import RateLimitedError
 from app.providers.models import NewsItem
+from app.providers.resilience import ProviderGuard
 from app.repositories.news import ARTICLES, STATE, NewsRepository
+from app.repositories.quotas import QuotaLedger
+from app.repositories.quotas import install_indexes as quota_indexes
 from app.services.container import Services
-from tests.services.fakes import CLOSED_NOW, FakeClock, FakeNews, FakeScorer
+from app.services.news import INGEST_FAILED, NewsService
+from tests.services.fakes import CLOSED_NOW, NAMES, FakeClock, FakeNews, FakeScorer
 
 pytestmark = pytest.mark.integration
 
@@ -196,7 +201,7 @@ async def test_provider_failure_everywhere_never_raises_and_records_error(
     state = await db[STATE].find_one({"symbol": "AAPL"})
     assert state is not None
     assert state["in_progress_since"] is None
-    assert "rate limited" in state["last_error"]
+    assert state["last_error"] == INGEST_FAILED  # vendor details stay in the logs
 
 
 async def test_minute_quota_skips_the_window_and_it_is_retried_on_next_run(
@@ -224,5 +229,77 @@ async def test_day_quota_stops_run_immediately_and_records_error(
     assert len(news_provider.queries) == 1  # no hammering of the remaining 23 windows
     state = await db[STATE].find_one({"symbol": "AAPL"})
     assert state is not None
-    assert "day quota exhausted" in state["last_error"]
+    assert state["last_error"] == INGEST_FAILED
     assert state["in_progress_since"] is None
+
+
+async def test_incremental_skips_providers_that_do_not_cover_the_exchange_and_spends_no_quota(
+    db: Database, clock: FakeClock, scorer: FakeScorer
+) -> None:
+    ledger = QuotaLedger(db)
+    await quota_indexes(db)
+    limits = {"google_news": ProviderLimits(per_minute=100, per_day=1000)} | {
+        "alphavantage": ProviderLimits(per_minute=5, per_day=25)
+    }
+    guard = ProviderGuard(ledger, limits, 0.8, clock=clock)
+    us_only = FakeNews("alphavantage", exchanges=frozenset({"US"}))
+    google = FakeNews()
+    news = NewsService(
+        db,
+        guard.wrap_news(google, wait_minute_quota=True),
+        [guard.wrap_news(us_only, wait_minute_quota=True), guard.wrap_news(google)],
+        scorer,
+        clock=clock,
+    )
+
+    await news.ensure_ingested("D05.SI", "DBS Group Holdings Ltd")
+    await news.wait("D05.SI")
+
+    assert us_only.queries == []
+    assert (
+        await ledger.snapshot("alphavantage", limits["alphavantage"], CLOSED_NOW)
+    ).used_today == 0
+    assert google.queries  # the covering provider still ran
+
+
+async def test_incremental_still_uses_a_provider_that_covers_the_exchange(
+    db: Database, clock: FakeClock, scorer: FakeScorer
+) -> None:
+    us_only = FakeNews("finnhub", exchanges=frozenset({"US"}))
+    google = FakeNews()
+    news = NewsService(db, google, [us_only, google], scorer, clock=clock)
+
+    await news.ensure_ingested("AAPL", "Apple Inc.")
+    await news.wait("AAPL")
+
+    assert len(us_only.queries) == 1
+
+
+async def test_ingestions_run_at_most_max_concurrent_at_a_time(
+    db: Database, clock: FakeClock, scorer: FakeScorer
+) -> None:
+    google = FakeNews()
+    news = NewsService(db, google, [google], scorer, max_concurrent=1, clock=clock)
+
+    for symbol in ("AAPL", "MSFT", "SPY"):
+        await news.ensure_ingested(symbol, NAMES[symbol])
+    await news.wait()
+
+    assert google.max_active == 1
+    for symbol in ("AAPL", "MSFT", "SPY"):
+        assert (await news.progress(symbol)).months_done == 24  # queued, not dropped
+
+
+async def test_finished_ingestions_are_forgotten(services: Services) -> None:
+    await _ingest(services)
+
+    assert not services.news._tasks  # a long-lived service must not keep every task it ever ran
+    assert not (await services.news.progress("AAPL")).in_progress
+
+
+async def test_has_history_is_false_until_ingestion_starts_then_true(services: Services) -> None:
+    assert not await services.news.has_history("AAPL")
+
+    await _ingest(services)
+
+    assert await services.news.has_history("AAPL")

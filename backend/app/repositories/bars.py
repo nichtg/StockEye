@@ -58,14 +58,18 @@ class BarsRepository:
         """Replace stored bars in [start, end] with ``bars``, record the fetch, return its state.
 
         Insert first, then delete the old in-range bars: a crash in between leaves duplicates
-        (which readers de-duplicate) rather than a hole in the saved history.
+        (which readers de-duplicate) rather than a hole in the saved history. With no ``bars``
+        nothing is deleted.
         """
-        series = {"meta.symbol": symbol, "meta.interval": interval}
-        in_range = {**series, "ts": {"$gte": start, "$lte": end}}
-        # Only bars that existed before this insert are deleted, so two overlapping refreshes of
-        # one series can never delete each other's fresh bars.
-        old_ids = [doc["_id"] async for doc in self._bars.find(in_range, {"_id": 1})]
-        if bars:
+        if bars:  # an empty answer is not evidence that the range is bare, so it deletes nothing
+            in_range = {
+                "meta.symbol": symbol,
+                "meta.interval": interval,
+                "ts": {"$gte": start, "$lte": end},
+            }
+            # Only bars that existed before this insert are deleted, so two overlapping refreshes
+            # of one series can never delete each other's fresh bars.
+            old_ids = [doc["_id"] async for doc in self._bars.find(in_range, {"_id": 1})]
             await self._bars.insert_many(
                 [
                     {"ts": b.ts, "meta": {"symbol": symbol, "interval": interval}}
@@ -73,7 +77,7 @@ class BarsRepository:
                     for b in bars
                 ]
             )
-        await self._bars.delete_many({**in_range, "_id": {"$in": old_ids}})
+            await self._bars.delete_many({**in_range, "_id": {"$in": old_ids}})
         # One atomic upsert: coverage only ever widens, and the newest bar only moves forward.
         newest = {"$max": {"last_bar_at": max(b.ts for b in bars)}} if bars else {}
         doc = await self._state.find_one_and_update(

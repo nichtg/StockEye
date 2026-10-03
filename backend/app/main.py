@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-from app.api import admin, auth, health, me, providers_status, stocks, watchlist
+from app.api import admin, auth, health, limits, me, providers_status, stocks, watchlist
 from app.api.errors import install_error_handlers
 from app.api.middleware import CsrfMiddleware, RequestContextMiddleware
 from app.config import Settings, get_settings
@@ -20,6 +20,7 @@ from app.repositories import (
     bars,
     cache,
     events,
+    ingest_budget,
     news,
     quotas,
     refresh_tokens,
@@ -46,6 +47,7 @@ INDEX_INSTALLERS: list[IndexInstaller] = [
     bars.install_indexes,
     events.install_indexes,
     news.install_indexes,
+    ingest_budget.install_indexes,
     cache.install_indexes,
 ]
 
@@ -65,7 +67,7 @@ def create_app(
         db = client[settings.mongodb_db]
         app.state.db = db
         app.state.settings = settings
-        auth.limiter.reset()  # fresh counters per app instance (matters for tests)
+        limits.limiter.reset()  # fresh counters per app instance (matters for tests)
         try:
             await ensure_indexes(db, INDEX_INSTALLERS)
             services = await services_factory(settings, db)
@@ -85,8 +87,16 @@ def create_app(
             await services.aclose()
             await client.close()
 
-    app = FastAPI(title="StockEye API", lifespan=lifespan)
-    app.state.limiter = auth.limiter
+    # No interactive docs or schema in prod: they are a free map of the API for attackers.
+    hide_docs = settings.environment == "prod"
+    app = FastAPI(
+        title="StockEye API",
+        lifespan=lifespan,
+        docs_url=None if hide_docs else "/docs",
+        redoc_url=None if hide_docs else "/redoc",
+        openapi_url=None if hide_docs else "/openapi.json",
+    )
+    app.state.limiter = limits.limiter
     install_error_handlers(app)
     for router in ROUTERS:
         app.include_router(router, prefix="/api")

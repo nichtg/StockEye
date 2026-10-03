@@ -185,3 +185,13 @@ async def test_demoted_admin_loses_access_immediately(
     await admin.patch(f"/api/admin/users/{second.id}", json={"role": "user"})
 
     assert (await second_client.get("/api/admin/users")).status_code == 403
+
+
+async def test_admin_user_search_query_longer_than_100_chars_returns_422(
+    new_client: ClientFactory, db: Database
+) -> None:
+    admin = await _admin_client(new_client, db)
+
+    resp = await admin.get("/api/admin/users", params={"query": "a" * 101})
+
+    assert resp.status_code == 422

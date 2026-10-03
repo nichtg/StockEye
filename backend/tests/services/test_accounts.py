@@ -1,10 +1,12 @@
 """AccountService behaviour through its public interface, against a real MongoDB."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from bson import ObjectId
 
+from app.auth import passwords
 from app.config import Settings
 from app.db import Database, ensure_indexes
 from app.main import INDEX_INSTALLERS
@@ -84,7 +86,7 @@ async def test_authenticate_locks_after_max_failures_even_for_the_right_password
 
     locked = await _raises(accounts.authenticate("alice@example.com", PASSWORD))
 
-    assert (locked.status, locked.code) == (429, "account_locked")
+    assert (locked.status, locked.code) == (401, "invalid_credentials")
 
 
 async def test_authenticate_after_lockout_expires_succeeds_and_resets_counters(
@@ -243,3 +245,159 @@ async def test_create_or_promote_admin_rejects_weak_password(accounts: AccountSe
     error = await _raises(accounts.create_or_promote_admin("root@example.com", "short"))
 
     assert error.status == 422
+
+
+# --- Eligibility, lockout and race conditions ---------------------------------------------------
+
+
+async def test_principal_valid_token_returns_the_current_user(accounts: AccountService) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    tokens = await accounts.start_session(user)
+
+    principal = await accounts.principal(tokens.access)
+
+    assert (principal.id, principal.email, principal.role) == (user.id, user.email, "user")
+
+
+@pytest.mark.parametrize("token", [None, "", "garbage"])
+async def test_principal_missing_or_invalid_token_raises_401(
+    accounts: AccountService, token: str | None
+) -> None:
+    error = await _raises(accounts.principal(token))
+
+    assert (error.status, error.code) == (401, "unauthenticated")
+
+
+async def test_principal_disabled_user_raises_401(accounts: AccountService, db: Database) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    tokens = await accounts.start_session(user)
+    await db.users.update_one({}, {"$set": {"status": "disabled"}})
+
+    error = await _raises(accounts.principal(tokens.access))
+
+    assert error.status == 401
+
+
+async def test_principal_deleted_user_raises_401(accounts: AccountService, db: Database) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    tokens = await accounts.start_session(user)
+    await db.users.delete_many({})
+
+    assert (await _raises(accounts.principal(tokens.access))).status == 401
+
+
+async def test_lockout_does_not_end_an_existing_session_or_refresh(
+    accounts: AccountService, settings: Settings
+) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    tokens = await accounts.start_session(user)
+    for _ in range(settings.login_max_failures):  # an attacker locks the account
+        await _raises(accounts.authenticate("alice@example.com", WRONG))
+
+    principal = await accounts.principal(tokens.access)
+    rotated, _ = await accounts.rotate(tokens.refresh)
+
+    assert principal.id == user.id
+    assert rotated.access
+
+
+async def test_locked_login_is_indistinguishable_from_unknown_email_and_pays_the_same_cpu(
+    accounts: AccountService, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await accounts.register("alice@example.com", PASSWORD)
+    for _ in range(settings.login_max_failures):
+        await _raises(accounts.authenticate("alice@example.com", WRONG))
+    dummy_runs: list[str] = []
+    real_dummy = passwords.verify_dummy
+
+    async def counting_dummy(password: str) -> None:
+        dummy_runs.append(password)
+        await real_dummy(password)
+
+    monkeypatch.setattr(passwords, "verify_dummy", counting_dummy)
+
+    locked = await _raises(accounts.authenticate("alice@example.com", PASSWORD))
+    unknown = await _raises(accounts.authenticate("nobody@example.com", PASSWORD))
+
+    assert (locked.status, locked.code, locked.message) == (
+        unknown.status,
+        unknown.code,
+        unknown.message,
+    )
+    assert dummy_runs == [PASSWORD, PASSWORD]
+
+
+async def test_concurrent_wrong_passwords_never_exceed_the_failure_cap(
+    accounts: AccountService, settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alice = await accounts.register("alice@example.com", PASSWORD)
+    verifications = 0
+    real_verify = passwords.verify_password
+
+    async def counting_verify(password: str, password_hash: str) -> bool:
+        nonlocal verifications
+        verifications += password_hash == alice.password_hash  # not the dummy's verifications
+        return await real_verify(password, password_hash)
+
+    monkeypatch.setattr(passwords, "verify_password", counting_verify)
+
+    results = await asyncio.gather(
+        *(accounts.authenticate("alice@example.com", WRONG) for _ in range(25)),
+        return_exceptions=True,
+    )
+
+    doc = await db.users.find_one({"email": "alice@example.com"})
+    assert doc is not None
+    assert all(isinstance(r, AppError) and r.status == 401 for r in results)
+    assert doc["failed_logins"] == settings.login_max_failures
+    assert doc["locked_until"] is not None
+    # Only reserved attempts get to run argon2 verify; the other 20 were turned away.
+    assert verifications == settings.login_max_failures
+
+
+async def test_concurrent_demotions_of_two_admins_never_leave_zero(
+    accounts: AccountService, db: Database
+) -> None:
+    repo = UsersRepository(db)
+    first = await repo.create("a@example.com", "x", "admin")
+    second = await repo.create("b@example.com", "x", "admin")
+
+    await asyncio.gather(
+        accounts.update_user(first.id, second.id, None, "user"),
+        accounts.update_user(second.id, first.id, None, "user"),
+        return_exceptions=True,
+    )
+
+    assert await repo.count_active_admins() >= 1
+
+
+async def test_concurrent_disables_of_two_admins_never_leave_zero(
+    accounts: AccountService, db: Database
+) -> None:
+    repo = UsersRepository(db)
+    first = await repo.create("a@example.com", "x", "admin")
+    second = await repo.create("b@example.com", "x", "admin")
+
+    await asyncio.gather(
+        accounts.update_user(first.id, second.id, "disabled", None),
+        accounts.update_user(second.id, first.id, "disabled", None),
+        return_exceptions=True,
+    )
+
+    assert await repo.count_active_admins() >= 1
+
+
+async def test_concurrent_deletes_of_two_admins_never_leave_zero(
+    accounts: AccountService, db: Database
+) -> None:
+    repo = UsersRepository(db)
+    first = await repo.create("a@example.com", "x", "admin")
+    second = await repo.create("b@example.com", "x", "admin")
+
+    await asyncio.gather(
+        accounts.delete_user(first.id, second.id),
+        accounts.delete_user(second.id, first.id),
+        return_exceptions=True,
+    )
+
+    assert await repo.count_active_admins() >= 1

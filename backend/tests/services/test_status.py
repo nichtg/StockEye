@@ -70,3 +70,12 @@ def test_age_phrase_scales_units() -> None:
     assert age_phrase(NOW - timedelta(hours=1), NOW) == "60 minutes"
     assert age_phrase(NOW - timedelta(hours=1, minutes=40), NOW) == "1 hour"
     assert age_phrase(NOW - timedelta(days=3), NOW) == "3 days"
+
+
+def test_describe_failure_names_the_window_of_a_quota_block() -> None:
+    minute = QuotaExhaustedError("finnhub", "blocked", window="minute")
+    day = QuotaExhaustedError("finnhub", "blocked", window="day")
+
+    assert "per-minute limit" in describe_failure(minute)
+    assert "daily" not in describe_failure(minute)
+    assert "daily request allowance" in describe_failure(day)

@@ -3,10 +3,11 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query
+from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel
 
 from app.api.deps import UserDep
+from app.api.limits import MACRO, SEARCH, STOCK, limited
 from app.providers.models import Exchange, SymbolMatch
 from app.services.container import ServicesDep
 from app.services.reports import ChartData, MacroResponse, RangeKey, TechnicalReport
@@ -33,17 +34,16 @@ class StockOut(BaseModel):
     data_status: DataStatus
 
 
-@router.get("/search")
+@router.get("/search", dependencies=[Depends(limited(SEARCH))])
 async def search(
     _user: UserDep, services: ServicesDep, q: Annotated[str, Query(max_length=60)] = ""
 ) -> list[SymbolMatch]:
     return await services.market.search(q)
 
 
-@router.get("/{symbol}")
+@router.get("/{symbol}", dependencies=[Depends(limited(STOCK))])
 async def stock(symbol: SymbolPath, _user: UserDep, services: ServicesDep) -> StockOut:
     quote, status = await services.market.quote(symbol)
-    change = (quote.price / quote.previous_close - 1.0) * 100.0 if quote.previous_close else None
     return StockOut(
         symbol=quote.symbol,
         name=quote.name,
@@ -51,13 +51,13 @@ async def stock(symbol: SymbolPath, _user: UserDep, services: ServicesDep) -> St
         currency=quote.currency,
         price=quote.price,
         previous_close=quote.previous_close,
-        change_pct=change,
+        change_pct=quote.change_pct,
         as_of=quote.as_of,
         data_status=status,
     )
 
 
-@router.get("/{symbol}/chart")
+@router.get("/{symbol}/chart", dependencies=[Depends(limited(STOCK))])
 async def chart(
     symbol: SymbolPath,
     _user: UserDep,
@@ -71,11 +71,11 @@ async def chart(
     return await services.analysis.chart(symbol, range, names)
 
 
-@router.get("/{symbol}/technical")
+@router.get("/{symbol}/technical", dependencies=[Depends(limited(STOCK))])
 async def technical(symbol: SymbolPath, _user: UserDep, services: ServicesDep) -> TechnicalReport:
     return await services.analysis.technical(symbol)
 
 
-@router.get("/{symbol}/macro")
-async def macro(symbol: SymbolPath, _user: UserDep, services: ServicesDep) -> MacroResponse:
-    return await services.analysis.macro(symbol)
+@router.get("/{symbol}/macro", dependencies=[Depends(limited(MACRO))])
+async def macro(symbol: SymbolPath, user: UserDep, services: ServicesDep) -> MacroResponse:
+    return await services.analysis.macro(symbol, user.id)

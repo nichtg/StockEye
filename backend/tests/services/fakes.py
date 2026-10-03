@@ -1,23 +1,33 @@
 """In-memory stand-ins for the vendor seams, so service tests need no network."""
 
+import asyncio
 import zlib
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
+from app.config import Settings
+from app.db import Database
 from app.providers.errors import ProviderError, QuotaExhaustedError, SymbolNotFoundError
 from app.providers.models import (
     Bar,
     CorporateEvent,
+    Exchange,
     Interval,
     NewsItem,
     NewsQuery,
     Quote,
     SymbolMatch,
 )
+from app.providers.resilience import ProviderGuard
+from app.repositories.quotas import QuotaLedger
 from app.sentiment.scorer import SentimentScore, SentimentUnavailableError
+from app.services.analysis import AnalysisService
 from app.services.calendars import exchange_for, session_calendar
+from app.services.container import Services
+from app.services.market_data import MarketDataService
+from app.services.news import NewsService
 
 # Saturday: both exchanges closed, last completed session is Friday 2026-10-02.
 CLOSED_NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
@@ -48,13 +58,14 @@ class FakeMarketData:
 
     def __init__(self, clock: FakeClock, unknown: Sequence[str] = ("ZZZZ",)) -> None:
         self._clock = clock
-        self._unknown = set(unknown)
+        self.unknown = set(unknown)
         self.fail_with: ProviderError | None = None
         self.fail_symbols: dict[str, ProviderError] = {}
+        self.empty_bars = False  # answer bar requests with an empty list, like a vendor glitch
         self.calls: dict[str, int] = {"search": 0, "quote": 0, "bars": 0, "events": 0}
 
     def _check(self, symbol: str) -> None:
-        if symbol in self._unknown:
+        if symbol in self.unknown:
             raise SymbolNotFoundError(self.name, f"unknown symbol {symbol}")
         if symbol in self.fail_symbols:
             raise self.fail_symbols[symbol]
@@ -110,6 +121,8 @@ class FakeMarketData:
     ) -> list[Bar]:
         self.calls["bars"] += 1
         self._check(symbol)
+        if self.empty_bars:
+            return []
         today = self._clock().date()  # the in-progress session's bar is included, like Yahoo
         last_day = min(end.date(), today)
         daily = self._daily(symbol, start.date(), last_day)
@@ -144,16 +157,32 @@ class FakeMarketData:
 class FakeNews:
     """Several articles per window; some irrelevant, some duplicated across windows."""
 
-    def __init__(self, name: str = "google_news") -> None:
+    def __init__(
+        self,
+        name: str = "google_news",
+        exchanges: frozenset[Exchange] = frozenset({"US", "SGX"}),
+    ) -> None:
         self.name = name
+        self.exchanges = exchanges
         self.queries: list[NewsQuery] = []
         self.fail_windows: set[str] = set()  # "YYYY-MM" of the window start
         self.fail_with: ProviderError | None = None
         self.quota_hits = 0  # next N fetches raise QuotaExhaustedError
         self.quota_window = "minute"
+        self.active = 0  # fetches in flight right now, and the most there ever were
+        self.max_active = 0
 
     async def fetch(self, query: NewsQuery) -> list[NewsItem]:
         self.queries.append(query)
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(0)  # a real fetch yields to the loop; overlap shows in max_active
+            return self._answer(query)
+        finally:
+            self.active -= 1
+
+    def _answer(self, query: NewsQuery) -> list[NewsItem]:
         if self.fail_with is not None:
             raise self.fail_with
         if self.quota_hits:
@@ -216,3 +245,28 @@ class FakeScorer:
             positive, negative = value * 0.8, (1.0 - value) * 0.8
             out.append(SentimentScore(positive, negative, 1.0 - positive - negative))
         return out
+
+
+def build_fake_services(
+    db: Database,
+    settings: Settings,
+    *,
+    clock: FakeClock,
+    provider: FakeMarketData,
+    news_provider: FakeNews,
+    scorer: FakeScorer,
+) -> Services:
+    """Real services over the fake vendors. The guard only backs the admin status page."""
+    guard = ProviderGuard(
+        QuotaLedger(db), settings.provider_limits, settings.quota_warning_ratio, clock=clock
+    )
+    market = MarketDataService(db, provider, clock)
+    news = NewsService(db, news_provider, [news_provider], scorer, clock=clock)
+    analysis = AnalysisService(
+        db,
+        market,
+        news,
+        clock,
+        max_new_symbols_per_user_per_day=settings.max_new_symbols_per_user_per_day,
+    )
+    return Services(market, news, analysis, guard)

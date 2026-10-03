@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from app.providers.collect import collect_items
 from app.providers.errors import ProviderDataError
 from app.providers.http import get_json
-from app.providers.models import NewsItem, NewsQuery
+from app.providers.models import Exchange, NewsItem, NewsQuery
 
 URL = "https://finnhub.io/api/v1/company-news"
 
@@ -23,21 +23,26 @@ class _Article(BaseModel):
 
 class FinnhubNews:
     name = "finnhub"
+    exchanges: frozenset[Exchange] = frozenset({"US"})
 
     def __init__(self, client: httpx.AsyncClient, api_key: str) -> None:
         self._client = client
         self._key = api_key
 
     async def fetch(self, query: NewsQuery) -> list[NewsItem]:
-        if query.exchange == "SGX":
-            return []  # Finnhub's free tier covers US companies only
         params = {
             "symbol": query.symbol,
             "from": query.start.date().isoformat(),
             "to": query.end.date().isoformat(),
-            "token": self._key,
         }
-        payload = await get_json(self._client, URL, provider=self.name, params=params)
+        # Header, not ``?token=``: URLs end up in logs and proxies, headers do not.
+        payload = await get_json(
+            self._client,
+            URL,
+            provider=self.name,
+            params=params,
+            headers={"X-Finnhub-Token": self._key},
+        )
         if not isinstance(payload, list):
             raise ProviderDataError(self.name, "expected a list of articles")
         return collect_items(self.name, payload, self._to_item)

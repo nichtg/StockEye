@@ -8,7 +8,7 @@ from pydantic import BaseModel, ValidationError
 from app.providers.collect import collect_items
 from app.providers.errors import ProviderDataError
 from app.providers.http import get_json
-from app.providers.models import NewsItem, NewsQuery
+from app.providers.models import Exchange, NewsItem, NewsQuery
 
 URL = "https://api.marketaux.com/v1/news/all"
 
@@ -27,6 +27,7 @@ class _Response(BaseModel):
 
 class MarketauxNews:
     name = "marketaux"
+    exchanges: frozenset[Exchange] = frozenset({"US", "SGX"})
 
     def __init__(self, client: httpx.AsyncClient, api_key: str) -> None:
         self._client = client

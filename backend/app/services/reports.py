@@ -10,8 +10,9 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app.domain.macro.sentiment_stats import Bucket, RegimeLabel, Reliability
+from app.domain.macro.summary import Scope
 from app.domain.technical.outlook import Direction, Lean
-from app.providers.models import Interval
+from app.providers.models import EventKind, Interval
 from app.services.status import DataStatus
 
 RangeKey = Literal["1W", "1M", "6M", "1Y", "2Y"]
@@ -167,8 +168,8 @@ class MacroReportOut(BaseModel):
     headline_findings: list[FindingOut]
     primary_findings: list[FindingOut]
     secondary_findings: list[FindingOut]
-    primary_scope: Literal["all_events", "excluding_earnings"]
-    secondary_scope: Literal["all_events", "excluding_earnings"] | None
+    primary_scope: Scope
+    secondary_scope: Scope | None
     stats_all: MacroStatsOut
     stats_ex_earnings: MacroStatsOut
     regime: RegimeOut | None
@@ -210,7 +211,7 @@ class Candle(BaseModel):
 
 class Marker(BaseModel):
     time: str | int
-    kind: Literal["earnings", "dividend", "split", "pattern", "news"]
+    kind: EventKind | Literal["pattern", "news"]
     label: str
     bias: Lean | None = None
     pattern: str | None = None

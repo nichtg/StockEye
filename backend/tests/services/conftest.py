@@ -5,17 +5,13 @@ import pytest
 from app.config import Settings
 from app.db import Database, ensure_indexes
 from app.main import INDEX_INSTALLERS
-from app.providers.resilience import ProviderGuard
-from app.repositories.quotas import QuotaLedger
-from app.services.analysis import AnalysisService
 from app.services.container import Services
-from app.services.market_data import MarketDataService
-from app.services.news import NewsService
 from tests.services.fakes import (
     FakeClock,
     FakeMarketData,
     FakeNews,
     FakeScorer,
+    build_fake_services,
 )
 
 
@@ -50,10 +46,6 @@ async def services(
     scorer: FakeScorer,
 ) -> Services:
     await ensure_indexes(db, INDEX_INSTALLERS)
-    # The fake adapters are used unguarded; the guard only backs the admin status page.
-    guard = ProviderGuard(
-        QuotaLedger(db), settings.provider_limits, settings.quota_warning_ratio, clock=clock
+    return build_fake_services(
+        db, settings, clock=clock, provider=provider, news_provider=news_provider, scorer=scorer
     )
-    market = MarketDataService(db, provider, clock)
-    news = NewsService(db, news_provider, [news_provider], scorer, clock=clock)
-    return Services(market, news, AnalysisService(db, market, news, clock), guard)

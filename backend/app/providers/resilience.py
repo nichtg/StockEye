@@ -37,7 +37,7 @@ from app.providers.models import (
     Quote,
     SymbolMatch,
 )
-from app.providers.quota import QuotaLedgerPort
+from app.providers.quota import QuotaLedgerPort, current_priority, daily_cap
 
 log = get_logger(__name__)
 
@@ -48,6 +48,9 @@ MAX_QUOTA_WAITS = 5
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+Level = Literal["ok", "warning", "blocked"]
 
 
 class ProviderStatus(BaseModel):
@@ -64,7 +67,7 @@ class ProviderStatus(BaseModel):
     breaker_state: BreakerState
     last_error: str | None
     last_error_at: AwareDatetime | None
-    level: Literal["ok", "warning", "blocked"]
+    level: Level
     message: str
 
 
@@ -108,7 +111,7 @@ class ProviderGuard:
         ingestion can afford to) instead of raising; a daily quota error always propagates.
         """
         self._require_limits(adapter.name)
-        return _GuardedNews(self, adapter, wait_minute_quota, self._sleep, self._clock)
+        return _GuardedNews(self, adapter, wait_minute_quota)
 
     def _require_limits(self, provider: str) -> None:
         # Checked at wrap time so a misnamed adapter fails at startup, not on its first call.
@@ -124,7 +127,9 @@ class ProviderGuard:
         attempt = 0
         while True:
             attempt += 1
-            decision = await self._ledger.try_consume(provider, limits, self._clock())
+            decision = await self._ledger.try_consume(
+                provider, limits, self._clock(), current_priority()
+            )
             if not decision.allowed:
                 # Our own throttle is not a vendor failure, so it must not trip the breaker,
                 # but a half_open trial slot must be handed back.
@@ -164,6 +169,27 @@ class ProviderGuard:
                 breaker.record_success()
                 return result
 
+    async def call_patiently[T](self, provider: str, operation: Callable[[], Awaitable[T]]) -> T:
+        """Like ``call``, but waits out a per-minute quota block instead of failing.
+
+        For background work only. At most ``MAX_QUOTA_WAITS`` pauses (so ``MAX_QUOTA_WAITS + 1``
+        attempts); a daily quota error always propagates since waiting cannot help.
+        """
+        waits = 0
+        while True:
+            try:
+                return await self.call(provider, operation)
+            except QuotaExhaustedError as exc:
+                waits += 1
+                if exc.window != "minute" or waits > MAX_QUOTA_WAITS:
+                    raise
+                wait = MAX_QUOTA_WAIT
+                if exc.retry_at is not None:
+                    until_open = (exc.retry_at - self._clock()).total_seconds()
+                    wait = min(MAX_QUOTA_WAIT, max(0.0, until_open))
+                log.info("news_backfill_paused", provider=provider, wait_seconds=round(wait, 1))
+                await self._sleep(wait)
+
     def _backoff(self, attempt: int) -> float:
         """Exponential backoff with full jitter, capped."""
         ceiling = min(self._max_delay, self._base_delay * 2 ** (attempt - 1))
@@ -195,7 +221,8 @@ class ProviderGuard:
         state = self.breaker(provider).state
         used, limit = snap.used_today, snap.daily_limit
         ratio = used / limit if limit else 1.0
-        level: Literal["ok", "warning", "blocked"]
+        level: Level
+        interactive_cap = daily_cap(limit, "interactive")
         # One ladder, worst first: the level and the sentence shown for it cannot disagree.
         if state == "open":
             level = "blocked"
@@ -203,6 +230,13 @@ class ProviderGuard:
         elif used >= limit:
             level = "blocked"
             message = f"Daily limit reached: {used} of {limit} calls used; blocked until 00:00 UTC."
+        elif used >= interactive_cap:
+            level = "warning"
+            message = (
+                f"Reserve in use: {used} of {limit} calls used today. The last "
+                f"{limit - interactive_cap} calls are held back for scheduled refreshes, so "
+                "user requests are paused until 00:00 UTC."
+            )
         elif state == "half_open":
             level = "warning"
             message = "Recovering: trial call pending after repeated failures."
@@ -210,7 +244,8 @@ class ProviderGuard:
             level = "warning"
             message = (
                 f"Approaching free-tier limit: {used} of {limit} calls used today; "
-                "resets 00:00 UTC."
+                f"resets 00:00 UTC. The last {limit - interactive_cap} calls are reserved for "
+                "scheduled refreshes."
             )
         else:
             level = "ok"
@@ -258,35 +293,11 @@ class _GuardedMarket:
 class _GuardedNews:
     """A ``NewsProvider`` whose ``fetch`` runs under the guard (and may wait out minute quotas)."""
 
-    def __init__(
-        self,
-        guard: ProviderGuard,
-        adapter: NewsProvider,
-        wait_minute_quota: bool,
-        sleep: Callable[[float], Awaitable[None]],
-        clock: Callable[[], datetime],
-    ) -> None:
+    def __init__(self, guard: ProviderGuard, adapter: NewsProvider, patient: bool) -> None:
         self.name = adapter.name
-        self._guard = guard
+        self.exchanges = adapter.exchanges
+        self._call = guard.call_patiently if patient else guard.call
         self._adapter = adapter
-        self._wait_minute_quota = wait_minute_quota
-        self._sleep = sleep
-        self._clock = clock
 
     async def fetch(self, query: NewsQuery) -> list[NewsItem]:
-        attempt = partial(self._guard.call, self.name, partial(self._adapter.fetch, query))
-        if not self._wait_minute_quota:
-            return await attempt()
-        for _ in range(MAX_QUOTA_WAITS):
-            try:
-                return await attempt()
-            except QuotaExhaustedError as exc:
-                if exc.window != "minute":
-                    raise
-                wait = MAX_QUOTA_WAIT
-                if exc.retry_at is not None:
-                    until_open = (exc.retry_at - self._clock()).total_seconds()
-                    wait = min(MAX_QUOTA_WAIT, max(0.0, until_open))
-                log.info("news_backfill_paused", provider=self.name, wait_seconds=round(wait, 1))
-                await self._sleep(wait)
-        return await attempt()
+        return await self._call(self.name, partial(self._adapter.fetch, query))

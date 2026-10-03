@@ -5,6 +5,7 @@ import pytest
 
 from app.config import Settings
 from app.db import Database
+from app.main import create_app
 from tests.integration.conftest import PASSWORD, ClientFactory, login, register
 
 pytestmark = pytest.mark.integration
@@ -130,7 +131,7 @@ async def test_login_unknown_email_and_wrong_password_look_identical(
     assert wrong.json()["error"]["code"] == unknown.json()["error"]["code"]
 
 
-async def test_login_locks_account_after_max_failures_then_returns_429(
+async def test_login_locks_account_after_max_failures_then_looks_like_a_wrong_password(
     client: httpx.AsyncClient, new_client: ClientFactory, settings: Settings
 ) -> None:
     await register(await new_client(), "alice@example.com")
@@ -142,8 +143,8 @@ async def test_login_locks_account_after_max_failures_then_returns_429(
     locked = await login(client, "alice@example.com", PASSWORD)
 
     assert statuses == [401] * settings.login_max_failures
-    assert locked.status_code == 429
-    assert locked.json()["error"]["code"] == "account_locked"
+    assert locked.status_code == 401
+    assert locked.json()["error"]["code"] == "invalid_credentials"
 
 
 async def test_login_after_lockout_expires_succeeds_and_resets_counter(
@@ -248,3 +249,75 @@ async def test_refresh_for_disabled_user_returns_401(
     await db.users.update_one({}, {"$set": {"status": "disabled"}})
 
     assert (await client.post("/api/auth/refresh")).status_code == 401
+
+
+async def test_register_issues_a_fresh_csrf_token_in_cookie(client: httpx.AsyncClient) -> None:
+    before = client.cookies.get("se_csrf")
+
+    resp = await register(client, "alice@example.com")
+
+    assert resp.cookies.get("se_csrf") not in (None, before)
+    assert client.cookies.get("se_csrf") == resp.cookies.get("se_csrf")
+
+
+async def test_login_rotates_the_csrf_token_and_the_new_one_works(
+    client: httpx.AsyncClient, new_client: ClientFactory
+) -> None:
+    await register(await new_client(), "alice@example.com")
+    before = client.cookies.get("se_csrf")
+
+    resp = await login(client, "alice@example.com")
+
+    after = resp.cookies.get("se_csrf")
+    assert after not in (None, before)
+    assert client.headers["X-CSRF-Token"] == after  # the helper follows rotation like the SPA
+    assert (await client.post("/api/auth/logout")).status_code == 204
+
+
+async def test_login_with_the_pre_login_csrf_token_is_still_accepted_then_replaced(
+    client: httpx.AsyncClient, new_client: ClientFactory
+) -> None:
+    await register(await new_client(), "alice@example.com")
+    stale = client.headers["X-CSRF-Token"]
+
+    await login(client, "alice@example.com")
+    client.headers["X-CSRF-Token"] = stale
+
+    assert (await client.post("/api/auth/logout")).status_code == 403
+
+
+async def test_locked_users_existing_session_keeps_working(
+    client: httpx.AsyncClient, new_client: ClientFactory, settings: Settings
+) -> None:
+    await register(client, "alice@example.com")
+    attacker = await new_client()
+    for _ in range(settings.login_max_failures):
+        await login(attacker, "alice@example.com", "wrong-password-123")
+
+    assert (await login(attacker, "alice@example.com")).status_code == 401  # locked out
+    assert (await client.get("/api/me")).json()["email"] == "alice@example.com"
+    assert (await client.post("/api/auth/refresh")).status_code == 200
+
+
+@pytest.mark.parametrize(("environment", "expected"), [("prod", 404), ("dev", 200)])
+async def test_interactive_docs_and_schema_are_only_served_outside_prod(
+    environment: str, expected: int
+) -> None:
+    settings = Settings.model_validate(
+        {"environment": environment, "jwt_secret": "k" * 40, "scheduler_enabled": False}
+    )
+    app = create_app(settings)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as anonymous:
+        docs = await anonymous.get("/docs")
+        schema = await anonymous.get("/openapi.json")
+
+    assert docs.status_code == schema.status_code == expected
+
+
+async def test_weak_common_password_is_rejected_at_registration(client: httpx.AsyncClient) -> None:
+    resp = await register(client, "alice@example.com", "unbelievable")
+
+    assert resp.status_code == 422
+    assert "too common" in resp.json()["error"]["message"]

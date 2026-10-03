@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 import pytest
+from bson import ObjectId
 
 from app.providers.errors import RateLimitedError, TransientProviderError
 from app.services.container import Services
@@ -8,6 +9,8 @@ from app.services.errors import AppError
 from tests.services.fakes import CLOSED_NOW, FakeClock, FakeMarketData, FakeNews, FakeScorer
 
 pytestmark = pytest.mark.integration
+
+USER = ObjectId()
 
 
 async def test_technical_returns_outlook_patterns_and_ok_status(services: Services) -> None:
@@ -161,7 +164,7 @@ async def test_chart_never_triggers_macro_computation(
 async def test_chart_includes_news_markers_from_cached_macro_report(services: Services) -> None:
     await services.news.ensure_ingested("AAPL", "Apple Inc.")
     await services.news.wait("AAPL")
-    macro = await services.analysis.macro("AAPL")
+    macro = await services.analysis.macro("AAPL", USER)
     assert macro.report is not None
     assert macro.report.top_events
 
@@ -176,7 +179,7 @@ async def test_chart_includes_news_markers_from_cached_macro_report(services: Se
 async def test_macro_first_call_reports_ingestion_in_progress_and_partial_news(
     services: Services,
 ) -> None:
-    response = await services.analysis.macro("AAPL")
+    response = await services.analysis.macro("AAPL", USER)
 
     assert response.ingestion.in_progress
     assert response.ingestion.months_total == 24
@@ -191,9 +194,9 @@ async def test_macro_after_ingestion_has_report_and_is_cached(
     await services.news.ensure_ingested("AAPL", "Apple Inc.")
     await services.news.wait("AAPL")
 
-    first = await services.analysis.macro("AAPL")
+    first = await services.analysis.macro("AAPL", USER)
     queries = len(news_provider.queries)
-    second = await services.analysis.macro("AAPL")
+    second = await services.analysis.macro("AAPL", USER)
 
     assert not first.ingestion.in_progress
     assert first.ingestion.months_done == 24
@@ -206,11 +209,11 @@ async def test_macro_after_ingestion_has_report_and_is_cached(
 
 
 async def test_macro_is_not_cached_while_ingestion_is_in_progress(services: Services) -> None:
-    first = await services.analysis.macro("AAPL")
+    first = await services.analysis.macro("AAPL", USER)
     assert first.ingestion.in_progress
 
     await services.news.wait("AAPL")
-    second = await services.analysis.macro("AAPL")
+    second = await services.analysis.macro("AAPL", USER)
 
     assert second.ingestion.months_done == 24
     assert not second.ingestion.in_progress
@@ -223,7 +226,7 @@ async def test_macro_with_sentiment_model_missing_degrades_instead_of_failing(
     await services.news.ensure_ingested("AAPL", "Apple Inc.")
     await services.news.wait("AAPL")
 
-    response = await services.analysis.macro("AAPL")
+    response = await services.analysis.macro("AAPL", USER)
 
     assert response.data_status.news.state == "unavailable"
     assert response.report is not None
@@ -236,7 +239,7 @@ async def test_macro_without_benchmark_data_returns_no_report_but_no_error(
 ) -> None:
     provider.fail_symbols["SPY"] = TransientProviderError("yahoo", "down")
 
-    response = await services.analysis.macro("AAPL")
+    response = await services.analysis.macro("AAPL", USER)
 
     assert response.report is None
     assert response.data_status.prices.state == "partial"
@@ -248,7 +251,7 @@ async def test_macro_sgx_symbol_uses_sti_benchmark(services: Services) -> None:
     await services.news.ensure_ingested("D05.SI", "DBS Group Holdings Ltd")
     await services.news.wait("D05.SI")
 
-    response = await services.analysis.macro("D05.SI")
+    response = await services.analysis.macro("D05.SI", USER)
 
     assert response.report is not None
     assert response.name == "DBS Group Holdings Ltd"

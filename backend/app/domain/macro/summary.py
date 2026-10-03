@@ -68,7 +68,7 @@ class MacroReport:
     headline_findings: list[Finding]  # primary + regime, kept for compatibility
     primary_findings: list[Finding]  # shown first: ex-earnings scope (or the only scope)
     secondary_findings: list[Finding]  # all-events scope; the UI shows it under Details
-    primary_scope: Scope  # scope is data, never prose in the finding text
+    primary_scope: Scope  # which events the primary findings cover; data, never finding prose
     secondary_scope: Scope | None  # None when only one scope was emitted
     stats_all: MacroStats
     stats_ex_earnings: MacroStats
@@ -151,7 +151,7 @@ def _bucket_findings(label: str, bucket: BucketStats) -> list[Finding]:
         out.append(
             Finding(
                 text=(
-                    f"Part of this move started before the news: in the 5 days before, "
+                    "Part of this move started before the news: in the 5 days before, "
                     f"the stock had already moved {_pct_abs(pre)} ({side} than expected)."
                 ),
                 based_on_events=bucket.n,
@@ -168,7 +168,7 @@ def _untested_finding(buckets: Sequence[tuple[str, BucketStats]], min_n: int) ->
     else:
         found = " and ".join(f"{b.n} {label}-news" for label, b in buckets)
         text = (
-            f"Not enough positive-news or negative-news events yet to judge "
+            "Not enough positive-news or negative-news events yet to judge "
             f"(found {found}; need at least {min_n} of each)."
         )
     return Finding(text=text, based_on_events=sum(b.n for _, b in buckets))
@@ -180,7 +180,7 @@ def _scope_findings(stats: MacroStats) -> list[Finding]:
         return [
             Finding(
                 text=(
-                    f"Not enough news events yet to judge "
+                    "Not enough news events yet to judge "
                     f"(found {stats.n_used}; need at least {stats.min_n})."
                 ),
                 based_on_events=stats.n_used,
@@ -200,7 +200,7 @@ def _scope_findings(stats: MacroStats) -> list[Finding]:
     diff = stats.difference
     if diff is not None:
         total = diff.n_pos + diff.n_neg
-        out.append(Finding(text=f"{_gap_sentence(diff.mean_diff)}", based_on_events=total))
+        out.append(Finding(text=_gap_sentence(diff.mean_diff), based_on_events=total))
         out.append(_reliability_finding(diff.p_value, "a gap this large", total))
     corr = stats.correlation
     if corr is not None:
@@ -210,7 +210,7 @@ def _scope_findings(stats: MacroStats) -> list[Finding]:
             text = "More positive news tended to go with better-than-expected moves."
         else:
             text = "More positive news tended to go with worse-than-expected moves."
-        out.append(Finding(text=f"{text}", based_on_events=corr.n))
+        out.append(Finding(text=text, based_on_events=corr.n))
         out.append(_reliability_finding(corr.p_value, "a pattern this strong", corr.n))
     return out
 
@@ -272,15 +272,17 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
 
     The primary scope excludes earnings periods (cleaner, not confounded by results
     announcements). When that scope used exactly the same events as the all-events scope
-    (equal counts, since one is a subset of the other), only one scope is emitted and
-    ``secondary_scope`` is None. ``headline_findings`` is primary plus the regime line.
+    (equal counts, since one is a subset of the other) they are identical: only one scope is
+    emitted, named "all_events", and ``secondary_scope`` is None. ``headline_findings`` is
+    primary plus the regime line.
     """
+    primary = _scope_findings(stats_ex_earnings)
+    primary_scope: Scope = "excluding_earnings"
     secondary: list[Finding] = []
     secondary_scope: Scope | None = None
     if stats_ex_earnings.n_used == stats_all.n_used:
-        primary = _scope_findings(stats_ex_earnings)
+        primary_scope = "all_events"  # no event was excluded, so the two scopes are the same
     else:
-        primary = _scope_findings(stats_ex_earnings)
         secondary = _scope_findings(stats_all)
         secondary_scope = "all_events"
     headline = list(primary)
@@ -291,7 +293,7 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
         headline_findings=headline,
         primary_findings=primary,
         secondary_findings=secondary,
-        primary_scope="excluding_earnings",
+        primary_scope=primary_scope,
         secondary_scope=secondary_scope,
         stats_all=stats_all,
         stats_ex_earnings=stats_ex_earnings,

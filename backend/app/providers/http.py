@@ -47,10 +47,15 @@ def parse_retry_after(value: str | None, now: datetime | None = None) -> float |
 
 
 async def _get(
-    client: httpx.AsyncClient, url: str, *, provider: str, params: dict[str, Any] | None
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    provider: str,
+    params: dict[str, Any] | None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     try:
-        response = await client.get(url, params=params)
+        response = await client.get(url, params=params, headers=headers)
     except httpx.TimeoutException as exc:
         raise TransientProviderError(provider, "request timed out") from exc
     except httpx.TransportError as exc:
@@ -73,8 +78,10 @@ async def get_json(
     *,
     provider: str,
     params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> object:
-    response = await _get(client, url, provider=provider, params=params)
+    """GET and decode JSON. ``headers`` is for credentials, which must stay out of the URL."""
+    response = await _get(client, url, provider=provider, params=params, headers=headers)
     try:
         return response.json()
     except ValueError as exc:

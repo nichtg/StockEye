@@ -5,6 +5,10 @@
 the port, so both adapters and the guard share one definition.
 """
 
+import math
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
@@ -12,6 +16,34 @@ from typing import Literal, Protocol
 from app.config import ProviderLimits
 
 Window = Literal["minute", "day"]
+Priority = Literal["interactive", "scheduled"]
+
+# Share of each provider's daily allowance that user-driven calls may consume. The remainder is
+# reserved so the scheduled refreshes still run after a busy day of browsing.
+INTERACTIVE_SHARE = 0.8
+
+# Who is calling. A context variable (rather than a parameter on every service method) because
+# background tasks started by a scheduled job inherit it, which is exactly the attribution wanted.
+_priority: ContextVar[Priority] = ContextVar("quota_priority", default="interactive")
+
+
+def current_priority() -> Priority:
+    return _priority.get()
+
+
+@contextmanager
+def scheduled_calls() -> Iterator[None]:
+    """Mark every provider call made inside (and by tasks spawned inside) as scheduled work."""
+    token = _priority.set("scheduled")
+    try:
+        yield
+    finally:
+        _priority.reset(token)
+
+
+def daily_cap(per_day: int, priority: Priority) -> int:
+    """Calls per day ``priority`` may consume: the whole allowance, or the interactive share."""
+    return per_day if priority == "scheduled" else math.ceil(INTERACTIVE_SHARE * per_day)
 
 
 @dataclass(frozen=True)
@@ -32,7 +64,7 @@ class QuotaSnapshot:
 
 class QuotaLedgerPort(Protocol):
     async def try_consume(
-        self, provider: str, limits: ProviderLimits, now: datetime
+        self, provider: str, limits: ProviderLimits, now: datetime, priority: Priority
     ) -> QuotaDecision: ...
 
     async def snapshot(

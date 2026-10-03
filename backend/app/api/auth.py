@@ -9,10 +9,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Request, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.api.deps import AccountsDep, SettingsDep
+from app.api.limits import limiter
 from app.auth.cookies import (
     ACCESS_COOKIE,
     REFRESH_COOKIE,
@@ -23,13 +22,11 @@ from app.auth.cookies import (
 from app.auth.csrf import new_csrf_token
 from app.auth.principal import Principal
 from app.config import Settings
-from app.repositories.users import UserRecord
+from app.repositories.users import Role, UserRecord
 from app.services.accounts import SessionTokens
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# In-memory, per process: adequate for a single instance; swap the storage URI to share limits.
-limiter = Limiter(key_func=get_remote_address)
 _AUTH_LIMIT = "10/minute"
 
 
@@ -50,7 +47,7 @@ class RegisterIn(BaseModel):
 class UserOut(BaseModel):
     id: str
     email: str
-    role: str
+    role: Role
     created_at: datetime
 
     @classmethod
@@ -67,7 +64,9 @@ class CsrfOut(BaseModel):
 
 
 def _sign_in(response: Response, settings: Settings, tokens: SessionTokens) -> None:
+    """Set the session cookies and a fresh CSRF token (a new session must not reuse the old one)."""
     set_auth_cookies(response, settings, tokens.access, tokens.refresh)
+    set_csrf_cookie(response, settings, new_csrf_token())
 
 
 @router.get("/csrf")

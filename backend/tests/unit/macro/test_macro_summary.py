@@ -305,7 +305,7 @@ def test_build_macro_report_identical_scopes_are_emitted_once_without_prefix():
     report = _report(ex, allv)
 
     assert report.secondary_findings == []
-    assert report.primary_scope == "excluding_earnings"
+    assert report.primary_scope == "all_events"  # nothing was excluded, so the scopes coincide
     assert report.secondary_scope is None
     assert report.primary_findings
     assert not any("earnings periods" in t for t in _texts(report))

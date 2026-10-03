@@ -121,15 +121,17 @@ class UsersRepository:
         )
         return _record(doc) if doc else None
 
-    async def record_failure(
+    async def reserve_attempt(
         self, user_id: ObjectId, max_failures: int, lock_until: datetime
-    ) -> None:
-        """Count a failed login and lock the account once the cap is reached.
+    ) -> bool:
+        """Atomically spend one password attempt; False when the account is already at the cap.
 
-        A single pipeline update, so concurrent failures cannot both miss the threshold.
+        The ``$lt`` guard sits in the filter, so under concurrency at most ``max_failures``
+        callers can ever get True before a successful login resets the counter. The attempt
+        that reaches the cap also sets the lock, in the same pipeline update.
         """
-        await self._col.update_one(
-            {"_id": user_id},
+        result = await self._col.update_one(
+            {"_id": user_id, "failed_logins": {"$lt": max_failures}},
             [
                 {
                     "$set": {
@@ -146,10 +148,33 @@ class UsersRepository:
                 }
             ],
         )
+        return result.modified_count == 1
 
-    async def clear_failures(self, user_id: ObjectId) -> None:
+    async def clear_expired_lock(self, user_id: ObjectId, now: datetime) -> None:
+        """Reset the failure counter if (and only if) a lock has run out.
+
+        Conditional so that a second request racing the first cannot wipe the counter again
+        after the first has already started a new window.
+        """
         await self._col.update_one(
-            {"_id": user_id}, {"$set": {"failed_logins": 0, "locked_until": None}}
+            {"_id": user_id, "locked_until": {"$lte": now}},
+            {"$set": {"failed_logins": 0, "locked_until": None}},
+        )
+
+    async def restore(self, user: UserRecord) -> None:
+        """Re-insert a record deleted a moment ago (undoing a delete that left no admin)."""
+        await self._col.insert_one(
+            {
+                "_id": user.id,
+                "email": user.email,
+                "password_hash": user.password_hash,
+                "role": user.role,
+                "status": user.status,
+                "failed_logins": user.failed_logins,
+                "locked_until": user.locked_until,
+                "created_at": user.created_at,
+                "last_login_at": user.last_login_at,
+            }
         )
 
     async def record_login(

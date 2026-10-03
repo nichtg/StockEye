@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from app.db import Database
 from app.logging_setup import get_logger
 from app.providers.base import MarketDataProvider
-from app.providers.errors import ProviderError, SymbolNotFoundError
+from app.providers.errors import ProviderDataError, ProviderError, SymbolNotFoundError
 from app.providers.models import Bar, CorporateEvent, Interval, Quote, SymbolMatch
 from app.repositories.bars import BarsRepository, FetchState
 from app.repositories.cache import CacheRepository
@@ -31,6 +31,7 @@ from app.services.calendars import (
     session_close,
 )
 from app.services.errors import AppError
+from app.services.singleflight import SingleFlight
 from app.services.status import DataStatus, describe_failure, ok, stale_status
 
 log = get_logger(__name__)
@@ -41,6 +42,7 @@ EVENTS_START_DAYS = 760  # one shared start so the events cache is reused across
 REFRESH_AFTER = timedelta(minutes=15)
 EVENTS_REFRESH_AFTER = timedelta(hours=24)
 QUOTE_TTL = timedelta(seconds=60)
+UNKNOWN_SYMBOL_TTL = timedelta(hours=6)  # how long "no such stock" is remembered
 SEARCH_TTL = timedelta(hours=1)
 # Callers ask for a start date relative to "today", so the requested start creeps forward by a
 # day each day. Without slack the stored coverage would look insufficient every morning.
@@ -81,8 +83,8 @@ def _unavailable(what: str, symbol: str, exc: ProviderError) -> AppError:
     )
 
 
-def _not_found(symbol: str) -> AppError:
-    return AppError(404, "not_found", f"We could not find a stock with the symbol {symbol}.")
+def _not_found() -> AppError:
+    return AppError(404, "not_found", "We couldn't find that stock.")
 
 
 class _HasFetchTime(Protocol):
@@ -104,6 +106,8 @@ class _Matches(BaseModel):
 
     matches: list[SymbolMatch]
 
+
+_UNKNOWN_SYMBOL = {"unknown_symbol": True}  # cached in place of a payload
 
 _QUOTE = _CacheKind(QUOTE_TTL, "price quote", "quote")
 _SEARCH = _CacheKind(SEARCH_TTL, "stock search", "search results")
@@ -130,6 +134,10 @@ class MarketDataService:
         self._cache = CacheRepository(db)
         self._provider = provider
         self._clock = clock
+        # Cold requests fan out (quote, chart, outlook, overview all want the same bars at once);
+        # one fetch per series serves them all instead of racing to write duplicate rows.
+        self._bar_flights = SingleFlight[tuple[FetchState, ProviderError | None]]()
+        self._event_flights = SingleFlight[tuple[EventsFetchState, ProviderError | None]]()
 
     # --- quote and search ------------------------------------------------------------------
 
@@ -161,17 +169,23 @@ class MarketDataService:
     ) -> tuple[M, DataStatus | None]:
         """Cache-first read; the status is None for fresh data and says what is wrong otherwise.
 
-        An unknown symbol is a 404. When the provider fails, a saved copy (however old) is served
-        as "stale", and only with no copy at all does the failure become a 503.
+        An unknown symbol is a 404, remembered for ``UNKNOWN_SYMBOL_TTL`` so repeated lookups of a
+        made-up symbol cost no vendor calls. When the provider fails, a saved copy (however old)
+        is served as "stale", and only with no copy at all does the failure become a 503.
         """
         now = self._clock()
         entry = await self._cache.lookup(key)
         if entry is not None and entry.is_fresh(now):
+            if entry.payload == _UNKNOWN_SYMBOL:
+                raise _not_found()
             return model.model_validate(entry.payload), None
+        if entry is not None and entry.payload == _UNKNOWN_SYMBOL:
+            entry = None  # an expired "unknown" is no fallback for a failed refresh
         try:
             value = await fetch()
         except SymbolNotFoundError as exc:
-            raise _not_found(subject) from exc
+            await self._cache.put(key, _UNKNOWN_SYMBOL, UNKNOWN_SYMBOL_TTL, now)
+            raise _not_found() from exc
         except ProviderError as exc:
             if entry is None:
                 raise _unavailable(f"The {kind.what}", subject, exc) from exc
@@ -213,30 +227,47 @@ class MarketDataService:
         self, symbol: str, interval: Interval, start: datetime
     ) -> tuple[list[Bar], DataStatus]:
         now = self._clock()
+        try:
+            state, failure = await self._bar_flights.run(
+                (symbol, interval, start), lambda: self._refresh_bars(symbol, interval, start)
+            )
+        except ProviderError as exc:
+            raise _unavailable("Price data", symbol, exc) from exc
+        stored = await self._bars.get_range(symbol, interval, start, now + timedelta(days=1))
+        bars = self._completed(symbol, interval, stored, now)
+        if not bars:
+            if failure is not None:
+                raise _unavailable("Price data", symbol, failure)
+            raise _not_found()
+        return bars, _status("Price data", "prices", state, now, failure)
+
+    async def _refresh_bars(
+        self, symbol: str, interval: Interval, start: datetime
+    ) -> tuple[FetchState, ProviderError | None]:
+        """Bring the saved bars up to date if they need it (the body of one single flight).
+
+        Deciding and fetching both happen inside the flight, so no caller can decide on a state
+        that a concurrent fetch is about to replace.
+        """
+        now = self._clock()
         end = now + timedelta(days=1)
+        state = await self._bars.get_state(symbol, interval)
 
         async def fetch() -> FetchState:
             try:
                 fetched = await self._provider.bars(symbol, interval, start, end)
             except SymbolNotFoundError as exc:
-                raise _not_found(symbol) from exc
+                raise _not_found() from exc
+            if not fetched and state is not None:
+                # Saved history exists, so "nothing came back" is a vendor glitch, not a verdict:
+                # saving it would erase the range.
+                raise ProviderDataError(self._provider.name, "empty bars")
             return await self._bars.replace_range(
                 symbol, interval, fetched, start=start, end=end, fetched_at=now
             )
 
-        state = await self._bars.get_state(symbol, interval)
         refresh = self._needs_refresh(symbol, interval, state, start, now)
-        try:
-            state, failure = await self._refresh(f"bars {interval}", symbol, state, refresh, fetch)
-        except ProviderError as exc:
-            raise _unavailable("Price data", symbol, exc) from exc
-        stored = await self._bars.get_range(symbol, interval, start, end)
-        bars = self._completed(symbol, interval, stored, now)
-        if not bars:
-            if failure is not None:
-                raise _unavailable("Price data", symbol, failure)
-            raise _not_found(symbol)
-        return bars, _status("Price data", "prices", state, now, failure)
+        return await self._refresh(f"bars {interval}", symbol, state, refresh, fetch)
 
     def _needs_refresh(
         self,
@@ -293,6 +324,24 @@ class MarketDataService:
     ) -> tuple[list[CorporateEvent], DataStatus]:
         """Events dated in [start, end]. Never raises for provider trouble: events are optional."""
         now = self._clock()
+        try:
+            state, failure = await self._event_flights.run(
+                symbol, lambda: self._refresh_events(symbol, start, end)
+            )
+        except ProviderError as exc:
+            reason = (
+                f"Corporate events are unavailable: {describe_failure(exc)}. "
+                "Earnings, dividend and split markers are hidden for now."
+            )
+            return [], DataStatus(state="unavailable", as_of=None, reason=reason)
+        events = await self._events.get_range(symbol, start, end)
+        return events, _status("Corporate event data", "events", state, now, failure)
+
+    async def _refresh_events(
+        self, symbol: str, start: date, end: date
+    ) -> tuple[EventsFetchState, ProviderError | None]:
+        """Refresh the saved events if stale (the body of one single flight per symbol)."""
+        now = self._clock()
 
         async def fetch() -> EventsFetchState:
             begin = datetime(start.year, start.month, start.day, tzinfo=UTC)
@@ -308,16 +357,7 @@ class MarketDataService:
             or now - state.last_fetched_at > EVENTS_REFRESH_AFTER
             or state.covered_start > start + COVERAGE_SLACK
         )
-        try:
-            state, failure = await self._refresh("events", symbol, state, stale, fetch)
-        except ProviderError as exc:
-            reason = (
-                f"Corporate events are unavailable: {describe_failure(exc)}. "
-                "Earnings, dividend and split markers are hidden for now."
-            )
-            return [], DataStatus(state="unavailable", as_of=None, reason=reason)
-        events = await self._events.get_range(symbol, start, end)
-        return events, _status("Corporate event data", "events", state, now, failure)
+        return await self._refresh("events", symbol, state, stale, fetch)
 
     @staticmethod
     async def _refresh[S: _HasFetchTime](

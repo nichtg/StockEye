@@ -74,6 +74,8 @@ def describe_failure(exc: ProviderError) -> str:
     if isinstance(exc, RateLimitedError):
         return f"{name} hit its rate limit"
     if isinstance(exc, QuotaExhaustedError):
+        if exc.window == "minute":
+            return f"our per-minute limit for {name} was reached"
         return f"our daily request allowance for {name} is used up"
     if isinstance(exc, CircuitOpenError):
         return f"{name} has been failing repeatedly and is paused for a few minutes"

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -8,6 +9,7 @@ from app.providers.models import Bar
 from app.repositories.bars import BarsRepository
 from app.services.container import Services
 from app.services.errors import AppError
+from app.services.overview import build_overview
 from tests.services.fakes import CLOSED_NOW, OPEN_NOW, FakeClock, FakeMarketData
 
 pytestmark = pytest.mark.integration
@@ -215,3 +217,94 @@ async def test_bars_replace_range_swaps_in_range_bars_and_widens_coverage(db: Da
     assert [b.close for b in stored] == [3.0]
     assert state.covered_start == day - timedelta(days=9)
     assert state.last_bar_at == day + timedelta(days=1)
+
+
+async def test_cold_overview_makes_one_bars_call_and_stores_no_duplicate_timestamps(
+    services: Services, provider: FakeMarketData, db: Database
+) -> None:
+    # quote, daily history and the technical outlook all want the same cold bars at once.
+    await build_overview(services.market, services.analysis, ["AAPL"])
+
+    stored = await db["price_bars"].distinct("ts", {"meta.symbol": "AAPL", "meta.interval": "1d"})
+    total = await db["price_bars"].count_documents({"meta.symbol": "AAPL", "meta.interval": "1d"})
+    assert provider.calls["bars"] == 1
+    assert total == len(stored)
+
+
+async def test_concurrent_cold_event_requests_make_one_vendor_call(
+    services: Services, provider: FakeMarketData
+) -> None:
+    await asyncio.gather(*(services.market.standard_events("AAPL") for _ in range(4)))
+
+    assert provider.calls["events"] == 1
+
+
+async def test_empty_bars_answer_keeps_saved_history_and_reports_stale(
+    services: Services, provider: FakeMarketData, clock: FakeClock, db: Database
+) -> None:
+    before, _ = await services.market.daily_history("AAPL")
+    clock.now = CLOSED_NOW + timedelta(days=3)  # a new session has closed, so a refresh is due
+    provider.empty_bars = True
+
+    after, status = await services.market.daily_history("AAPL")
+
+    assert status.state == "stale"
+    assert after.equals(before.loc[after.index])  # only the window start moved with the clock
+    assert after.index[-1] == before.index[-1]
+    assert await db["price_bars"].count_documents({"meta.symbol": "AAPL"}) == len(before)
+
+
+async def test_replace_range_with_no_bars_deletes_nothing(db: Database) -> None:
+    repo = BarsRepository(db)
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    end = datetime(2026, 9, 30, tzinfo=UTC)
+    saved = [
+        Bar(ts=start + timedelta(days=d), open=1, high=2, low=1, close=2, volume=5)
+        for d in range(3)
+    ]
+    await repo.replace_range("AAPL", "1d", saved, start=start, end=end, fetched_at=end)
+
+    state = await repo.replace_range("AAPL", "1d", [], start=start, end=end, fetched_at=end)
+
+    assert await repo.get_range("AAPL", "1d", start, end) == saved
+    assert state.last_bar_at == saved[-1].ts
+
+
+async def test_unknown_symbol_is_remembered_so_repeat_lookups_cost_no_vendor_call(
+    services: Services, provider: FakeMarketData
+) -> None:
+    for _ in range(3):
+        with pytest.raises(AppError) as caught:
+            await services.market.quote("ZZZZ")
+        assert caught.value.status == 404
+
+    assert provider.calls["quote"] == 1
+
+
+async def test_unknown_symbol_memory_expires_after_six_hours(
+    services: Services, provider: FakeMarketData, clock: FakeClock
+) -> None:
+    with pytest.raises(AppError):
+        await services.market.quote("ZZZZ")
+    clock.now = CLOSED_NOW + timedelta(hours=6, minutes=1)
+
+    with pytest.raises(AppError) as caught:
+        await services.market.quote("ZZZZ")
+
+    assert caught.value.status == 404
+    assert provider.calls["quote"] == 2
+
+
+async def test_expired_unknown_symbol_is_no_stale_fallback_when_provider_is_down(
+    services: Services, provider: FakeMarketData, clock: FakeClock
+) -> None:
+    with pytest.raises(AppError):
+        await services.market.quote("ZZZZ")
+    clock.now = CLOSED_NOW + timedelta(hours=7)
+    provider.unknown.clear()
+    provider.fail_with = TransientProviderError("yahoo", "down")
+
+    with pytest.raises(AppError) as caught:
+        await services.market.quote("ZZZZ")
+
+    assert caught.value.status == 503

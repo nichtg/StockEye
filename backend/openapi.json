@@ -294,6 +294,7 @@
           "watchlist"
         ],
         "summary": "Add Symbol",
+        "description": "Add a stock the vendor knows (looked up cache-first, so repeats cost nothing).",
         "operationId": "add_symbol_api_watchlist__symbol__put",
         "parameters": [
           {
@@ -385,7 +386,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -823,12 +825,10 @@
             "title": "Email"
           },
           "role": {
-            "type": "string",
-            "title": "Role"
+            "$ref": "#/components/schemas/Role"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/Status"
           },
           "created_at": {
             "type": "string",
@@ -1655,13 +1655,22 @@
             "title": "Time"
           },
           "kind": {
-            "type": "string",
-            "enum": [
-              "earnings",
-              "dividend",
-              "split",
-              "pattern",
-              "news"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "earnings",
+                  "dividend",
+                  "split"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "pattern",
+                  "news"
+                ]
+              }
             ],
             "title": "Kind"
           },
@@ -2199,6 +2208,13 @@
         ],
         "title": "RegisterIn"
       },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "user",
+          "admin"
+        ]
+      },
       "SeriesPoint": {
         "properties": {
           "time": {
@@ -2273,6 +2289,13 @@
           "detail"
         ],
         "title": "SignalOut"
+      },
+      "Status": {
+        "type": "string",
+        "enum": [
+          "active",
+          "disabled"
+        ]
       },
       "StockOut": {
         "properties": {
@@ -2483,8 +2506,7 @@
             "title": "Email"
           },
           "role": {
-            "type": "string",
-            "title": "Role"
+            "$ref": "#/components/schemas/Role"
           },
           "created_at": {
             "type": "string",
@@ -2506,32 +2528,22 @@
           "status": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "active",
-                  "disabled"
-                ]
+                "$ref": "#/components/schemas/Status"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Status"
+            ]
           },
           "role": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "user",
-                  "admin"
-                ]
+                "$ref": "#/components/schemas/Role"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Role"
+            ]
           }
         },
         "additionalProperties": false,

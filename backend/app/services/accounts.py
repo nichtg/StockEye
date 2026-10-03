@@ -10,11 +10,20 @@ importing the API.
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 
 from bson import ObjectId
+from bson.errors import InvalidId
 
 from app.auth import passwords
-from app.auth.tokens import create_access_token, hash_refresh_token, new_refresh_token
+from app.auth.principal import Principal
+from app.auth.tokens import (
+    TokenError,
+    create_access_token,
+    decode_access_token,
+    hash_refresh_token,
+    new_refresh_token,
+)
 from app.config import Settings
 from app.db import Database
 from app.repositories.refresh_tokens import RefreshTokensRepository
@@ -26,6 +35,8 @@ __all__ = ["AccountService", "AppError", "SessionTokens"]
 
 _INVALID_LOGIN = "Incorrect email or password."
 _SESSION_EXPIRED = "Your session has expired."
+_SIGN_IN_REQUIRED = "Please sign in to continue."
+_LAST_ADMIN = "The last active admin cannot be removed or demoted."
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +45,19 @@ class SessionTokens:
 
     access: str
     refresh: str
+
+
+def _eligible(user: UserRecord | None) -> bool:
+    """Whether an existing session may keep working: the user exists and is not disabled.
+
+    A lockout is deliberately not part of this. It only stops new password logins; someone who
+    is already signed in (or holds a refresh token) is not the guesser it defends against.
+    """
+    return user is not None and user.status == "active"
+
+
+def _invalid_login() -> AppError:
+    return AppError(401, "invalid_credentials", _INVALID_LOGIN)
 
 
 class AccountService:
@@ -51,7 +75,7 @@ class AccountService:
         """
         _check_policy(email, password)
         try:
-            return await self._users.create(email, passwords.hash_password(password))
+            return await self._users.create(email, await passwords.hash_password(password))
         except EmailTakenError as exc:
             raise AppError(409, "conflict", "An account with this email already exists.") from exc
 
@@ -63,7 +87,9 @@ class AccountService:
         """
         _check_policy(email, password)
         try:
-            created = await self._users.create(email, passwords.hash_password(password), "admin")
+            created = await self._users.create(
+                email, await passwords.hash_password(password), "admin"
+            )
         except EmailTakenError:
             promoted = await self._users.promote_to_admin(email)
             if promoted is None:  # deleted between the two calls; extremely unlikely
@@ -74,42 +100,61 @@ class AccountService:
     async def authenticate(self, email: str, password: str) -> UserRecord:
         """Verify credentials, enforcing lockout and the disabled flag.
 
-        Unknown emails and wrong passwords raise the identical 401 and cost the same CPU.
+        Unknown emails, locked accounts and wrong passwords raise the identical 401 and cost
+        the same CPU, so neither the message nor the timing reveals which one it was.
         """
         user = await self._users.get_by_email(email)
         if user is None:
-            passwords.verify_dummy(password)
-            raise AppError(401, "invalid_credentials", _INVALID_LOGIN)
-
+            await self._reject(password)
         now = datetime.now(UTC)
         if user.locked_until is not None:
             if user.locked_until > now:
-                raise AppError(
-                    429,
-                    "account_locked",
-                    "Too many failed sign-in attempts. Please try again later.",
-                )
-            await self._users.clear_failures(user.id)  # lockout served; start counting afresh
-
-        if not passwords.verify_password(password, user.password_hash):
-            await self._users.record_failure(
-                user.id,
-                self._settings.login_max_failures,
-                now + timedelta(minutes=self._settings.login_lockout_minutes),
-            )
-            raise AppError(401, "invalid_credentials", _INVALID_LOGIN)
+                await self._reject(password)
+            await self._users.clear_expired_lock(user.id, now)  # served; start counting afresh
+        # Reserved before verifying, atomically, so a burst of concurrent guesses cannot get
+        # more than ``login_max_failures`` verifications in. A success resets the counter.
+        lock_until = now + timedelta(minutes=self._settings.login_lockout_minutes)
+        if not await self._users.reserve_attempt(
+            user.id, self._settings.login_max_failures, lock_until
+        ):
+            await self._reject(password)
+        if not await passwords.verify_password(password, user.password_hash):
+            raise _invalid_login()
         if user.status != "active":
             raise AppError(403, "account_disabled", "This account has been disabled.")
 
         new_hash = (
-            passwords.hash_password(password)
+            await passwords.hash_password(password)
             if passwords.needs_rehash(user.password_hash)
             else None
         )
         logged_in = await self._users.record_login(user.id, new_hash)
         if logged_in is None:  # deleted mid-login: indistinguishable from an unknown email
-            raise AppError(401, "invalid_credentials", _INVALID_LOGIN)
+            raise _invalid_login()
         return logged_in
+
+    @staticmethod
+    async def _reject(password: str) -> NoReturn:
+        await passwords.verify_dummy(password)
+        raise _invalid_login()
+
+    async def principal(self, access_token: str | None) -> Principal:
+        """Resolve the caller behind an access JWT, re-reading the user on every call.
+
+        Hitting the DB each time means disabling a user or changing a role applies at once.
+        Raises ``AppError`` 401 for a missing, invalid or expired token and for a user who is
+        gone or disabled. A lockout does not end a session (see ``_eligible``).
+        """
+        if not access_token:
+            raise AppError(401, "unauthenticated", _SIGN_IN_REQUIRED)
+        try:
+            user_id = ObjectId(decode_access_token(access_token, self._settings))
+        except (TokenError, InvalidId) as exc:
+            raise AppError(401, "unauthenticated", _SIGN_IN_REQUIRED) from exc
+        user = await self._users.get_by_id(user_id)
+        if user is None or not _eligible(user):
+            raise AppError(401, "unauthenticated", _SIGN_IN_REQUIRED)
+        return Principal(id=user.id, email=user.email, role=user.role, created_at=user.created_at)
 
     async def start_session(self, user: UserRecord) -> SessionTokens:
         """Begin a new session (a new refresh-token family) for an authenticated user."""
@@ -127,7 +172,7 @@ class AccountService:
         if rotated is None:
             raise AppError(401, "unauthenticated", _SESSION_EXPIRED)
         user = await self._users.get_by_id(rotated.user_id)
-        if user is None or user.status != "active":
+        if user is None or not _eligible(user):
             await self._tokens.revoke_family(rotated.family_id)
             raise AppError(401, "unauthenticated", _SESSION_EXPIRED)
         return await self._issue(user.id, rotated.family_id), user
@@ -152,12 +197,16 @@ class AccountService:
         self, actor_id: ObjectId, target_id: ObjectId, status: Status | None, role: Role | None
     ) -> UserRecord:
         target = await self._require(target_id)
-        losing_admin = target.role == "admin" and (status == "disabled" or role == "user")
-        if losing_admin:
+        removes_admin = _is_active_admin(target) and (status == "disabled" or role == "user")
+        if removes_admin:
             await self._guard_admin_removal(actor_id, target)
         updated = await self._users.update(target_id, status, role)
         if updated is None:
             raise AppError(404, "not_found", "User not found.")
+        if removes_admin and await self._users.count_active_admins() == 0:
+            # Two admins demoting each other both passed the guard above; undo this one.
+            await self._users.update(target_id, target.status, target.role)
+            raise AppError(409, "conflict", _LAST_ADMIN)
         return updated
 
     async def delete_user(self, actor_id: ObjectId, target_id: ObjectId) -> None:
@@ -168,6 +217,9 @@ class AccountService:
         elif actor_id == target_id:
             raise AppError(409, "conflict", "You cannot delete your own account.")
         await self._users.delete(target_id)
+        if _is_active_admin(target) and await self._users.count_active_admins() == 0:
+            await self._users.restore(target)  # lost a race with another admin removal
+            raise AppError(409, "conflict", _LAST_ADMIN)
         await self._tokens.delete_for_user(target_id)
         await self._watchlists.delete_for_owner(target_id)
 
@@ -182,8 +234,12 @@ class AccountService:
             raise AppError(
                 409, "conflict", "You cannot disable, demote or delete your own admin account."
             )
-        if target.status == "active" and await self._users.count_active_admins() <= 1:
-            raise AppError(409, "conflict", "The last active admin cannot be removed or demoted.")
+        if _is_active_admin(target) and await self._users.count_active_admins() <= 1:
+            raise AppError(409, "conflict", _LAST_ADMIN)
+
+
+def _is_active_admin(user: UserRecord) -> bool:
+    return user.role == "admin" and user.status == "active"
 
 
 def _check_policy(email: str, password: str) -> None:
