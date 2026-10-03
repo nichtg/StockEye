@@ -1,12 +1,12 @@
 """Pure technical analysis for a 1-week (5 session) horizon."""
 
+from app.domain.technical.candlestick_rules import PatternThresholds
 from app.domain.technical.candlesticks import (
     PATTERNS,
     Bias,
     PatternHit,
     PatternKey,
     PatternSpec,
-    PatternThresholds,
     detect_patterns,
     trend_context,
 )

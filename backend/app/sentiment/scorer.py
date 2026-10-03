@@ -27,7 +27,8 @@ class SentimentUnavailableError(Exception):
 class SentimentScorer(Protocol):
     """Synchronous, CPU-bound scorer; async callers must use ``asyncio.to_thread``."""
 
-    model_version: str
+    @property
+    def model_version(self) -> str: ...
 
     def score(self, texts: Sequence[str]) -> list[SentimentScore]:
         """Return one score per input text, in order. Empty input gives an empty list."""

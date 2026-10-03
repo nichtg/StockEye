@@ -8,13 +8,11 @@ from itertools import pairwise
 
 import feedparser
 import httpx
-from pydantic import ValidationError
 
-from app.logging_setup import get_logger
+from app.providers.collect import collect_items
 from app.providers.http import get_text
 from app.providers.models import NewsItem, NewsQuery
 
-log = get_logger(__name__)
 URL = "https://news.google.com/rss/search"
 _TAGS = re.compile(r"<[^>]+>")
 _SPACES = re.compile(r"\s+")
@@ -57,7 +55,7 @@ class GoogleNewsRss:
         self._client = client
 
     async def fetch(self, query: NewsQuery) -> list[NewsItem]:
-        country = "SG" if query.symbol.upper().endswith(".SI") else "US"
+        country = "SG" if query.exchange == "SGX" else "US"
         q = (
             f'"{query.company_name}" after:{query.start.date().isoformat()} '
             f"before:{query.end.date().isoformat()}"
@@ -67,37 +65,31 @@ class GoogleNewsRss:
         return self._parse(text)
 
     def _parse(self, text: str) -> list[NewsItem]:
-        feed = feedparser.parse(text)
-        items: list[NewsItem] = []
-        for entry in feed.entries:
-            try:
-                raw_title = str(entry.get("title", "")).strip()
-                split = _split_title(raw_title)
-                title, source = split if split else (raw_title, str(_publisher(entry)))
-                summary: str | None = _strip_html(str(entry.get("summary", ""))) or None
-                if summary is not None and (
-                    summary == title or (title in summary and len(summary) <= len(raw_title) + 8)
-                ):
-                    summary = None  # Google's description just repeats the headline
-                parsed = entry.get("published_parsed")
-                if not parsed or not title or not source:
-                    raise ValueError("missing title, source or date")  # noqa: TRY301
-                published = datetime(*parsed[:6]).replace(tzinfo=UTC)  # noqa: DTZ001 - tz set here
-                items.append(
-                    NewsItem.model_validate(
-                        {
-                            "url": entry.get("link", ""),
-                            "title": title,
-                            "summary": summary,
-                            "source": source,
-                            "published_at": published,
-                            "provider": self.name,
-                        }
-                    )
-                )
-            except (ValidationError, ValueError, TypeError):
-                log.debug("provider_item_skipped", provider=self.name)
-        return items
+        return collect_items(self.name, feedparser.parse(text).entries, self._to_item)
+
+    def _to_item(self, entry: feedparser.FeedParserDict) -> NewsItem:
+        raw_title = str(entry.get("title", "")).strip()
+        split = _split_title(raw_title)
+        title, source = split if split else (raw_title, _publisher(entry))
+        summary: str | None = _strip_html(str(entry.get("summary", ""))) or None
+        if summary is not None and (
+            summary == title or (title in summary and len(summary) <= len(raw_title) + 8)
+        ):
+            summary = None  # Google's description just repeats the headline
+        parsed = entry.get("published_parsed")
+        if not parsed or not title or not source:
+            raise ValueError("missing title, source or date")
+        published = datetime(*parsed[:6]).replace(tzinfo=UTC)  # noqa: DTZ001 - tz set here
+        return NewsItem.model_validate(
+            {
+                "url": entry.get("link", ""),
+                "title": title,
+                "summary": summary,
+                "source": source,
+                "published_at": published,
+                "provider": self.name,
+            }
+        )
 
 
 def _publisher(entry: feedparser.FeedParserDict) -> str:

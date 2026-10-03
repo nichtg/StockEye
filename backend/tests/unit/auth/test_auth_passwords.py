@@ -5,6 +5,7 @@ from app.auth.passwords import (
     hash_password,
     needs_rehash,
     validate_password,
+    verify_dummy,
     verify_password,
 )
 
@@ -50,3 +51,7 @@ def test_validate_password_violation_raises_plain_english(
 @pytest.mark.parametrize("password", ["x" * 12, "y" * 128])
 def test_validate_password_boundary_lengths_are_accepted(password: str) -> None:
     validate_password(password, "someone@example.com")
+
+
+def test_verify_dummy_accepts_any_password_without_raising() -> None:
+    verify_dummy("whatever-password-1")

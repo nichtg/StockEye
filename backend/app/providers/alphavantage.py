@@ -4,14 +4,13 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
-from app.logging_setup import get_logger
+from app.providers.collect import collect_items
 from app.providers.errors import ProviderDataError, RateLimitedError
 from app.providers.http import get_json
 from app.providers.models import NewsItem, NewsQuery
 
-log = get_logger(__name__)
 URL = "https://www.alphavantage.co/query"
 _EASTERN = ZoneInfo("America/New_York")
 _STAMP = "%Y%m%dT%H%M%S"
@@ -33,7 +32,7 @@ class AlphaVantageNews:
         self._key = api_key
 
     async def fetch(self, query: NewsQuery) -> list[NewsItem]:
-        if query.symbol.upper().endswith(".SI"):
+        if query.exchange == "SGX":
             return []  # NEWS_SENTIMENT tickers are US-listed only
         params = {
             "function": "NEWS_SENTIMENT",
@@ -54,27 +53,20 @@ class AlphaVantageNews:
             return []  # no articles in the window
         if not isinstance(feed, list):
             raise ProviderDataError(self.name, "feed is not a list")
-        items: list[NewsItem] = []
-        for raw in feed:
-            try:
-                art = _Article.model_validate(raw)
-                published = (
-                    datetime.strptime(art.time_published, _STAMP)
-                    .replace(tzinfo=_EASTERN)
-                    .astimezone(UTC)
-                )
-                items.append(
-                    NewsItem.model_validate(
-                        {
-                            "url": art.url,
-                            "title": art.title,
-                            "summary": art.summary or None,
-                            "source": art.source,
-                            "published_at": published,
-                            "provider": self.name,
-                        }
-                    )
-                )
-            except (ValidationError, ValueError):
-                log.debug("provider_item_skipped", provider=self.name)
-        return items
+        return collect_items(self.name, feed, self._to_item)
+
+    def _to_item(self, raw: object) -> NewsItem:
+        art = _Article.model_validate(raw)
+        published = (
+            datetime.strptime(art.time_published, _STAMP).replace(tzinfo=_EASTERN).astimezone(UTC)
+        )
+        return NewsItem.model_validate(
+            {
+                "url": art.url,
+                "title": art.title,
+                "summary": art.summary or None,
+                "source": art.source,
+                "published_at": published,
+                "provider": self.name,
+            }
+        )

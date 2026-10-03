@@ -30,6 +30,7 @@ from app.domain.technical.indicators import _validate_ohlcv, atr, ema, macd, rsi
 from app.domain.technical.reliability import PatternStats
 
 Lean = Literal["bullish", "bearish", "neutral"]
+Direction = Literal[-1, 0, 1]
 
 LEAN_THRESHOLD = 0.25
 EDGE_FULL_STRENGTH = 0.2
@@ -50,7 +51,7 @@ _TIE_REL = 1e-9  # relative tolerance below which two prices/indicators count as
 class Signal:
     key: str
     label: str
-    direction: int  # +1 bullish, 0 neutral, -1 bearish
+    direction: Direction  # +1 bullish, 0 neutral, -1 bearish
     weight: float
     detail: str
 
@@ -128,11 +129,11 @@ def _pattern_signal(
         return Signal("patterns", label, 0, 0.0, detail)
     mean = sum(signed) / len(signed)
     # weight * direction == mean signed strength, so opposing patterns offset one another.
-    direction = 1 if mean > 0 else -1 if mean < 0 else 0
-    return Signal("patterns", label, direction, abs(mean), detail)
+    return Signal("patterns", label, _sign(mean, 0.0), abs(mean), detail)
 
 
 def _rsi_signal(value: float) -> Signal:
+    d: Direction
     if value > _RSI_OVERBOUGHT:
         d, why = -1, "above 70 (overbought), which often precedes a pullback"
     elif value < _RSI_OVERSOLD:
@@ -147,7 +148,7 @@ def _tie_tolerance(scale: float) -> float:
     return _TIE_REL * max(abs(scale), 1.0)
 
 
-def _sign(x: float, tol: float) -> int:
+def _sign(x: float, tol: float) -> Direction:
     return 0 if abs(x) <= tol else 1 if x > 0 else -1
 
 

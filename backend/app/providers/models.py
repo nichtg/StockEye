@@ -66,6 +66,7 @@ class NewsItem(_Frozen):
 
 class NewsQuery(_Frozen):
     symbol: str
+    exchange: Exchange  # adapters branch on this, never on the ticker's suffix
     company_name: str
     start: datetime
     end: datetime

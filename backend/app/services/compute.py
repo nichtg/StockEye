@@ -2,7 +2,6 @@
 
 from dataclasses import asdict
 from datetime import date
-from typing import Literal, cast
 
 import pandas as pd
 
@@ -138,7 +137,7 @@ def compute_technical(symbol: str, frame: pd.DataFrame, statuses: PriceStatuses)
                 SignalOut(
                     key=s.key,
                     label=s.label,
-                    direction=cast(Literal[-1, 0, 1], s.direction),
+                    direction=s.direction,
                     weight=s.weight,
                     detail=s.detail,
                 )

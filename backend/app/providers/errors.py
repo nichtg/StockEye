@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+from app.providers.quota import Window
+
 
 class ProviderError(Exception):
     """Base class. ``provider`` names the adapter that failed."""
@@ -33,7 +35,7 @@ class QuotaExhaustedError(ProviderError):
         self,
         provider: str,
         message: str,
-        window: str | None = None,
+        window: Window | None = None,
         retry_at: datetime | None = None,
     ) -> None:
         super().__init__(provider, message)

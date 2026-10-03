@@ -1,7 +1,7 @@
 """Scheduled refresh: bring watchlisted symbols up to date after each exchange's close."""
 
+import asyncio
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 
 from app.db import Database
 from app.logging_setup import get_logger
@@ -11,8 +11,6 @@ from app.services.calendars import exchange_for
 from app.services.container import Services
 
 log = get_logger(__name__)
-
-EVENTS_WINDOW_DAYS = 760
 
 
 @dataclass(frozen=True)
@@ -46,13 +44,9 @@ async def refresh_exchange(services: Services, db: Database, exchange: Exchange)
 
 
 async def _refresh_symbol(services: Services, symbol: str) -> None:
-    today = datetime.now(UTC).date()
-    await services.market.daily_history(symbol)
-    await services.market.events(symbol, today - timedelta(days=EVENTS_WINDOW_DAYS), today)
-    try:
-        quote, _ = await services.market.quote(symbol)
-        name = quote.name
-    except Exception:
-        name = symbol.removesuffix(".SI")
+    market = services.market
+    _, _, name = await asyncio.gather(
+        market.daily_history(symbol), market.standard_events(symbol), market.company_name(symbol)
+    )
     await services.news.ensure_ingested(symbol, name)
     await services.news.wait(symbol)

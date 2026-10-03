@@ -18,7 +18,7 @@ from app.services import compute
 from app.services.calendars import session_calendar, spec_for
 from app.services.charts import INDICATORS, RANGES, RangeKey
 from app.services.errors import AppError
-from app.services.market_data import MarketDataService
+from app.services.market_data import EVENTS_START_DAYS, MarketDataService
 from app.services.news import IngestProgress, NewsService
 from app.services.reports import (
     ChartData,
@@ -34,7 +34,6 @@ from app.services.status import DataStatus, combine
 TECHNICAL_TTL = timedelta(minutes=15)
 MACRO_TTL = timedelta(hours=1)
 NEWS_WINDOW_DAYS = 730  # two years of news
-EVENTS_START_DAYS = 760  # one shared start so the events cache is reused across endpoints
 MIN_HISTORY_BARS = 30
 
 

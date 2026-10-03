@@ -1,10 +1,11 @@
-"""Quota types and the ledger port the guard depends on.
+"""The quota interface: decision and snapshot types plus the ledger port the guard depends on.
 
-``app.providers`` and ``app.repositories`` are sibling layers and must not import each other, so
-the guard talks to the MongoDB-backed ledger through these structural protocols. The concrete
-dataclasses live in ``app.repositories.quotas`` and satisfy them by shape.
+``QuotaLedgerPort`` is a seam with two adapters, the MongoDB ledger in
+``app.repositories.quotas`` and an in-memory fake in tests. The value types live here, beside
+the port, so both adapters and the guard share one definition.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
 
@@ -13,36 +14,30 @@ from app.config import ProviderLimits
 Window = Literal["minute", "day"]
 
 
-class QuotaDecisionLike(Protocol):
-    @property
-    def allowed(self) -> bool: ...
-    @property
-    def window_blocked(self) -> Window | None: ...
-    @property
-    def used_today(self) -> int: ...
-    @property
-    def daily_limit(self) -> int: ...
-    @property
-    def retry_at(self) -> datetime | None: ...
+@dataclass(frozen=True)
+class QuotaDecision:
+    allowed: bool
+    window_blocked: Window | None
+    used_today: int
+    daily_limit: int
+    retry_at: datetime | None
 
 
-class QuotaSnapshotLike(Protocol):
-    @property
-    def used_today(self) -> int: ...
-    @property
-    def daily_limit(self) -> int: ...
-    @property
-    def resets_at(self) -> datetime: ...
+@dataclass(frozen=True)
+class QuotaSnapshot:
+    used_today: int
+    daily_limit: int
+    resets_at: datetime  # next 00:00 UTC
 
 
-class QuotaLedgerLike(Protocol):
+class QuotaLedgerPort(Protocol):
     async def try_consume(
         self, provider: str, limits: ProviderLimits, now: datetime
-    ) -> QuotaDecisionLike: ...
+    ) -> QuotaDecision: ...
 
     async def snapshot(
         self, provider: str, limits: ProviderLimits, now: datetime
-    ) -> QuotaSnapshotLike: ...
+    ) -> QuotaSnapshot: ...
 
     async def record_error(self, provider: str, message: str, now: datetime) -> None: ...
 

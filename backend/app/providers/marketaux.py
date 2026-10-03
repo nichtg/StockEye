@@ -5,12 +5,11 @@ from datetime import datetime
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from app.logging_setup import get_logger
+from app.providers.collect import collect_items
 from app.providers.errors import ProviderDataError
 from app.providers.http import get_json
 from app.providers.models import NewsItem, NewsQuery
 
-log = get_logger(__name__)
 URL = "https://api.marketaux.com/v1/news/all"
 
 
@@ -46,22 +45,17 @@ class MarketauxNews:
             rows = _Response.model_validate(payload).data
         except ValidationError as exc:
             raise ProviderDataError(self.name, "response has no data list") from exc
-        items: list[NewsItem] = []
-        for raw in rows:
-            try:
-                art = _Article.model_validate(raw)
-                items.append(
-                    NewsItem.model_validate(
-                        {
-                            "url": art.url,
-                            "title": art.title,
-                            "summary": art.description or None,
-                            "source": art.source,
-                            "published_at": art.published_at,
-                            "provider": self.name,
-                        }
-                    )
-                )
-            except ValidationError:
-                log.debug("provider_item_skipped", provider=self.name)
-        return items
+        return collect_items(self.name, rows, self._to_item)
+
+    def _to_item(self, raw: object) -> NewsItem:
+        art = _Article.model_validate(raw)
+        return NewsItem.model_validate(
+            {
+                "url": art.url,
+                "title": art.title,
+                "summary": art.description or None,
+                "source": art.source,
+                "published_at": art.published_at,
+                "provider": self.name,
+            }
+        )

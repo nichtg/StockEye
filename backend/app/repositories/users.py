@@ -112,24 +112,53 @@ class UsersRepository:
         result = await self._col.delete_one({"_id": user_id})
         return result.deleted_count == 1
 
+    async def promote_to_admin(self, email: str) -> UserRecord | None:
+        """Make the user with this email an active admin; None when no such user exists."""
+        doc = await self._col.find_one_and_update(
+            {"email": email.lower()},
+            {"$set": {"role": "admin", "status": "active"}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return _record(doc) if doc else None
+
     async def record_failure(
         self, user_id: ObjectId, max_failures: int, lock_until: datetime
     ) -> None:
-        """Atomically count a failed login; lock the account once the cap is reached."""
-        doc = await self._col.find_one_and_update(
+        """Count a failed login and lock the account once the cap is reached.
+
+        A single pipeline update, so concurrent failures cannot both miss the threshold.
+        """
+        await self._col.update_one(
             {"_id": user_id},
-            {"$inc": {"failed_logins": 1}},
-            return_document=ReturnDocument.AFTER,
+            [
+                {
+                    "$set": {
+                        "failed_logins": {"$add": ["$failed_logins", 1]},
+                        # In one $set stage every expression sees the pre-increment document.
+                        "locked_until": {
+                            "$cond": [
+                                {"$gte": [{"$add": ["$failed_logins", 1]}, max_failures]},
+                                lock_until,
+                                "$locked_until",
+                            ]
+                        },
+                    }
+                }
+            ],
         )
-        if doc and doc["failed_logins"] >= max_failures:
-            await self._col.update_one({"_id": user_id}, {"$set": {"locked_until": lock_until}})
 
     async def clear_failures(self, user_id: ObjectId) -> None:
         await self._col.update_one(
             {"_id": user_id}, {"$set": {"failed_logins": 0, "locked_until": None}}
         )
 
-    async def record_login(self, user_id: ObjectId, new_hash: str | None = None) -> None:
+    async def record_login(
+        self, user_id: ObjectId, new_hash: str | None = None
+    ) -> UserRecord | None:
+        """Reset the failure counter, stamp the login and optionally swap in a rehashed password.
+
+        Returns the updated record, or None if the user was deleted meanwhile.
+        """
         changes: Document = {
             "failed_logins": 0,
             "locked_until": None,
@@ -137,4 +166,7 @@ class UsersRepository:
         }
         if new_hash is not None:
             changes["password_hash"] = new_hash
-        await self._col.update_one({"_id": user_id}, {"$set": changes})
+        doc = await self._col.find_one_and_update(
+            {"_id": user_id}, {"$set": changes}, return_document=ReturnDocument.AFTER
+        )
+        return _record(doc) if doc else None

@@ -20,6 +20,23 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+from app.domain.technical.candlestick_rules import (
+    Candle,
+    Ctx,
+    PatternThresholds,
+    bear_engulf,
+    bear_harami,
+    bull_engulf,
+    bull_harami,
+    crows,
+    dark_cloud,
+    evening_star,
+    hammer_shape,
+    inverted_shape,
+    morning_star,
+    piercing,
+    soldiers,
+)
 from app.domain.technical.indicators import _validate_ohlcv, atr, sma
 
 
@@ -115,220 +132,40 @@ class PatternHit:
     date: datetime  # index label of that candle
 
 
-@dataclass(frozen=True, slots=True)
-class PatternThresholds:
-    atr_period: int = 14
-    trend_sma_period: int = 10
-    trend_lookback: int = 5  # sma10[s-1] is compared with sma10[s-1-lookback]
-    long_body_atr: float = 0.5
-    doji_body_range: float = 0.1
-    doji_range_atr: float = 0.3
-    shape_min_body_range: float = 0.1
-    shape_tail_body_mult: float = 2.0
-    shape_opposite_tail_range: float = 0.1
-    engulf_body_atr: float = 0.3
-    star_small_body: float = 0.3
-    soldier_opposite_shadow_body: float = 0.3
-
-
 DEFAULT_THRESHOLDS = PatternThresholds()
 
 _UP, _DOWN = 1, -1
 _THREE_SPAN = 3
 
 
-@dataclass(frozen=True, slots=True)
-class _Candle:
-    o: float
-    h: float
-    low: float
-    c: float
-
-    @property
-    def body(self) -> float:
-        return abs(self.c - self.o)
-
-    @property
-    def range(self) -> float:
-        return self.h - self.low
-
-    @property
-    def upper(self) -> float:
-        return self.h - max(self.o, self.c)
-
-    @property
-    def lower(self) -> float:
-        return min(self.o, self.c) - self.low
-
-    @property
-    def bull(self) -> bool:
-        return self.c > self.o
-
-    @property
-    def bear(self) -> bool:
-        return self.c < self.o
-
-    @property
-    def mid(self) -> float:
-        return (self.o + self.c) / 2.0
-
-
-@dataclass(frozen=True, slots=True)
-class _Ctx:
-    trend: int | None  # +1 up, -1 down, 0 none, None unknown (warm-up)
-    atr: float  # NaN in warm-up
-
-
-def _hammer_shape(c: _Candle, t: PatternThresholds) -> bool:
-    return (
-        c.body > t.shape_min_body_range * c.range
-        and c.lower >= t.shape_tail_body_mult * c.body
-        and c.upper <= t.shape_opposite_tail_range * c.range
-    )
-
-
-def _inverted_shape(c: _Candle, t: PatternThresholds) -> bool:
-    return (
-        c.body > t.shape_min_body_range * c.range
-        and c.upper >= t.shape_tail_body_mult * c.body
-        and c.lower <= t.shape_opposite_tail_range * c.range
-    )
-
-
-def _is_long(c: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    return c.body >= t.long_body_atr * ctx.atr  # False when ATR is NaN
-
-
-def _bull_engulf(a: _Candle, b: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    return (
-        a.bear
-        and b.bull
-        and b.o <= a.c
-        and b.c >= a.o
-        and b.body > a.body
-        and b.body >= t.engulf_body_atr * ctx.atr
-    )
-
-
-def _bear_engulf(a: _Candle, b: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    return (
-        a.bull
-        and b.bear
-        and b.o >= a.c
-        and b.c <= a.o
-        and b.body > a.body
-        and b.body >= t.engulf_body_atr * ctx.atr
-    )
-
-
-def _bull_harami(a: _Candle, b: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    return (
-        a.bear
-        and _is_long(a, ctx, t)
-        and b.bull
-        and max(b.o, b.c) <= a.o
-        and min(b.o, b.c) >= a.c
-        and b.body < a.body
-    )
-
-
-def _bear_harami(a: _Candle, b: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    return (
-        a.bull
-        and _is_long(a, ctx, t)
-        and b.bear
-        and max(b.o, b.c) <= a.c
-        and min(b.o, b.c) >= a.o
-        and b.body < a.body
-    )
-
-
-def _piercing(a: _Candle, b: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    return a.bear and _is_long(a, ctx, t) and b.bull and b.o <= a.c and a.mid < b.c < a.o
-
-
-def _dark_cloud(a: _Candle, b: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    return a.bull and _is_long(a, ctx, t) and b.bear and b.o >= a.c and a.o < b.c < a.mid
-
-
-def _morning_star(a: _Candle, b: _Candle, c: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    return (
-        a.bear
-        and _is_long(a, ctx, t)
-        and b.body <= t.star_small_body * a.body
-        and b.mid < a.c
-        and c.bull
-        and c.c > a.mid
-    )
-
-
-def _evening_star(a: _Candle, b: _Candle, c: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    return (
-        a.bull
-        and _is_long(a, ctx, t)
-        and b.body <= t.star_small_body * a.body
-        and b.mid > a.c
-        and c.bear
-        and c.c < a.mid
-    )
-
-
-def _soldiers(a: _Candle, b: _Candle, c: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    cs = (a, b, c)
-    for i, x in enumerate(cs):
-        if not (
-            x.bull and _is_long(x, ctx, t) and x.upper <= t.soldier_opposite_shadow_body * x.body
-        ):
-            return False
-        if i > 0:
-            p = cs[i - 1]
-            if not (x.c > p.c and p.o <= x.o <= p.c):
-                return False
-    return True
-
-
-def _crows(a: _Candle, b: _Candle, c: _Candle, ctx: _Ctx, t: PatternThresholds) -> bool:
-    cs = (a, b, c)
-    for i, x in enumerate(cs):
-        if not (
-            x.bear and _is_long(x, ctx, t) and x.lower <= t.soldier_opposite_shadow_body * x.body
-        ):
-            return False
-        if i > 0:
-            p = cs[i - 1]
-            if not (x.c < p.c and p.c <= x.o <= p.o):
-                return False
-    return True
-
-
-def _trend_ok(ctx: _Ctx, wanted: int, *, allow_none: bool = False) -> bool:
+def _trend_ok(ctx: Ctx, wanted: int, *, allow_none: bool = False) -> bool:
     if ctx.trend is None:
         return False
     return ctx.trend == wanted or (allow_none and ctx.trend == 0)
 
 
-_TwoRule = Callable[[_Candle, _Candle, _Ctx, PatternThresholds], bool]
-_ThreeRule = Callable[[_Candle, _Candle, _Candle, _Ctx, PatternThresholds], bool]
+_TwoRule = Callable[[Candle, Candle, Ctx, PatternThresholds], bool]
+_ThreeRule = Callable[[Candle, Candle, Candle, Ctx, PatternThresholds], bool]
 
 _TWO: tuple[tuple[PatternKey, int, _TwoRule], ...] = (
-    (PatternKey.BULLISH_ENGULFING, _DOWN, _bull_engulf),
-    (PatternKey.BEARISH_ENGULFING, _UP, _bear_engulf),
-    (PatternKey.BULLISH_HARAMI, _DOWN, _bull_harami),
-    (PatternKey.BEARISH_HARAMI, _UP, _bear_harami),
-    (PatternKey.PIERCING_LINE, _DOWN, _piercing),
-    (PatternKey.DARK_CLOUD_COVER, _UP, _dark_cloud),
+    (PatternKey.BULLISH_ENGULFING, _DOWN, bull_engulf),
+    (PatternKey.BEARISH_ENGULFING, _UP, bear_engulf),
+    (PatternKey.BULLISH_HARAMI, _DOWN, bull_harami),
+    (PatternKey.BEARISH_HARAMI, _UP, bear_harami),
+    (PatternKey.PIERCING_LINE, _DOWN, piercing),
+    (PatternKey.DARK_CLOUD_COVER, _UP, dark_cloud),
 )
 # (key, required trend, accept unknown-free "none" trend too, rule)
 _THREE: tuple[tuple[PatternKey, int, bool, _ThreeRule], ...] = (
-    (PatternKey.MORNING_STAR, _DOWN, False, _morning_star),
-    (PatternKey.EVENING_STAR, _UP, False, _evening_star),
-    (PatternKey.THREE_WHITE_SOLDIERS, _DOWN, True, _soldiers),
-    (PatternKey.THREE_BLACK_CROWS, _UP, True, _crows),
+    (PatternKey.MORNING_STAR, _DOWN, False, morning_star),
+    (PatternKey.EVENING_STAR, _UP, False, evening_star),
+    (PatternKey.THREE_WHITE_SOLDIERS, _DOWN, True, soldiers),
+    (PatternKey.THREE_BLACK_CROWS, _UP, True, crows),
 )
 
 
 def _evaluate_at(
-    cs: list[_Candle], ctxs: list[_Ctx], t: int, th: PatternThresholds
+    cs: list[Candle], ctxs: list[Ctx], t: int, th: PatternThresholds
 ) -> list[PatternKey]:
     """Patterns whose last candle is at ``t``; context is taken before each first candle."""
     hits: list[PatternKey] = []
@@ -343,12 +180,12 @@ def _evaluate_at(
         and last.range >= th.doji_range_atr * ctx.atr
     ):
         hits.append(k.DOJI)
-    if _hammer_shape(last, th):
+    if hammer_shape(last, th):
         if _trend_ok(ctx, _DOWN):
             hits.append(k.HAMMER)
         if _trend_ok(ctx, _UP):
             hits.append(k.HANGING_MAN)
-    if _inverted_shape(last, th):
+    if inverted_shape(last, th):
         if _trend_ok(ctx, _DOWN):
             hits.append(k.INVERTED_HAMMER)
         if _trend_ok(ctx, _UP):
@@ -406,13 +243,13 @@ def trend_context(
 _TREND_INT: Mapping[str, int] = MappingProxyType({"up": _UP, "down": _DOWN, "none": 0})
 
 
-def _contexts(df: pd.DataFrame, th: PatternThresholds) -> list[_Ctx]:
+def _contexts(df: pd.DataFrame, th: PatternThresholds) -> list[Ctx]:
     """``ctxs[s]`` is the context for a pattern whose first candle is ``s``: bars ``<= s-1``."""
     trend = trend_context(df, th).to_numpy(dtype=object)
     atr_v = atr(df, th.atr_period).to_numpy(dtype=float)
     nan = float("nan")
     return [
-        _Ctx(
+        Ctx(
             _TREND_INT[trend[s]] if isinstance(trend[s], str) else None,
             float(atr_v[s - 1]) if s > 0 else nan,
         )
@@ -434,7 +271,7 @@ def detect_patterns(
     h = df["high"].to_numpy(dtype=float)
     low = df["low"].to_numpy(dtype=float)
     c = df["close"].to_numpy(dtype=float)
-    cs = [_Candle(float(o[i]), float(h[i]), float(low[i]), float(c[i])) for i in range(len(df))]
+    cs = [Candle(float(o[i]), float(h[i]), float(low[i]), float(c[i])) for i in range(len(df))]
     ctxs = _contexts(df, thresholds)
     hits: list[PatternHit] = []
     for t in range(len(df)):

@@ -6,7 +6,6 @@ from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
-from app.config import ProviderLimits, Settings
 from app.providers.errors import ProviderError, QuotaExhaustedError, SymbolNotFoundError
 from app.providers.models import (
     Bar,
@@ -17,8 +16,6 @@ from app.providers.models import (
     Quote,
     SymbolMatch,
 )
-from app.providers.resilience import ProviderGuard
-from app.repositories.quotas import QuotaDecision, QuotaSnapshot
 from app.sentiment.scorer import SentimentScore, SentimentUnavailableError
 from app.services.calendars import exchange_for, session_calendar
 
@@ -42,53 +39,6 @@ class FakeClock:
 
     def __call__(self) -> datetime:
         return self.now
-
-
-class Sleeps:
-    """Records requested sleeps instead of waiting."""
-
-    def __init__(self) -> None:
-        self.waited: list[float] = []
-
-    async def append_sleep(self, seconds: float) -> None:
-        self.waited.append(seconds)
-
-
-class AlwaysAllowLedger:
-    """Quota ledger that never blocks and remembers errors, in memory."""
-
-    def __init__(self) -> None:
-        self.errors: list[str] = []
-
-    async def try_consume(
-        self, provider: str, limits: ProviderLimits, now: datetime
-    ) -> QuotaDecision:
-        return QuotaDecision(True, None, 1, limits.per_day, None)
-
-    async def snapshot(self, provider: str, limits: ProviderLimits, now: datetime) -> QuotaSnapshot:
-        return QuotaSnapshot(1, limits.per_day, now + timedelta(days=1))
-
-    async def record_error(self, provider: str, message: str, now: datetime) -> None:
-        self.errors.append(message)
-
-    async def last_error(self, provider: str) -> tuple[str, datetime] | None:
-        return (self.errors[-1], CLOSED_NOW) if self.errors else None
-
-
-async def _no_sleep(_seconds: float) -> None:
-    return None
-
-
-def make_guard(settings: Settings, clock: FakeClock) -> ProviderGuard:
-    """A guard with one attempt per call, so a failing fake fails fast."""
-    return ProviderGuard(
-        AlwaysAllowLedger(),
-        settings.provider_limits,
-        settings.quota_warning_ratio,
-        max_attempts=1,
-        sleep=_no_sleep,
-        clock=clock,
-    )
 
 
 class FakeMarketData:

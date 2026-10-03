@@ -3,16 +3,15 @@
 Ingestion runs as an ``asyncio.Task`` per symbol (never two at once) and never raises: failures
 are logged and recorded in the ingest state, and the failed window is simply retried on the next
 run. Backfill windows are whole calendar months (so their ``YYYY-MM`` keys stay stable from day
-to day); the current, partial month is covered by the incremental pass.
+to day) fetched from one ``backfill`` provider; the current, partial month is covered by the
+incremental pass over every ``live`` provider. Providers arrive already guarded.
 """
 
 import asyncio
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from functools import partial
-from typing import Protocol
 
 from app.db import Database
 from app.domain.macro import ScoredArticle
@@ -21,9 +20,9 @@ from app.providers.base import NewsProvider
 from app.providers.errors import ProviderError, QuotaExhaustedError
 from app.providers.google_news import monthly_windows
 from app.providers.models import NewsItem, NewsQuery
-from app.providers.resilience import ProviderGuard
 from app.repositories.news import ArticleText, IngestState, NewsRepository, SentimentRecord
-from app.sentiment.scorer import SentimentScore, SentimentUnavailableError
+from app.sentiment.scorer import SentimentScore, SentimentScorer, SentimentUnavailableError
+from app.services.calendars import exchange_for, root_ticker
 from app.services.status import DataStatus, ok
 
 log = get_logger(__name__)
@@ -33,10 +32,7 @@ INCREMENTAL_DAYS = 30
 INCREMENTAL_EVERY = timedelta(hours=6)
 RETRY_AFTER_ATTEMPT = timedelta(minutes=5)  # do not hammer providers after a failed run
 STALE_RUN_AFTER = timedelta(minutes=30)  # an "in progress" marker older than this is a crash
-MAX_QUOTA_WAIT = 65.0  # seconds; one minute window plus a margin
-MAX_QUOTA_WAITS = 5
 SCORE_BATCH = 64
-BACKFILL_PROVIDER = "google_news"  # the only adapter that can reach far back
 
 _SUFFIXES = frozenset(
     {"inc", "corp", "corporation", "ltd", "limited", "holdings", "group", "co", "plc", "nv", "sa"}
@@ -71,7 +67,7 @@ def is_relevant(symbol: str, company_name: str, title: str, summary: str | None)
     name = core_name(company_name)
     if name and re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE):
         return True
-    root = symbol.upper().removesuffix(".SI")
+    root = root_ticker(symbol)
     return len(root) >= _MIN_TICKER_LENGTH and bool(
         re.search(rf"(?<![\w.]){re.escape(root)}(?![\w])", text)
     )
@@ -84,15 +80,6 @@ class IngestProgress:
     in_progress: bool
 
 
-class ScorerPort(Protocol):
-    """What the service needs from a scorer (``model_version`` read-only, as on FinBERT)."""
-
-    @property
-    def model_version(self) -> str: ...
-
-    def score(self, texts: Sequence[str]) -> list[SentimentScore]: ...
-
-
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -101,21 +88,25 @@ def _month_start(moment: datetime) -> datetime:
     return moment.astimezone(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+def _missing(
+    windows: list[tuple[datetime, datetime]], state: IngestState
+) -> list[tuple[datetime, datetime]]:
+    return [w for w in windows if w[0].strftime("%Y-%m") not in state.backfilled_months]
+
+
 class NewsService:
     def __init__(
         self,
         db: Database,
-        providers: list[NewsProvider],
-        guard: ProviderGuard,
-        scorer: ScorerPort,
+        backfill: NewsProvider,
+        live: list[NewsProvider],
+        scorer: SentimentScorer,
         *,
         clock: Callable[[], datetime] = _utc_now,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
-        self._sleep = sleep
         self._repo = NewsRepository(db)
-        self._providers = providers
-        self._guard = guard
+        self._backfill = backfill  # the one adapter that can reach far back
+        self._live = live
         self._scorer = scorer
         self._clock = clock
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -133,7 +124,7 @@ class NewsService:
         now = self._clock()
         windows = self._windows(now)
         state = await self._repo.get_state(symbol)
-        missing = [w for w in windows if w[0].strftime("%Y-%m") not in state.backfilled_months]
+        missing = _missing(windows, state)
         total = len(windows)
         if self._running(symbol):
             return IngestProgress(total - len(missing), total, True)
@@ -191,102 +182,80 @@ class NewsService:
     async def _ingest(
         self, symbol: str, company_name: str, windows: list[tuple[datetime, datetime]]
     ) -> str | None:
+        """Backfill then incremental pass; returns up to three failure messages, if any."""
         state = await self._repo.get_state(symbol)
+        missing = _missing(windows, state)
+        try:
+            failures = await self._backfill_months(symbol, company_name, missing)
+        except QuotaExhaustedError as exc:
+            # The daily budget is gone: every remaining window would fail the same way.
+            log.warning("news_backfill_stopped", symbol=symbol, error=str(exc))
+            return str(exc)
+        now = self._clock()
+        recent = self._query(symbol, company_name, now - timedelta(days=INCREMENTAL_DAYS), now)
+        incremental_failures = await self._incremental(symbol, company_name, recent)
+        if not incremental_failures:
+            await self._repo.mark_incremental(symbol, now)
+        return "; ".join([*failures, *incremental_failures][:3]) or None
+
+    def _query(self, symbol: str, company_name: str, start: datetime, end: datetime) -> NewsQuery:
+        return NewsQuery(
+            symbol=symbol,
+            exchange=exchange_for(symbol),
+            company_name=company_name,
+            start=start,
+            end=end,
+        )
+
+    async def _backfill_months(
+        self, symbol: str, company_name: str, windows: list[tuple[datetime, datetime]]
+    ) -> list[str]:
+        """Fetch and store each missing month; returns the failures of the months skipped.
+
+        A skipped month is retried on the next run. Only a daily quota error propagates, since
+        it dooms every remaining window.
+        """
         failures: list[str] = []
         for start, end in windows:
             month = start.strftime("%Y-%m")
-            if month in state.backfilled_months:
-                continue
             try:
-                fetched = await self._fetch_backfill_window(
-                    symbol, company_name, start, end, failures
-                )
-            except QuotaExhaustedError as exc:
-                # The daily budget is gone: every remaining window would fail the same way.
-                log.warning("news_backfill_stopped", symbol=symbol, error=str(exc))
-                return str(exc)
-            if fetched is None:
-                continue  # skipped now, retried on the next run
-            await self._store(symbol, company_name, fetched)
-            await self._repo.mark_month_done(symbol, month)
-        now = self._clock()
-        recent = NewsQuery(
-            symbol=symbol,
-            company_name=company_name,
-            start=now - timedelta(days=INCREMENTAL_DAYS),
-            end=now,
-        )
-        incremental_ok = True
-        for provider in self._providers:
-            try:
-                items = await self._call(provider, recent)
-            except ProviderError as exc:
-                incremental_ok = False
-                failures.append(str(exc))
-                log.warning(
-                    "news_window_failed", symbol=symbol, provider=provider.name, error=str(exc)
-                )
-                continue
-            await self._store(symbol, company_name, items)
-        if incremental_ok:
-            await self._repo.mark_incremental(symbol, now)
-        return "; ".join(failures[:3]) or None
-
-    async def _call(self, provider: NewsProvider, query: NewsQuery) -> list[NewsItem]:
-        """Guarded fetch that waits out a per-minute quota instead of skipping the window.
-
-        Ingestion is a background job, so pausing is cheap. A daily quota error propagates.
-        """
-        for _ in range(MAX_QUOTA_WAITS):
-            try:
-                return await self._guard.call(provider.name, partial(provider.fetch, query))
-            except QuotaExhaustedError as exc:
-                if exc.window != "minute":
-                    raise
-                wait = MAX_QUOTA_WAIT
-                if exc.retry_at is not None:
-                    wait = min(
-                        MAX_QUOTA_WAIT, max(0.0, (exc.retry_at - self._clock()).total_seconds())
-                    )
-                log.info(
-                    "news_backfill_paused", provider=provider.name, wait_seconds=round(wait, 1)
-                )
-                await self._sleep(wait)
-        return await self._guard.call(provider.name, partial(provider.fetch, query))
-
-    async def _fetch_backfill_window(
-        self,
-        symbol: str,
-        company_name: str,
-        start: datetime,
-        end: datetime,
-        failures: list[str],
-    ) -> list[NewsItem] | None:
-        query = NewsQuery(symbol=symbol, company_name=company_name, start=start, end=end)
-        items: list[NewsItem] = []
-        found_provider = False
-        for provider in self._providers:
-            if provider.name != BACKFILL_PROVIDER:
-                continue
-            found_provider = True
-            try:
-                items += await self._call(provider, query)
+                items = await self._backfill.fetch(self._query(symbol, company_name, start, end))
             except QuotaExhaustedError as exc:
                 if exc.window == "day":
                     raise
                 failures.append(str(exc))
-                return None
+                continue
             except ProviderError as exc:
                 failures.append(str(exc))
                 log.warning(
                     "news_window_failed",
                     symbol=symbol,
-                    provider=provider.name,
-                    window=start.strftime("%Y-%m"),
+                    provider=self._backfill.name,
+                    window=month,
                     error=str(exc),
                 )
-                return None
-        return items if found_provider else None
+                continue
+            await self._store(symbol, company_name, items)
+            await self._repo.mark_month_done(symbol, month)
+        return failures
+
+    async def _incremental(self, symbol: str, company_name: str, recent: NewsQuery) -> list[str]:
+        """Fetch the last ``INCREMENTAL_DAYS`` from every live provider at once; return failures."""
+        results = await asyncio.gather(
+            *(provider.fetch(recent) for provider in self._live), return_exceptions=True
+        )
+        failures: list[str] = []
+        for provider, result in zip(self._live, results, strict=True):
+            if isinstance(result, ProviderError):
+                failures.append(str(result))
+                log.warning(
+                    "news_window_failed", symbol=symbol, provider=provider.name, error=str(result)
+                )
+            elif isinstance(result, BaseException):
+                raise result
+            else:
+                await self._store(symbol, company_name, result)
+        return failures
 
     async def _store(self, symbol: str, company_name: str, items: list[NewsItem]) -> None:
         relevant = [i for i in items if is_relevant(symbol, company_name, i.title, i.summary)]
@@ -314,7 +283,7 @@ class NewsService:
 
     def _progress_of(self, symbol: str, state: IngestState) -> IngestProgress:
         windows = self._windows(self._clock())
-        done = sum(1 for w in windows if w[0].strftime("%Y-%m") in state.backfilled_months)
+        done = len(windows) - len(_missing(windows, state))
         return IngestProgress(done, len(windows), self._running(symbol))
 
     async def status(self, symbol: str) -> DataStatus:

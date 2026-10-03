@@ -39,21 +39,10 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+def verify_dummy(password: str) -> None:
+    """Spend a real verification's CPU so unknown-email logins take as long as wrong passwords."""
+    verify_password(password, _DUMMY_HASH)
+
+
 def needs_rehash(password_hash: str) -> bool:
     return _hasher.check_needs_rehash(password_hash)
-
-
-class Argon2Hasher:
-    """Adapter the service layer depends on (services may not import ``app.auth`` directly)."""
-
-    def hash(self, password: str) -> str:
-        return hash_password(password)
-
-    def verify(self, password: str, password_hash: str) -> bool:
-        return verify_password(password, password_hash)
-
-    def verify_dummy(self, password: str) -> None:
-        verify_password(password, _DUMMY_HASH)
-
-    def needs_rehash(self, password_hash: str) -> bool:
-        return needs_rehash(password_hash)

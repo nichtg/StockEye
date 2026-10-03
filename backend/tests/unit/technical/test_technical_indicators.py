@@ -9,6 +9,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from technical_refs import (
+    frame,
     ohlc_frames,
     ref_atr,
     ref_bollinger,
@@ -29,6 +30,10 @@ from app.domain.technical import (
 )
 
 NAN = float("nan")
+
+
+def _daily(closes: list[float]) -> pd.DataFrame:
+    return frame([(c, c + 1.0, c - 1.0, c) for c in closes])
 
 
 def _series(values: list[float]) -> pd.Series:
@@ -337,3 +342,21 @@ def test_indicators_property_future_bar_never_changes_earlier_values(
 
     for before, after in zip(_all_indicators(df, k), _all_indicators(changed, k), strict=True):
         np.testing.assert_array_equal(before, after)
+
+
+def test_rsi_propagates_nan_instead_of_reading_it_as_no_change() -> None:
+    close = pd.Series([100.0 + (i % 3) for i in range(40)])
+    close.iloc[20] = np.nan
+
+    out = rsi(close, 14)
+
+    assert not out.iloc[:14].notna().any()
+    assert out.iloc[14:20].notna().all()
+    assert out.iloc[20:].isna().all()
+
+
+def test_anchored_vwap_rejects_timezone_aware_anchor() -> None:
+    df = _daily([100.0 + i for i in range(10)])
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        anchored_vwap(df, pd.Timestamp("2024-01-03", tz="UTC"))

@@ -1,12 +1,18 @@
 # ruff: noqa: RUF005
 """Reliability tests on hand-computed forward returns."""
 
+import numpy as np
 import pandas as pd
 import pytest
-from technical_refs import frame, ref_wilson
+from technical_refs import frame, ref_wilson, trend_is
 
-from app.domain.technical import PatternHit, PatternKey, pattern_reliability, wilson_interval
-from app.domain.technical.candlesticks import PATTERNS
+from app.domain.technical import (
+    PatternHit,
+    PatternKey,
+    pattern_reliability,
+    wilson_interval,
+)
+from app.domain.technical.candlesticks import PATTERNS, trend_context
 
 K = PatternKey
 
@@ -19,6 +25,10 @@ def _ctx(df: pd.DataFrame, value: str) -> pd.Series:
     """A trend-context series that is the same everywhere (the hand fixtures are too short
     for a real 10-bar SMA trend)."""
     return pd.Series(value, index=df.index, dtype=object)
+
+
+def _daily(closes: list[float]) -> pd.DataFrame:
+    return frame([(c, c + 1.0, c - 1.0, c) for c in closes])
 
 
 def _fixture() -> pd.DataFrame:
@@ -177,3 +187,90 @@ def test_pattern_reliability_rejects_non_positive_horizon() -> None:
 
 def test_pattern_reliability_no_hits_returns_empty_mapping() -> None:
     assert pattern_reliability(_fixture(), []) == {}
+
+
+def test_pattern_reliability_bearish_base_rate_is_share_of_negative_returns_with_ticks() -> None:
+    # Flat open of 100 and mostly-100 closes: most forward returns are exactly 0 (a tick-size
+    # market). 1 - up-rate would count those zeros as "down"; the base rate must not.
+    closes = [100.0] * 60
+    for i in range(0, 60, 7):
+        closes[i] = 101.0
+    for i in range(3, 60, 11):
+        closes[i] = 99.0
+    df = frame([(100.0, 102.0, 98.0, c) for c in closes])
+    horizon = 3
+    rets = [closes[t + horizon] / 100.0 - 1.0 for t in range(len(closes) - horizon)]
+    share_down = sum(r < 0 for r in rets) / len(rets)
+    share_up = sum(r > 0 for r in rets) / len(rets)
+    assert 1.0 - share_up > share_down + 0.3  # guard: the old formula would be far off
+
+    stats = pattern_reliability(
+        df, [_hit(K.EVENING_STAR, 10, df)], horizon=horizon, trend=_ctx(df, "up")
+    )[K.EVENING_STAR]
+
+    assert stats.base_down_rate == pytest.approx(share_down)
+    assert stats.base_rate == pytest.approx(share_down)
+    assert stats.base_up_rate == pytest.approx(share_up)
+
+
+def test_pattern_reliability_default_min_samples_is_fifteen() -> None:
+    df = _daily([100.0 + (i % 5) for i in range(200)])
+    hits = [_hit(K.DOJI, t, df) for t in range(0, 14 * 5, 5)]  # 14 non-overlapping hits
+    more = [*hits, _hit(K.DOJI, 14 * 5, df)]  # 15
+
+    thin = pattern_reliability(df, hits)[K.DOJI]
+    enough = pattern_reliability(df, more)[K.DOJI]
+
+    assert (thin.n, thin.sufficient) == (14, False)
+    assert (enough.n, enough.sufficient) == (15, True)
+
+
+def _mean_reverting(n: int = 3000, seed: int = 1) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    x = np.zeros(n)
+    for i in range(1, n):
+        x[i] = 0.9 * x[i - 1] + rng.normal(0.0, 0.01)
+    c = 100.0 * np.exp(x)
+    o = np.r_[c[0], c[:-1]]
+    return pd.DataFrame(
+        {
+            "open": o,
+            "high": np.maximum(o, c) * 1.002,
+            "low": np.minimum(o, c) * 0.998,
+            "close": c,
+            "volume": 1000.0,
+        },
+        index=pd.bdate_range("2010-01-01", periods=n),
+    )
+
+
+def test_pattern_reliability_context_only_pattern_has_no_edge_on_mean_reverting_series() -> None:
+    df = _mean_reverting()
+    tc = trend_context(df)
+    # A fake "pattern" that fires on every bar in a downtrend and encodes nothing else.
+    hits = [_hit(K.HAMMER, t, df) for t in range(len(df)) if trend_is(tc.iloc[t], "down")]
+    close, open_ = df["close"].to_numpy(), df["open"].to_numpy()
+    unconditional_up = float((close[5:] / open_[1:-4] - 1 > 0).mean())
+
+    stats = pattern_reliability(df, hits)[K.HAMMER]
+
+    assert stats.hit_rate is not None
+    assert stats.hit_rate - unconditional_up > 0.1  # the old yardstick would show a big "edge"
+    assert stats.edge is not None
+    assert abs(stats.edge) < 0.05
+
+
+def test_pattern_reliability_base_rate_uses_only_bars_in_the_required_context() -> None:
+    # Hand fixture: forward ret (horizon 1) is entry open[t+1]=100 vs close[t+1].
+    closes = [101.0, 99.0, 101.0, 101.0, 99.0, 100.0]  # ret[t] = closes[t+1]/100 - 1, t = 0..4
+    df = frame([(100.0, 102.0, 98.0, c) for c in closes])
+    ctx = pd.Series(["down", "down", "up", "none", "up", pd.NA], index=df.index, dtype=object)
+    hits = [_hit(K.HAMMER, 0, df), _hit(K.THREE_WHITE_SOLDIERS, 0, df), _hit(K.DOJI, 0, df)]
+
+    result = pattern_reliability(df, hits, horizon=1, trend=ctx)
+
+    # rets: t0 -.01, t1 +.01, t2 +.01, t3 -.01, t4 0.0
+    assert result[K.HAMMER].base_up_rate == pytest.approx(0.5)  # down bars: t0, t1
+    assert result[K.THREE_WHITE_SOLDIERS].base_up_rate == pytest.approx(1 / 3)  # t0, t1, t3
+    assert result[K.DOJI].base_up_rate == pytest.approx(2 / 5)  # every eligible bar
+    assert result[K.HAMMER].base_n == 2

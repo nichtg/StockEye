@@ -10,6 +10,8 @@ from app.config import Settings
 from app.db import Database
 from app.main import create_app
 from app.providers.errors import RateLimitedError, TransientProviderError
+from app.providers.resilience import ProviderGuard
+from app.repositories.quotas import QuotaLedger
 from app.services.analysis import AnalysisService
 from app.services.container import Services
 from app.services.market_data import MarketDataService
@@ -21,7 +23,6 @@ from tests.services.fakes import (
     FakeMarketData,
     FakeNews,
     FakeScorer,
-    make_guard,
 )
 
 pytestmark = pytest.mark.integration
@@ -53,9 +54,11 @@ async def app(
     """The real app, with its services built around fake vendors."""
 
     async def factory(cfg: Settings, database: Database) -> Services:
-        guard = make_guard(cfg, clock)
-        market = MarketDataService(database, provider, guard, clock)
-        news = NewsService(database, [news_provider], guard, FakeScorer(), clock=clock)
+        guard = ProviderGuard(
+            QuotaLedger(database), cfg.provider_limits, cfg.quota_warning_ratio, clock=clock
+        )
+        market = MarketDataService(database, provider, clock)
+        news = NewsService(database, news_provider, [news_provider], FakeScorer(), clock=clock)
         return Services(market, news, AnalysisService(database, market, news, clock), guard)
 
     application = create_app(settings, services_factory=factory)

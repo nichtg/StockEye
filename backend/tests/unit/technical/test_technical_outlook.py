@@ -56,6 +56,33 @@ def _stats(
     )
 
 
+def _edge_stats(
+    key: PatternKey,
+    *,
+    n: int = 18,
+    success: int = 14,
+    base: float = 0.55,
+    low: float = 0.6,
+    sufficient: bool = True,
+) -> PatternStats:
+    hit = success / n
+    return PatternStats(
+        key=key,
+        n=n,
+        up_count=success,
+        success_count=success,
+        hit_rate=hit,
+        wilson_low=low,
+        wilson_high=0.95,
+        mean_return=0.01,
+        median_return=0.01,
+        base_up_rate=base,
+        base_rate=base,
+        edge=hit - base,
+        sufficient=sufficient,
+    )
+
+
 def _sig(outlook: Outlook, key: str) -> Signal:
     return next(s for s in outlook.signals if s.key == key)
 
@@ -349,3 +376,88 @@ def test_outlook_and_signal_are_frozen() -> None:
         out.score = 1.0  # type: ignore[misc]
     with pytest.raises(AttributeError):
         out.signals[0].weight = 2.0  # type: ignore[misc]
+
+
+def test_build_outlook_constant_prices_is_neutral_with_score_zero() -> None:
+    df = frame([(100.0, 100.0, 100.0, 100.0)] * 60)
+
+    out = build_outlook(df, [], {}, 100.0, AS_OF)
+
+    assert out.lean == "neutral"
+    assert out.score == 0.0
+    by_key = {s.key: s for s in out.signals}
+    for key in ("rsi14", "ema_cross", "macd_momentum", "vwap"):
+        assert by_key[key].direction == 0
+        assert by_key[key].weight > 0  # the tie still counts its weight
+
+
+def test_build_outlook_pattern_counts_only_when_wilson_low_beats_base_rate() -> None:
+    credible = {K.HAMMER: _edge_stats(K.HAMMER, low=0.56)}
+    not_credible = {K.HAMMER: _edge_stats(K.HAMMER, low=0.55)}  # equals the base rate: not above it
+    daily = _daily(_growth())
+
+    yes = build_outlook(daily, [_hit(K.HAMMER, 1)], credible, None, AS_OF)
+    no = build_outlook(daily, [_hit(K.HAMMER, 1)], not_credible, None, AS_OF)
+
+    sig_yes = next(s for s in yes.signals if s.key == "patterns")
+    sig_no = next(s for s in no.signals if s.key == "patterns")
+    assert sig_yes.direction == 1
+    assert sig_yes.weight == pytest.approx(min((14 / 18 - 0.55) / 0.2, 1.0))
+    assert (sig_no.direction, sig_no.weight) == (0, 0.0)
+
+
+def test_build_outlook_pattern_detail_explains_reliable_and_unclear_outcomes() -> None:
+    daily = _daily(_growth())
+    rel = {K.BULLISH_ENGULFING: _edge_stats(K.BULLISH_ENGULFING)}
+    good = build_outlook(daily, [_hit(K.BULLISH_ENGULFING, 1)], rel, None, AS_OF)
+    weak = build_outlook(
+        daily,
+        [_hit(K.BULLISH_ENGULFING, 1)],
+        {K.BULLISH_ENGULFING: _edge_stats(K.BULLISH_ENGULFING, low=0.4)},
+        None,
+        AS_OF,
+    )
+
+    d_good = next(s.detail for s in good.signals if s.key == "patterns")
+    d_weak = next(s.detail for s in weak.signals if s.key == "patterns")
+
+    assert "Bullish engulfing has been reliable for this stock" in d_good
+    assert "higher a week later 14 of 18 times vs 55% normally" in d_good
+    assert "seen 18 times, but not clearly better than a typical week" in d_weak
+
+
+def test_build_outlook_bearish_pattern_detail_says_lower() -> None:
+    rel = {K.EVENING_STAR: _edge_stats(K.EVENING_STAR)}
+
+    out = build_outlook(_daily(_growth()), [_hit(K.EVENING_STAR, 1)], rel, None, AS_OF)
+
+    sig = next(s for s in out.signals if s.key == "patterns")
+    assert sig.direction == -1
+    assert "lower a week later 14 of 18 times" in sig.detail
+
+
+def test_build_outlook_doji_hit_is_indecision_with_zero_weight_not_thin_history() -> None:
+    out = build_outlook(_daily(_growth()), [_hit(K.DOJI, 1)], {}, None, AS_OF)
+
+    sig = next(s for s in out.signals if s.key == "patterns")
+    assert (sig.direction, sig.weight) == (0, 0.0)
+    assert "Doji: indecision pattern, no directional signal" in sig.detail
+    assert "not enough" not in sig.detail
+
+
+def test_build_outlook_rsi_detail_has_one_decimal() -> None:
+    closes = [100.0 + (i % 2) * 1.5 + (i // 7) * 0.2 for i in range(40)]
+
+    out = build_outlook(_daily(closes), [], {}, None, AS_OF)
+
+    detail = next(s.detail for s in out.signals if s.key == "rsi14")
+    value = detail.split("RSI is ")[1].split(",")[0]
+    assert len(value.split(".")[1]) == 1
+
+
+def test_outlook_exposes_typical_week_range_and_coverage() -> None:
+    out: Outlook = build_outlook(_daily(_growth()), [], {}, None, AS_OF)
+
+    assert out.expected_range_coverage == 0.9
+    assert out.typical_week_range == out.expected_range
+    assert out.expected_range is not None

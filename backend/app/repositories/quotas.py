@@ -6,9 +6,7 @@ exists and is full.
 """
 
 import math
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
 
 from pymongo import ASCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -16,29 +14,13 @@ from pymongo.errors import DuplicateKeyError
 from app.config import ProviderLimits
 from app.db import Database, Document
 from app.logging_setup import get_logger
+from app.providers.quota import QuotaDecision, QuotaSnapshot, Window
 
 log = get_logger(__name__)
 
 QUOTA = "provider_quota"
 HEALTH = "provider_health"
-Window = Literal["minute", "day"]
 DEFAULT_WARNING_RATIO = 0.8
-
-
-@dataclass(frozen=True)
-class QuotaDecision:
-    allowed: bool
-    window_blocked: Window | None
-    used_today: int
-    daily_limit: int
-    retry_at: datetime | None
-
-
-@dataclass(frozen=True)
-class QuotaSnapshot:
-    used_today: int
-    daily_limit: int
-    resets_at: datetime  # next 00:00 UTC
 
 
 def _minute_start(now: datetime) -> datetime:
@@ -111,9 +93,6 @@ class QuotaLedger:
                 False, "minute", await self._used_today(provider, day), limits.per_day, retry_at
             )
 
-        new_day = not await self._db[QUOTA].find_one(
-            {"provider": provider, "window": "day", "start": day}, {"_id": 1}
-        )
         day_doc = await self._bump(provider, "day", day, limits.per_day, timedelta(days=3))
         if day_doc is None:
             # Roll back so a day-blocked call does not eat the minute budget.
@@ -132,7 +111,7 @@ class QuotaLedger:
             return QuotaDecision(False, "day", limits.per_day, limits.per_day, resets_at)
 
         used = int(day_doc["used"])
-        if new_day:
+        if used == 1:  # the upsert just created today's document
             await self._maybe_log_reset(provider, day)
         threshold = math.ceil(self._warning_ratio * limits.per_day)
         if used >= threshold and await self._flag_once(provider, "day", day, "warning_logged"):

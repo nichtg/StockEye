@@ -15,7 +15,8 @@ from fastapi import Depends, Request
 
 from app.config import Settings
 from app.db import Database
-from app.providers.registry import build_news_providers
+from app.providers.google_news import GoogleNewsRss
+from app.providers.registry import build_keyed_news_providers
 from app.providers.resilience import ProviderGuard
 from app.providers.yahoo import YahooMarketData
 from app.repositories.quotas import QuotaLedger
@@ -55,12 +56,18 @@ async def build_services(settings: Settings, db: Database) -> Services:
         settings.provider_limits,
         settings.quota_warning_ratio,
     )
-    market = MarketDataService(db, YahooMarketData(), guard)
+    market = MarketDataService(db, guard.wrap_market(YahooMarketData()))
+    # Ingestion is a background job, so every news adapter may wait out a per-minute quota.
+    google = guard.wrap_news(GoogleNewsRss(http), wait_minute_quota=True)
+    keyed = [
+        guard.wrap_news(adapter, wait_minute_quota=True)
+        for adapter in build_keyed_news_providers(settings, http)
+    ]
     news = NewsService(
         db,
-        build_news_providers(settings, http),
-        guard,
-        FinBertOnnxScorer(settings.finbert_model_dir),
+        backfill=google,
+        live=[*keyed, google],
+        scorer=FinBertOnnxScorer(settings.finbert_model_dir),
     )
     return Services(market, news, AnalysisService(db, market, news), guard, http)
 

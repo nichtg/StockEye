@@ -192,15 +192,18 @@ class YahooMarketData:
                 )
             return out
 
-        events = await self._run(core, symbol)
-        try:
-            events += await self._run(earnings, symbol)
-        except ProviderError as exc:
-            # Partial success: dividends and splits are still worth returning.
-            log.warning(
-                "provider_partial_result", provider=self.name, part="earnings", error=str(exc)
-            )
-        return sorted(events, key=lambda e: (e.date, e.kind))
+        async def optional_earnings() -> list[CorporateEvent]:
+            try:
+                return await self._run(earnings, symbol)
+            except ProviderError as exc:
+                # Partial success: dividends and splits are still worth returning.
+                log.warning(
+                    "provider_partial_result", provider=self.name, part="earnings", error=str(exc)
+                )
+                return []
+
+        actions, reported = await asyncio.gather(self._run(core, symbol), optional_earnings())
+        return sorted([*actions, *reported], key=lambda e: (e.date, e.kind))
 
 
 def _as_date(ts: Any) -> date:

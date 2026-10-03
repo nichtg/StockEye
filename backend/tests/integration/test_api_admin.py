@@ -2,7 +2,6 @@ import httpx
 import pytest
 from bson import ObjectId
 
-from app.auth.passwords import Argon2Hasher
 from app.config import Settings
 from app.db import Database
 from app.services.accounts import AccountService, AppError
@@ -93,7 +92,7 @@ async def test_account_service_refuses_to_remove_the_last_active_admin(
     settings: Settings, db: Database
 ) -> None:
     only_admin = await make_admin(db)
-    service = AccountService(db, settings, Argon2Hasher())
+    service = AccountService(db, settings)
     someone_else = ObjectId()
 
     with pytest.raises(AppError) as demote:

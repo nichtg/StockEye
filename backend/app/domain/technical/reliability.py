@@ -20,13 +20,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from app.domain.technical.candlestick_rules import PatternThresholds
 from app.domain.technical.candlesticks import (
     DEFAULT_THRESHOLDS,
     PATTERNS,
     Bias,
     PatternHit,
     PatternKey,
-    PatternThresholds,
     context_allows,
     trend_context,
 )

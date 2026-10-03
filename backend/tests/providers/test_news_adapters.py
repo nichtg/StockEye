@@ -14,7 +14,7 @@ from app.providers.finnhub import FinnhubNews
 from app.providers.google_news import GoogleNewsRss, monthly_windows
 from app.providers.marketaux import MarketauxNews
 from app.providers.models import NewsQuery
-from app.providers.registry import build_news_providers, configured_providers
+from app.providers.registry import build_keyed_news_providers, configured_providers
 
 FIXTURES = Path(__file__).parent / "fixtures"
 START = datetime(2026, 9, 1, tzinfo=UTC)
@@ -22,7 +22,8 @@ END = datetime(2026, 10, 1, tzinfo=UTC)
 
 
 def _query(symbol: str = "AAPL", name: str = "Apple Inc.") -> NewsQuery:
-    return NewsQuery(symbol=symbol, company_name=name, start=START, end=END)
+    exchange = "SGX" if symbol.endswith(".SI") else "US"
+    return NewsQuery(symbol=symbol, exchange=exchange, company_name=name, start=START, end=END)
 
 
 @pytest.fixture
@@ -274,10 +275,10 @@ def test_monthly_windows_cover_24_contiguous_months_ending_at_end() -> None:
 # --- Registry --------------------------------------------------------------------------------
 
 
-def test_registry_without_keys_has_only_google_news(client: httpx.AsyncClient) -> None:
+def test_registry_without_keys_has_no_keyed_providers(client: httpx.AsyncClient) -> None:
     settings = Settings(environment="test")
 
-    assert [p.name for p in build_news_providers(settings, client)] == ["google_news"]
+    assert build_keyed_news_providers(settings, client) == []
     assert configured_providers(settings) == {
         "yahoo": True,
         "google_news": True,
@@ -287,7 +288,7 @@ def test_registry_without_keys_has_only_google_news(client: httpx.AsyncClient) -
     }
 
 
-def test_registry_with_all_keys_orders_keyed_vendors_before_google(
+def test_registry_with_all_keys_lists_keyed_vendors_in_priority_order(
     client: httpx.AsyncClient,
 ) -> None:
     settings = Settings.model_validate(
@@ -299,7 +300,7 @@ def test_registry_with_all_keys_orders_keyed_vendors_before_google(
         }
     )
 
-    names = [p.name for p in build_news_providers(settings, client)]
+    names = [p.name for p in build_keyed_news_providers(settings, client)]
 
-    assert names == ["finnhub", "marketaux", "alphavantage", "google_news"]
+    assert names == ["finnhub", "marketaux", "alphavantage"]
     assert all(configured_providers(settings).values())

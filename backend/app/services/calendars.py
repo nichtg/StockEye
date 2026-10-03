@@ -36,6 +36,11 @@ def exchange_for(symbol: str) -> Exchange:
     return "SGX" if upper.endswith(".SI") or upper in _SGX_INDEXES else "US"
 
 
+def root_ticker(symbol: str) -> str:
+    """The ticker without the exchange suffix, upper-cased: "d05.si" -> "D05"."""
+    return symbol.upper().removesuffix(".SI")
+
+
 def spec_for(symbol: str) -> ExchangeSpec:
     return SPECS[exchange_for(symbol)]
 

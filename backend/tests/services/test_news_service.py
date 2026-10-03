@@ -7,7 +7,7 @@ from app.providers.errors import RateLimitedError
 from app.providers.models import NewsItem
 from app.repositories.news import ARTICLES, STATE, NewsRepository
 from app.services.container import Services
-from tests.services.fakes import CLOSED_NOW, FakeClock, FakeNews, FakeScorer, Sleeps
+from tests.services.fakes import CLOSED_NOW, FakeClock, FakeNews, FakeScorer
 
 pytestmark = pytest.mark.integration
 
@@ -199,37 +199,28 @@ async def test_provider_failure_everywhere_never_raises_and_records_error(
     assert "rate limited" in state["last_error"]
 
 
-async def test_minute_quota_pauses_then_retries_same_window(
-    services: Services, news_provider: FakeNews, sleeps: Sleeps
+async def test_minute_quota_skips_the_window_and_it_is_retried_on_next_run(
+    services: Services, news_provider: FakeNews, clock: FakeClock
 ) -> None:
-    news_provider.quota_hits = 2
+    news_provider.quota_hits = 1  # the first backfill month hits the per-minute throttle
 
     await _ingest(services)
+    assert (await services.news.progress("AAPL")).months_done == 23
 
-    assert sleeps.waited == [20.0, 20.0]  # until retry_at, well under the 65s cap
-    assert (await services.news.progress("AAPL")).months_done == 24  # nothing was skipped
-
-
-async def test_minute_quota_wait_is_capped_at_65_seconds(
-    services: Services, news_provider: FakeNews, sleeps: Sleeps, clock: FakeClock
-) -> None:
-    news_provider.quota_hits = 1
-    clock.now = CLOSED_NOW - timedelta(minutes=10)  # retry_at is now 10 minutes + 20s away
-
+    clock.now = CLOSED_NOW + timedelta(minutes=10)  # past the 5 minute retry pause
     await _ingest(services)
 
-    assert sleeps.waited == [65.0]
+    assert (await services.news.progress("AAPL")).months_done == 24
 
 
 async def test_day_quota_stops_run_immediately_and_records_error(
-    services: Services, news_provider: FakeNews, sleeps: Sleeps, db: Database
+    services: Services, news_provider: FakeNews, db: Database
 ) -> None:
     news_provider.quota_hits = 1000
     news_provider.quota_window = "day"
 
     await _ingest(services)
 
-    assert sleeps.waited == []
     assert len(news_provider.queries) == 1  # no hammering of the remaining 23 windows
     state = await db[STATE].find_one({"symbol": "AAPL"})
     assert state is not None

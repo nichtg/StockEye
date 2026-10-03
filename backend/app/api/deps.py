@@ -13,6 +13,7 @@ from app.auth.tokens import TokenError, decode_access_token
 from app.config import Settings
 from app.db import Database
 from app.repositories.users import UsersRepository
+from app.services.accounts import AccountService
 
 
 def get_db(request: Request) -> Database:
@@ -27,6 +28,13 @@ def get_settings_dep(request: Request) -> Settings:
 
 DbDep = Annotated[Database, Depends(get_db)]
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
+
+
+def get_accounts(db: DbDep, settings: SettingsDep) -> AccountService:
+    return AccountService(db, settings)
+
+
+AccountsDep = Annotated[AccountService, Depends(get_accounts)]
 
 
 def _unauthenticated() -> HTTPException:
@@ -50,7 +58,7 @@ async def current_user(request: Request, db: DbDep, settings: SettingsDep) -> Pr
         raise _unauthenticated()
     if user.locked_until is not None and user.locked_until > datetime.now(UTC):
         raise _unauthenticated()
-    return Principal(id=user.id, email=user.email, role=user.role)
+    return Principal(id=user.id, email=user.email, role=user.role, created_at=user.created_at)
 
 
 async def require_admin(user: Annotated[Principal, Depends(current_user)]) -> Principal:

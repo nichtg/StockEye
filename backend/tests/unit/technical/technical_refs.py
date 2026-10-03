@@ -122,3 +122,8 @@ def ohlc_frames(min_size: int = 30, max_size: int = 60) -> SearchStrategy[pd.Dat
         lambda t: (t[0], max(t[0], t[1]) + t[2], max(0.01, min(t[0], t[1]) - t[3]), t[1])
     )
     return st.lists(bar, min_size=min_size, max_size=max_size).map(frame)
+
+
+def trend_is(value: object, wanted: str) -> bool:
+    """True when a trend-context cell (``"up"``/``"down"``/``"none"``/NA) equals ``wanted``."""
+    return isinstance(value, str) and value == wanted

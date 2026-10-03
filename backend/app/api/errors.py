@@ -62,7 +62,7 @@ async def _http_exception(request: Request, exc: Exception) -> JSONResponse:
 
 async def _app_error(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, AppError)  # noqa: S101
-    return error_response(request, exc.status, exc.code, exc.message)
+    return error_response(request, exc.status, exc.code, exc.message, details=exc.details)
 
 
 async def _validation_error(request: Request, exc: Exception) -> JSONResponse:

@@ -1,8 +1,9 @@
 """Market data use-cases: quotes, search, price bars and corporate events, cache-first.
 
-Every vendor call goes through ``guard.call("yahoo", ...)``. A provider failure never becomes a
-500: the service falls back to whatever is saved and says so in a ``DataStatus``. The only hard
-failures are an unknown symbol (404) and "nothing saved and the provider is down" for prices (503).
+The provider is already guarded (see ``ProviderGuard.wrap_market``). A provider failure never
+becomes a 500: the service falls back to whatever is saved and says so in a ``DataStatus``. The
+only hard failures are an unknown symbol (404) and "nothing saved and the provider is down" for
+prices (503).
 """
 
 from collections.abc import Callable
@@ -16,7 +17,6 @@ from app.logging_setup import get_logger
 from app.providers.base import MarketDataProvider
 from app.providers.errors import ProviderError, SymbolNotFoundError
 from app.providers.models import Bar, CorporateEvent, Interval, Quote, SymbolMatch
-from app.providers.resilience import ProviderGuard
 from app.repositories.bars import BarsRepository, FetchState
 from app.repositories.cache import CacheRepository
 from app.repositories.events import EventsRepository
@@ -24,6 +24,7 @@ from app.services.calendars import (
     exchange_tz,
     is_session_open,
     last_completed_session,
+    root_ticker,
     session_close,
 )
 from app.services.errors import AppError
@@ -31,9 +32,9 @@ from app.services.status import DataStatus, describe_failure, ok, stale_status
 
 log = get_logger(__name__)
 
-PROVIDER = "yahoo"
 DAILY_HISTORY_DAYS = 1100  # 3 years plus slack: covers 2 years of sessions + 200 warm-up sessions
 HOURLY_HISTORY_DAYS = 60  # enough for the 1M chart (22 sessions) plus indicator warm-up
+EVENTS_START_DAYS = 760  # one shared start so the events cache is reused across endpoints
 REFRESH_AFTER = timedelta(minutes=15)
 EVENTS_REFRESH_AFTER = timedelta(hours=24)
 QUOTE_TTL = timedelta(seconds=60)
@@ -86,14 +87,12 @@ class MarketDataService:
         self,
         db: Database,
         provider: MarketDataProvider,
-        guard: ProviderGuard,
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._bars = BarsRepository(db)
         self._events = EventsRepository(db)
         self._cache = CacheRepository(db)
         self._provider = provider
-        self._guard = guard
         self._clock = clock
 
     # --- quote and search ------------------------------------------------------------------
@@ -105,7 +104,7 @@ class MarketDataService:
             quote = Quote.model_validate(cached)
             return quote, ok(quote.as_of)
         try:
-            quote = await self._guard.call(PROVIDER, lambda: self._provider.quote(symbol))
+            quote = await self._provider.quote(symbol)
         except SymbolNotFoundError as exc:
             raise _not_found(symbol) from exc
         except ProviderError as exc:
@@ -129,7 +128,7 @@ class MarketDataService:
         if (cached := await self._cache.get(key, now)) is not None:
             return [SymbolMatch.model_validate(m) for m in cached["matches"]]
         try:
-            matches = await self._guard.call(PROVIDER, lambda: self._provider.search(text))
+            matches = await self._provider.search(text)
         except ProviderError as exc:
             stale = await self._cache.get_stale(key)
             if stale is not None:
@@ -176,9 +175,7 @@ class MarketDataService:
         failure: ProviderError | None = None
         if self._needs_refresh(symbol, interval, state, start, now):
             try:
-                fetched = await self._guard.call(
-                    PROVIDER, lambda: self._provider.bars(symbol, interval, start, end)
-                )
+                fetched = await self._provider.bars(symbol, interval, start, end)
             except SymbolNotFoundError as exc:
                 raise _not_found(symbol) from exc
             except ProviderError as exc:
@@ -236,6 +233,19 @@ class MarketDataService:
 
     # --- corporate events ------------------------------------------------------------------
 
+    async def standard_events(self, symbol: str) -> tuple[list[CorporateEvent], DataStatus]:
+        """Events over the shared window every analysis uses (one cache, one fetch)."""
+        today = self._clock().astimezone(UTC).date()
+        return await self.events(symbol, today - timedelta(days=EVENTS_START_DAYS), today)
+
+    async def company_name(self, symbol: str) -> str:
+        """The quote's name, or the bare ticker when no quote can be had."""
+        try:
+            quote, _ = await self.quote(symbol)
+        except AppError:
+            return root_ticker(symbol)
+        return quote.name
+
     async def events(
         self, symbol: str, start: date, end: date
     ) -> tuple[list[CorporateEvent], DataStatus]:
@@ -252,9 +262,7 @@ class MarketDataService:
             begin = datetime(start.year, start.month, start.day, tzinfo=UTC)
             until = datetime(end.year, end.month, end.day, tzinfo=UTC)
             try:
-                fetched = await self._guard.call(
-                    PROVIDER, lambda: self._provider.events(symbol, begin, until)
-                )
+                fetched = await self._provider.events(symbol, begin, until)
             except ProviderError as exc:
                 failure = exc
                 log.warning("events_fetch_failed", symbol=symbol, error=str(exc))
