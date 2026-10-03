@@ -3,9 +3,9 @@
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
-from pymongo import ASCENDING, UpdateOne
+from pymongo import ASCENDING, ReturnDocument, UpdateOne
 
-from app.db import Database
+from app.db import Database, Document
 from app.providers.models import CorporateEvent
 
 EVENTS = "corporate_events"
@@ -41,8 +41,8 @@ class EventsRepository:
         start: date,
         end: date,
         fetched_at: datetime,
-    ) -> None:
-        """Upsert ``events`` and record that [start, end] was fetched at ``fetched_at``."""
+    ) -> EventsFetchState:
+        """Upsert ``events``, record [start, end] as fetched at ``fetched_at``, return the state."""
         if events:
             await self._events.bulk_write(
                 [
@@ -54,20 +54,20 @@ class EventsRepository:
                     for e in events
                 ]
             )
-        previous = await self.get_state(symbol)
-        covered_start = min(start, previous.covered_start) if previous else start
-        covered_end = max(end, previous.covered_end) if previous else end
-        await self._state.update_one(
+        # One atomic upsert; ISO dates compare correctly as strings, so coverage only widens.
+        doc = await self._state.find_one_and_update(
             {"symbol": symbol},
             {
-                "$set": {
-                    "last_fetched_at": fetched_at,
-                    "covered_start": covered_start.isoformat(),
-                    "covered_end": covered_end.isoformat(),
-                }
+                "$set": {"last_fetched_at": fetched_at},
+                "$min": {"covered_start": start.isoformat()},
+                "$max": {"covered_end": end.isoformat()},
             },
             upsert=True,
+            return_document=ReturnDocument.AFTER,
         )
+        if doc is None:  # an upsert always yields the document
+            raise RuntimeError("fetch-state upsert returned nothing")
+        return _to_state(doc)
 
     async def get_range(self, symbol: str, start: date, end: date) -> list[CorporateEvent]:
         """Events with ``start <= date <= end``, oldest first (ISO dates sort correctly)."""
@@ -87,11 +87,13 @@ class EventsRepository:
 
     async def get_state(self, symbol: str) -> EventsFetchState | None:
         doc = await self._state.find_one({"symbol": symbol})
-        if doc is None:
-            return None
-        fetched: datetime = doc["last_fetched_at"]
-        return EventsFetchState(
-            fetched.astimezone(UTC),
-            date.fromisoformat(doc["covered_start"]),
-            date.fromisoformat(doc["covered_end"]),
-        )
+        return None if doc is None else _to_state(doc)
+
+
+def _to_state(doc: Document) -> EventsFetchState:
+    fetched: datetime = doc["last_fetched_at"]
+    return EventsFetchState(
+        fetched.astimezone(UTC),
+        date.fromisoformat(doc["covered_start"]),
+        date.fromisoformat(doc["covered_end"]),
+    )

@@ -105,13 +105,14 @@ async def test_scheduler_has_one_weekday_job_per_exchange(services: Services, db
     assert "mon-fri" in str(jobs["refresh_sgx"].trigger)
 
 
-async def test_cache_get_stale_returns_expired_payload_but_get_does_not(db: Database) -> None:
+async def test_cache_lookup_returns_expired_entry_marked_not_fresh(db: Database) -> None:
     cache = CacheRepository(db)
     await cache.put("k", {"v": 1}, timedelta(minutes=1), CLOSED_NOW)
-    later = CLOSED_NOW + timedelta(hours=1)
 
-    assert await cache.get("k", later) is None
-    stale = await cache.get_stale("k")
-    assert stale is not None
-    assert stale[0] == {"v": 1}
-    assert await cache.get("k", CLOSED_NOW) == {"v": 1}
+    entry = await cache.lookup("k")
+
+    assert entry is not None
+    assert entry.payload == {"v": 1}
+    assert entry.is_fresh(CLOSED_NOW)
+    assert not entry.is_fresh(CLOSED_NOW + timedelta(hours=1))
+    assert await cache.lookup("missing") is None

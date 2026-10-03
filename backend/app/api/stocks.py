@@ -8,9 +8,8 @@ from pydantic import BaseModel
 
 from app.api.deps import UserDep
 from app.providers.models import Exchange, SymbolMatch
-from app.services.charts import RangeKey
 from app.services.container import ServicesDep
-from app.services.reports import ChartData, MacroResponse, TechnicalReport
+from app.services.reports import ChartData, MacroResponse, RangeKey, TechnicalReport
 from app.services.status import DataStatus
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])

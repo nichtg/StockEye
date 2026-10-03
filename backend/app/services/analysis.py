@@ -16,10 +16,10 @@ from app.db import Database
 from app.repositories.cache import CacheRepository
 from app.services import compute
 from app.services.calendars import session_calendar, spec_for
-from app.services.charts import INDICATORS, RANGES, RangeKey
+from app.services.charts import INDICATORS, RANGES
 from app.services.errors import AppError
-from app.services.market_data import EVENTS_START_DAYS, MarketDataService
-from app.services.news import IngestProgress, NewsService
+from app.services.market_data import MarketDataService
+from app.services.news import NewsService
 from app.services.reports import (
     ChartData,
     FullStatuses,
@@ -27,6 +27,7 @@ from app.services.reports import (
     MacroReportOut,
     MacroResponse,
     PriceStatuses,
+    RangeKey,
     TechnicalReport,
 )
 from app.services.status import DataStatus, combine
@@ -54,11 +55,9 @@ def _bad_data(symbol: str) -> AppError:
     )
 
 
-def _ingestion(progress: IngestProgress) -> IngestionOut:
-    return IngestionOut(
-        months_done=progress.months_done,
-        months_total=progress.months_total,
-        in_progress=progress.in_progress,
+def _full_statuses(prices: DataStatus, events: DataStatus, news: DataStatus) -> FullStatuses:
+    return FullStatuses(
+        prices=prices, events=events, news=news, overall=combine([prices, events, news])
     )
 
 
@@ -90,6 +89,11 @@ class AnalysisService:
 
     # --- technical -------------------------------------------------------------------------
 
+    async def _fresh(self, key: str, now: datetime) -> dict[str, Any] | None:
+        """The cached payload if it has not expired."""
+        entry = await self._cache.lookup(key)
+        return entry.payload if entry is not None and entry.is_fresh(now) else None
+
     async def technical(self, symbol: str) -> TechnicalReport:
         """1-week outlook from daily bars; cached 15 minutes per symbol and last bar date."""
         now = self._clock()
@@ -102,7 +106,7 @@ class AnalysisService:
             )
         statuses = PriceStatuses(prices=status, overall=combine([status]))
         key = f"technical:{symbol}:{frame.index[-1].date().isoformat()}"
-        if (cached := await self._cache.get(key, now)) is not None:
+        if (cached := await self._fresh(key, now)) is not None:
             report = TechnicalReport.model_validate(cached)
             return report.model_copy(update={"data_status": statuses})
         try:
@@ -123,10 +127,10 @@ class AnalysisService:
         """
         now = self._clock()
         key = macro_cache_key(symbol)
-        if (cached := await self._cache.get(key, now)) is not None:
+        if (cached := await self._fresh(key, now)) is not None:
             return MacroResponse.model_validate(cached)
         today = now.astimezone(UTC).date()
-        events_start = today - timedelta(days=EVENTS_START_DAYS)
+        news_start = now - timedelta(days=NEWS_WINDOW_DAYS)
         (
             (stock, price_status),
             name,
@@ -134,36 +138,24 @@ class AnalysisService:
             (events, event_status),
         ) = await asyncio.gather(
             self._market.daily_history(symbol),
-            self._company_name(symbol),
+            self._market.company_name(symbol),
             self._benchmark(symbol),
-            self._market.events(symbol, events_start, today),
+            self._market.standard_events(symbol),
         )
-        await self._news.ensure_ingested(symbol, name)
-        articles, news_status = await self._news.scored_articles(
-            symbol, now - timedelta(days=NEWS_WINDOW_DAYS), now
-        )
+        progress = await self._news.ensure_ingested(symbol, name)
+        articles, news_status = await self._news.scored_articles(symbol, news_start, now)
         report: MacroReportOut | None = None
         if bench is not None:
-            cal = session_calendar(symbol, events_start, today + timedelta(days=14))
+            cal = session_calendar(symbol, news_start.date(), today + timedelta(days=14))
             earnings = [e.date for e in events if e.kind == "earnings"]
             report = await asyncio.to_thread(
                 compute.compute_macro, stock, bench, articles, earnings, cal
             )
-        prices = combine([price_status, bench_status])
-        statuses = FullStatuses(
-            prices=prices,
-            events=event_status,
-            news=news_status,
-            overall=combine([prices, event_status, news_status]),
-        )
+        statuses = _full_statuses(combine([price_status, bench_status]), event_status, news_status)
+        ingestion = IngestionOut.model_validate(progress, from_attributes=True)
         response = MacroResponse(
-            symbol=symbol,
-            name=name,
-            report=report,
-            ingestion=_ingestion(await self._news.progress(symbol)),
-            data_status=statuses,
+            symbol=symbol, name=name, report=report, ingestion=ingestion, data_status=statuses
         )
-        ingestion = response.ingestion
         complete = (
             not ingestion.in_progress
             and ingestion.months_done == ingestion.months_total
@@ -172,13 +164,6 @@ class AnalysisService:
         if complete:  # a half-built report must not be served for an hour
             await self._cache.put(key, response.model_dump(mode="json"), MACRO_TTL, now)
         return response
-
-    async def _company_name(self, symbol: str) -> str:
-        try:
-            quote, _ = await self._market.quote(symbol)
-        except AppError:
-            return symbol.removesuffix(".SI")
-        return quote.name
 
     async def _benchmark(self, symbol: str) -> tuple[pd.DataFrame | None, DataStatus]:
         """Daily closes of the first benchmark with data; (None, partial) if none responds."""
@@ -202,7 +187,6 @@ class AnalysisService:
                 f"Unknown indicator: {unknown[0]}. Choose from {', '.join(INDICATORS)}.",
             )
         now = self._clock()
-        today = now.astimezone(UTC).date()
         interval, _ = RANGES[range_key]
         prices = (
             self._market.hourly_history(symbol)
@@ -216,12 +200,12 @@ class AnalysisService:
             macro_payload,
         ) = await asyncio.gather(
             prices,
-            self._market.events(symbol, today - timedelta(days=EVENTS_START_DAYS), today),
+            self._market.standard_events(symbol),
             self._news.status(symbol),
-            self._cache.get(macro_cache_key(symbol), now),
+            self._fresh(macro_cache_key(symbol), now),
         )
         try:
-            data = await asyncio.to_thread(
+            return await asyncio.to_thread(
                 compute.build_chart,
                 symbol,
                 range_key,
@@ -229,13 +213,7 @@ class AnalysisService:
                 frame=frame,
                 events=events,
                 news=_news_markers(macro_payload),
+                statuses=_full_statuses(price_status, event_status, news_status),
             )
         except ValueError as exc:
             raise _bad_data(symbol) from exc
-        statuses = FullStatuses(
-            prices=price_status,
-            events=event_status,
-            news=news_status,
-            overall=combine([price_status, event_status, news_status]),
-        )
-        return data.model_copy(update={"data_status": statuses})

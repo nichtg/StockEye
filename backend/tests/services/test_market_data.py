@@ -1,8 +1,11 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
+from app.db import Database
 from app.providers.errors import RateLimitedError, TransientProviderError
+from app.providers.models import Bar
+from app.repositories.bars import BarsRepository
 from app.services.container import Services
 from app.services.errors import AppError
 from tests.services.fakes import CLOSED_NOW, OPEN_NOW, FakeClock, FakeMarketData
@@ -181,3 +184,34 @@ async def test_events_without_cache_and_provider_down_is_unavailable_not_error(
 
     assert events == []
     assert status.state == "unavailable"
+
+
+async def test_bars_replace_range_swaps_in_range_bars_and_widens_coverage(db: Database) -> None:
+    repo = BarsRepository(db)
+    day = datetime(2026, 9, 1, tzinfo=UTC)
+
+    def bar(offset: int, close: float) -> Bar:
+        ts = day + timedelta(days=offset)
+        return Bar(ts=ts, open=close, high=close, low=close, close=close, volume=1.0)
+
+    await repo.replace_range(
+        "AAPL",
+        "1d",
+        [bar(0, 1.0), bar(1, 2.0)],
+        start=day,
+        end=day + timedelta(days=5),
+        fetched_at=day,
+    )
+    state = await repo.replace_range(
+        "AAPL",
+        "1d",
+        [bar(1, 3.0)],
+        start=day - timedelta(days=9),
+        end=day + timedelta(days=5),
+        fetched_at=day + timedelta(days=2),
+    )
+
+    stored = await repo.get_range("AAPL", "1d", day - timedelta(days=10), day + timedelta(days=10))
+    assert [b.close for b in stored] == [3.0]
+    assert state.covered_start == day - timedelta(days=9)
+    assert state.last_bar_at == day + timedelta(days=1)

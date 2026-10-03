@@ -6,11 +6,14 @@ only hard failures are an unknown symbol (404) and "nothing saved and the provid
 prices (503).
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from typing import Protocol
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from pydantic import BaseModel
 
 from app.db import Database
 from app.logging_setup import get_logger
@@ -19,7 +22,7 @@ from app.providers.errors import ProviderError, SymbolNotFoundError
 from app.providers.models import Bar, CorporateEvent, Interval, Quote, SymbolMatch
 from app.repositories.bars import BarsRepository, FetchState
 from app.repositories.cache import CacheRepository
-from app.repositories.events import EventsRepository
+from app.repositories.events import EventsFetchState, EventsRepository
 from app.services.calendars import (
     exchange_tz,
     is_session_open,
@@ -68,18 +71,51 @@ def bars_to_frame(bars: list[Bar], interval: Interval, tz: ZoneInfo) -> pd.DataF
     return frame[~frame.index.duplicated(keep="last")].sort_index()
 
 
-def _unavailable(what: str, symbol: str, exc: ProviderError | None) -> AppError:
-    cause = f" ({describe_failure(exc)})" if exc else ""
+def _unavailable(what: str, symbol: str, exc: ProviderError) -> AppError:
     return AppError(
         503,
         "data_unavailable",
-        f"{what} for {symbol} is temporarily unavailable{cause} and nothing has been saved yet. "
+        f"{what} for {symbol} is temporarily unavailable ({describe_failure(exc)}) and nothing "
+        "has been saved yet. "
         "Please try again in a few minutes.",
     )
 
 
 def _not_found(symbol: str) -> AppError:
     return AppError(404, "not_found", f"We could not find a stock with the symbol {symbol}.")
+
+
+class _HasFetchTime(Protocol):
+    @property
+    def last_fetched_at(self) -> datetime: ...
+
+
+@dataclass(frozen=True)
+class _CacheKind:
+    """How one kind of cached payload is described to the user."""
+
+    ttl: timedelta
+    what: str  # "price quote", as in "The price quote for X is unavailable"
+    noun: str  # "quote", as in "Showing the last saved quote"
+
+
+class _Matches(BaseModel):
+    """The cached shape of a search result (the cache stores JSON objects, not bare lists)."""
+
+    matches: list[SymbolMatch]
+
+
+_QUOTE = _CacheKind(QUOTE_TTL, "price quote", "quote")
+_SEARCH = _CacheKind(SEARCH_TTL, "stock search", "search results")
+
+
+def _status(
+    label: str, noun: str, state: _HasFetchTime, now: datetime, failure: ProviderError | None
+) -> DataStatus:
+    """ "ok" as of the last fetch, or "stale" when the refresh just failed."""
+    if failure is None:
+        return ok(state.last_fetched_at)
+    return stale_status(label, noun, state.last_fetched_at, now, failure)
 
 
 class MarketDataService:
@@ -98,45 +134,52 @@ class MarketDataService:
     # --- quote and search ------------------------------------------------------------------
 
     async def quote(self, symbol: str) -> tuple[Quote, DataStatus]:
-        now = self._clock()
-        key = f"quote:{symbol}"
-        if (cached := await self._cache.get(key, now)) is not None:
-            quote = Quote.model_validate(cached)
-            return quote, ok(quote.as_of)
-        try:
-            quote = await self._provider.quote(symbol)
-        except SymbolNotFoundError as exc:
-            raise _not_found(symbol) from exc
-        except ProviderError as exc:
-            stale = await self._cache.get_stale(key)
-            if stale is None:
-                raise _unavailable("The price quote", symbol, exc) from exc
-            payload, created = stale
-            log.warning("quote_stale_fallback", symbol=symbol, error=str(exc))
-            return Quote.model_validate(payload), stale_status(
-                "Price quote", "quote", created, now, exc
-            )
-        await self._cache.put(key, quote.model_dump(mode="json"), QUOTE_TTL, now)
-        return quote, ok(quote.as_of)
+        quote, degraded = await self._cached(
+            _QUOTE, f"quote:{symbol}", symbol, Quote, lambda: self._provider.quote(symbol)
+        )
+        return quote, degraded or ok(quote.as_of)
 
     async def search(self, query: str) -> list[SymbolMatch]:
+        """Matches for ``query``; a stale fallback is logged (the endpoint returns a bare list)."""
         text = query.strip()
         if not text:
             return []
+
+        async def fetch() -> _Matches:
+            return _Matches(matches=await self._provider.search(text))
+
+        found, _ = await self._cached(_SEARCH, f"search:{text.lower()}", text, _Matches, fetch)
+        return found.matches
+
+    async def _cached[M: BaseModel](
+        self,
+        kind: _CacheKind,
+        key: str,
+        subject: str,
+        model: type[M],
+        fetch: Callable[[], Awaitable[M]],
+    ) -> tuple[M, DataStatus | None]:
+        """Cache-first read; the status is None for fresh data and says what is wrong otherwise.
+
+        An unknown symbol is a 404. When the provider fails, a saved copy (however old) is served
+        as "stale", and only with no copy at all does the failure become a 503.
+        """
         now = self._clock()
-        key = f"search:{text.lower()}"
-        if (cached := await self._cache.get(key, now)) is not None:
-            return [SymbolMatch.model_validate(m) for m in cached["matches"]]
+        entry = await self._cache.lookup(key)
+        if entry is not None and entry.is_fresh(now):
+            return model.model_validate(entry.payload), None
         try:
-            matches = await self._provider.search(text)
+            value = await fetch()
+        except SymbolNotFoundError as exc:
+            raise _not_found(subject) from exc
         except ProviderError as exc:
-            stale = await self._cache.get_stale(key)
-            if stale is not None:
-                return [SymbolMatch.model_validate(m) for m in stale[0]["matches"]]
-            raise _unavailable("Stock search", text, exc) from exc
-        payload = {"matches": [m.model_dump(mode="json") for m in matches]}
-        await self._cache.put(key, payload, SEARCH_TTL, now)
-        return matches
+            if entry is None:
+                raise _unavailable(f"The {kind.what}", subject, exc) from exc
+            log.warning("cache_stale_fallback", key=key, error=str(exc))
+            status = stale_status(kind.what.capitalize(), kind.noun, entry.created_at, now, exc)
+            return model.model_validate(entry.payload), status
+        await self._cache.put(key, value.model_dump(mode="json"), kind.ttl, now)
+        return value, None
 
     # --- bars ------------------------------------------------------------------------------
 
@@ -171,30 +214,29 @@ class MarketDataService:
     ) -> tuple[list[Bar], DataStatus]:
         now = self._clock()
         end = now + timedelta(days=1)
-        state = await self._bars.get_state(symbol, interval)
-        failure: ProviderError | None = None
-        if self._needs_refresh(symbol, interval, state, start, now):
+
+        async def fetch() -> FetchState:
             try:
                 fetched = await self._provider.bars(symbol, interval, start, end)
             except SymbolNotFoundError as exc:
                 raise _not_found(symbol) from exc
-            except ProviderError as exc:
-                failure = exc
-                log.warning("bars_fetch_failed", symbol=symbol, interval=interval, error=str(exc))
-            else:
-                await self._bars.replace_range(
-                    symbol, interval, fetched, start=start, end=end, fetched_at=now
-                )
-                state = await self._bars.get_state(symbol, interval)
+            return await self._bars.replace_range(
+                symbol, interval, fetched, start=start, end=end, fetched_at=now
+            )
+
+        state = await self._bars.get_state(symbol, interval)
+        refresh = self._needs_refresh(symbol, interval, state, start, now)
+        try:
+            state, failure = await self._refresh(f"bars {interval}", symbol, state, refresh, fetch)
+        except ProviderError as exc:
+            raise _unavailable("Price data", symbol, exc) from exc
         stored = await self._bars.get_range(symbol, interval, start, end)
         bars = self._completed(symbol, interval, stored, now)
         if not bars:
             if failure is not None:
                 raise _unavailable("Price data", symbol, failure)
             raise _not_found(symbol)
-        if failure is not None and state is not None:
-            return bars, stale_status("Price data", "prices", state.last_fetched_at, now, failure)
-        return bars, ok(state.last_fetched_at if state else now)
+        return bars, _status("Price data", "prices", state, now, failure)
 
     def _needs_refresh(
         self,
@@ -251,35 +293,52 @@ class MarketDataService:
     ) -> tuple[list[CorporateEvent], DataStatus]:
         """Events dated in [start, end]. Never raises for provider trouble: events are optional."""
         now = self._clock()
+
+        async def fetch() -> EventsFetchState:
+            begin = datetime(start.year, start.month, start.day, tzinfo=UTC)
+            until = datetime(end.year, end.month, end.day, tzinfo=UTC)
+            fetched = await self._provider.events(symbol, begin, until)
+            return await self._events.upsert_many(
+                symbol, fetched, start=start, end=end, fetched_at=now
+            )
+
         state = await self._events.get_state(symbol)
-        failure: ProviderError | None = None
         stale = (
             state is None
             or now - state.last_fetched_at > EVENTS_REFRESH_AFTER
             or state.covered_start > start + COVERAGE_SLACK
         )
-        if stale:
-            begin = datetime(start.year, start.month, start.day, tzinfo=UTC)
-            until = datetime(end.year, end.month, end.day, tzinfo=UTC)
-            try:
-                fetched = await self._provider.events(symbol, begin, until)
-            except ProviderError as exc:
-                failure = exc
-                log.warning("events_fetch_failed", symbol=symbol, error=str(exc))
-            else:
-                await self._events.upsert_many(
-                    symbol, fetched, start=start, end=end, fetched_at=now
-                )
-                state = await self._events.get_state(symbol)
-        events = await self._events.get_range(symbol, start, end)
-        if failure is None:
-            return events, ok(state.last_fetched_at if state else now)
-        if state is None:
+        try:
+            state, failure = await self._refresh("events", symbol, state, stale, fetch)
+        except ProviderError as exc:
             reason = (
-                f"Corporate events are unavailable: {describe_failure(failure)}. "
+                f"Corporate events are unavailable: {describe_failure(exc)}. "
                 "Earnings, dividend and split markers are hidden for now."
             )
             return [], DataStatus(state="unavailable", as_of=None, reason=reason)
-        return events, stale_status(
-            "Corporate event data", "events", state.last_fetched_at, now, failure
-        )
+        events = await self._events.get_range(symbol, start, end)
+        return events, _status("Corporate event data", "events", state, now, failure)
+
+    @staticmethod
+    async def _refresh[S: _HasFetchTime](
+        dataset: str,
+        symbol: str,
+        state: S | None,
+        needed: bool,
+        fetch: Callable[[], Awaitable[S]],
+    ) -> tuple[S, ProviderError | None]:
+        """Run ``fetch`` (it saves the data and returns the new fetch state) when ``needed``.
+
+        Returns the state to report and the failure that was absorbed, if any: when the provider
+        fails but something is saved, that is the old state. With nothing saved the failure is
+        raised, since there is nothing to fall back on.
+        """
+        if state is not None and not needed:
+            return state, None
+        try:
+            return await fetch(), None
+        except ProviderError as exc:
+            log.warning("provider_fetch_failed", dataset=dataset, symbol=symbol, error=str(exc))
+            if state is None:
+                raise
+            return state, exc

@@ -107,9 +107,6 @@ class NewsRepository:
             async for doc in cursor
         ]
 
-    async def count_unscored(self, symbol: str) -> int:
-        return await self._articles.count_documents({"symbols": symbol, "sentiment": None})
-
     async def save_scores(self, records: list[SentimentRecord]) -> None:
         if not records:
             return

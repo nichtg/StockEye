@@ -4,12 +4,13 @@ import asyncio
 
 from pydantic import BaseModel
 
+from app.domain.technical.outlook import Lean
 from app.logging_setup import get_logger
 from app.providers.models import Exchange
 from app.services.analysis import AnalysisService
 from app.services.errors import AppError
 from app.services.market_data import MarketDataService
-from app.services.reports import Lean
+from app.services.reports import TechnicalReport
 from app.services.status import State, combine
 
 log = get_logger(__name__)
@@ -47,23 +48,22 @@ def _failed(symbol: str, reason: str) -> OverviewRow:
     )
 
 
+async def _outlook(analysis: AnalysisService, symbol: str) -> TechnicalReport | None:
+    """The technical report, or None when there is too little history for one."""
+    try:
+        return await analysis.technical(symbol)
+    except AppError as exc:
+        log.info("overview_no_outlook", symbol=symbol, reason=exc.message)
+        return None
+
+
 async def _row(market: MarketDataService, analysis: AnalysisService, symbol: str) -> OverviewRow:
-    # Bars first, alone: the quote and technical calls below then hit a warm cache instead of
-    # racing each other into duplicate vendor fetches.
-    frame, price_status = await market.daily_history(symbol)
-    quote_result, technical = await asyncio.gather(
-        market.quote(symbol), analysis.technical(symbol), return_exceptions=True
+    (frame, price_status), (quote, quote_status), technical = await asyncio.gather(
+        market.daily_history(symbol), market.quote(symbol), _outlook(analysis, symbol)
     )
-    if isinstance(quote_result, BaseException):
-        raise quote_result
-    quote, quote_status = quote_result
     statuses = [price_status, quote_status]
     lean: Lean | None = None
-    if isinstance(technical, AppError):
-        log.info("overview_no_outlook", symbol=symbol, reason=technical.message)
-    elif isinstance(technical, BaseException):
-        raise technical
-    else:
+    if technical is not None:
         lean = technical.outlook.lean
         statuses.append(technical.data_status.overall)
     closes = [float(c) for c in frame["close"].tolist()]

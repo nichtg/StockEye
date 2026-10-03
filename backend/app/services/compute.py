@@ -27,21 +27,17 @@ from app.domain.technical import (
 from app.providers.models import CorporateEvent
 from app.services import charts
 from app.services.calendars import exchange_tz
-from app.services.charts import RANGES, RangeKey
+from app.services.charts import RANGES
 from app.services.reports import (
-    Bias,
     ChartData,
-    ExpectedRange,
     FullStatuses,
     MacroReportOut,
     OutlookOut,
-    PatternStatsOut,
     PriceStatuses,
+    RangeKey,
     RecentPattern,
-    SignalOut,
     TechnicalReport,
 )
-from app.services.status import ok
 
 RECENT_SESSIONS = 3
 VWAP_ANCHOR_BACK = 5  # anchored at the 5th-last session
@@ -55,13 +51,13 @@ def build_chart(
     frame: pd.DataFrame,
     events: list[CorporateEvent],
     news: list[tuple[date, str, float]],
+    statuses: FullStatuses,
 ) -> ChartData:
-    """Chart payload with placeholder statuses; the service overwrites them afterwards."""
+    """Chart payload: candles, the requested indicator lines and the markers on visible bars."""
     interval, _ = RANGES[range_key]
     tz = exchange_tz(symbol)
     mask = charts.visible_mask(frame, range_key)
     hits = detect_patterns(frame) if interval == "1d" else []
-    placeholder = ok()
     return ChartData(
         symbol=symbol,
         range=range_key,
@@ -71,9 +67,7 @@ def build_chart(
         markers=charts.build_markers(
             frame, mask, interval, tz, events=events, hits=hits, news=news
         ),
-        data_status=FullStatuses(
-            prices=placeholder, events=placeholder, news=placeholder, overall=placeholder
-        ),
+        data_status=statuses,
     )
 
 
@@ -104,54 +98,35 @@ def compute_technical(symbol: str, frame: pd.DataFrame, statuses: PriceStatuses)
     patterns: list[RecentPattern] = []
     for hit in sorted(recent, key=lambda h: h.index, reverse=True):
         stats = reliability.get(hit.key)
-        bias: Bias = hit.bias.value
+        bias = hit.bias.value
+        # The response models are deliberately separate from the domain dataclasses (see
+        # ``reports``), so each one is built from plain dicts at this single boundary.
+        stats_out = (
+            None
+            if stats is None
+            else {**asdict(stats), "label": _stats_label(stats, bias), "bias": bias}
+        )
         patterns.append(
-            RecentPattern(
-                key=hit.key.value,
-                label=PATTERNS[hit.key].label,
-                bias=bias,
-                date=pd.Timestamp(hit.date).date(),
-                stats=None
-                if stats is None
-                else PatternStatsOut(
-                    n=stats.n,
-                    up_count=stats.up_count,
-                    hit_rate=stats.hit_rate,
-                    base_rate=stats.base_rate,
-                    edge=stats.edge,
-                    base_down_rate=stats.base_down_rate,
-                    base_n=stats.base_n,
-                    sufficient=stats.sufficient,
-                    label=_stats_label(stats, bias),
-                    bias=bias,
-                ),
+            RecentPattern.model_validate(
+                {
+                    "key": hit.key.value,
+                    "label": PATTERNS[hit.key].label,
+                    "bias": bias,
+                    "date": pd.Timestamp(hit.date).date(),
+                    "stats": stats_out,
+                }
             )
         )
     expected = outlook.expected_range
+    outlook_out = OutlookOut.model_validate(
+        {
+            **asdict(outlook),
+            "expected_range": expected and {"low": expected[0], "high": expected[1]},
+            "as_of": as_of.date(),
+        }
+    )
     return TechnicalReport(
-        symbol=symbol,
-        outlook=OutlookOut(
-            lean=outlook.lean,
-            score=outlook.score,
-            signals=[
-                SignalOut(
-                    key=s.key,
-                    label=s.label,
-                    direction=s.direction,
-                    weight=s.weight,
-                    detail=s.detail,
-                )
-                for s in outlook.signals
-            ],
-            expected_range=None
-            if expected is None
-            else ExpectedRange(low=expected[0], high=expected[1]),
-            expected_range_coverage=outlook.expected_range_coverage,
-            last_close=outlook.last_close,
-            as_of=as_of.date(),
-        ),
-        recent_patterns=patterns,
-        data_status=statuses,
+        symbol=symbol, outlook=outlook_out, recent_patterns=patterns, data_status=statuses
     )
 
 

@@ -6,7 +6,6 @@ window) and trimmed afterwards, so lines start at the left edge instead of with 
 
 import math
 from datetime import date
-from typing import Literal
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -22,11 +21,9 @@ from app.domain.technical import (
     sma,
 )
 from app.domain.technical.candlesticks import PatternHit
-from app.providers.models import CorporateEvent
-from app.services.reports import Candle, Marker, SeriesPoint
+from app.providers.models import CorporateEvent, Interval
+from app.services.reports import Candle, Marker, RangeKey, SeriesPoint
 
-RangeKey = Literal["1W", "1M", "6M", "1Y", "2Y"]
-Interval = Literal["1d", "1h"]
 INDICATORS = ("sma20", "sma50", "ema9", "ema21", "vwap", "bollinger", "rsi", "macd")
 
 # range -> (interval, hourly: number of sessions shown / daily: calendar days shown)

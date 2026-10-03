@@ -9,12 +9,12 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.domain.macro.sentiment_stats import Bucket, RegimeLabel, Reliability
+from app.domain.technical.outlook import Direction, Lean
+from app.providers.models import Interval
 from app.services.status import DataStatus
 
-Lean = Literal["bullish", "bearish", "neutral"]
-Bias = Literal["bullish", "bearish", "neutral"]
-Reliability = Literal["likely_real", "weak_evidence", "could_be_chance"]
-Bucket = Literal["positive", "negative", "neutral"]
+RangeKey = Literal["1W", "1M", "6M", "1Y", "2Y"]
 
 
 class PriceStatuses(BaseModel):
@@ -35,7 +35,7 @@ class FullStatuses(BaseModel):
 class SignalOut(BaseModel):
     key: str
     label: str
-    direction: Literal[-1, 0, 1]
+    direction: Direction
     weight: float
     detail: str
 
@@ -65,13 +65,13 @@ class PatternStatsOut(BaseModel):
     base_n: int
     sufficient: bool
     label: str  # plain-English reliability sentence
-    bias: Bias
+    bias: Lean
 
 
 class RecentPattern(BaseModel):
     key: str
     label: str
-    bias: Bias
+    bias: Lean
     date: date
     stats: PatternStatsOut | None
 
@@ -153,7 +153,7 @@ class RegimeOut(BaseModel):
     baseline_mean: float
     z: float
     recent_articles: int
-    label: Literal["more_positive_than_usual", "more_negative_than_usual", "typical"]
+    label: RegimeLabel
 
 
 class TimelinePointOut(BaseModel):
@@ -210,15 +210,15 @@ class Marker(BaseModel):
     time: str | int
     kind: Literal["earnings", "dividend", "split", "pattern", "news"]
     label: str
-    bias: Bias | None = None
+    bias: Lean | None = None
     pattern: str | None = None
     car_0_1: float | None = None  # news markers only: abnormal return over 2 sessions, fraction
 
 
 class ChartData(BaseModel):
     symbol: str
-    range: Literal["1W", "1M", "6M", "1Y", "2Y"]
-    interval: Literal["1d", "1h"]
+    range: RangeKey
+    interval: Interval
     candles: list[Candle]
     indicators: dict[str, list[SeriesPoint]]
     markers: list[Marker]
