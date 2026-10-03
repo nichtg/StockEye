@@ -22,7 +22,7 @@ class RefreshSummary:
 
 
 async def refresh_exchange(services: Services, db: Database, exchange: Exchange) -> RefreshSummary:
-    """Refresh daily bars, events and news for the distinct watchlisted symbols of ``exchange``.
+    """Refresh daily bars and events (and news, for admitted symbols) of watchlisted symbols.
 
     Never raises: a failing symbol is logged and counted, and the rest carry on. Its vendor calls
     (and those of the ingestion tasks it starts) draw on the quota reserved for scheduled work.
@@ -55,5 +55,7 @@ async def _refresh_symbol(services: Services, symbol: str) -> None:
     _, _, name = await asyncio.gather(
         market.daily_history(symbol), market.standard_events(symbol), market.company_name(symbol)
     )
+    if not await services.admission.is_admitted(symbol):
+        return  # prices only: news for a never-admitted symbol is not worth the vendor quota
     await services.news.ensure_ingested(symbol, name)
     await services.news.wait(symbol)

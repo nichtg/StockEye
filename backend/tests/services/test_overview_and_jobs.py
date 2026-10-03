@@ -85,6 +85,7 @@ async def test_refresh_job_only_touches_symbols_of_its_exchange_and_counts_failu
     owner = ObjectId()
     for symbol in ("AAPL", "MSFT", "D05.SI"):
         await repo.add(owner, symbol, 50)
+        assert await services.admission.admit(owner, symbol)
     provider.fail_symbols["MSFT"] = TransientProviderError("yahoo", "down")
 
     summary = await refresh_exchange(services, db, "US")

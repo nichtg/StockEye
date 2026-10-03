@@ -6,7 +6,9 @@ from bson import ObjectId
 
 from app.config import Settings
 from app.db import Database
+from app.jobs.ingest import refresh_exchange
 from app.repositories.ingest_budget import IngestBudget, install_indexes
+from app.repositories.watchlists import WatchlistsRepository
 from app.services.analysis import NEW_SYMBOL_LIMIT_REASON
 from app.services.container import Services
 from app.services.reports import MacroResponse
@@ -84,21 +86,66 @@ async def test_macro_symbol_someone_else_already_ingested_costs_no_budget(
     assert response.data_status.news.state != "unavailable"
 
 
-async def test_try_spend_is_idempotent_per_symbol_and_atomic_at_the_cap(db: Database) -> None:
+async def test_admit_is_idempotent_per_symbol_and_atomic_at_the_cap(db: Database) -> None:
     await install_indexes(db)
     budget = IngestBudget(db, per_day=5)
 
-    results = await asyncio.gather(
-        *(budget.try_spend(ALICE, f"SYM{n}", CLOSED_NOW) for n in range(30))
-    )
+    results = await asyncio.gather(*(budget.admit(ALICE, f"SYM{n}", CLOSED_NOW) for n in range(30)))
 
     assert sum(results) == 5
     admitted = [n for n, ok in enumerate(results) if ok]
-    assert await budget.try_spend(ALICE, f"SYM{admitted[0]}", CLOSED_NOW)  # already admitted
-    assert not await budget.try_spend(ALICE, "NEW", CLOSED_NOW)
+    assert await budget.admit(ALICE, f"SYM{admitted[0]}", CLOSED_NOW)  # already admitted
+    assert not await budget.admit(ALICE, "NEW", CLOSED_NOW)
 
 
-async def test_try_spend_with_a_zero_budget_admits_nothing(db: Database) -> None:
+async def test_admit_with_a_zero_budget_admits_nothing(db: Database) -> None:
     await install_indexes(db)
 
-    assert not await IngestBudget(db, per_day=0).try_spend(ALICE, "AAPL", CLOSED_NOW)
+    assert not await IngestBudget(db, per_day=0).admit(ALICE, "AAPL", CLOSED_NOW)
+
+
+async def test_admit_spends_the_budget_once_per_symbol_across_users(db: Database) -> None:
+    await install_indexes(db)
+    one_each = IngestBudget(db, per_day=1)
+
+    assert await one_each.admit(ALICE, "AAPL", CLOSED_NOW)  # Alice spends her one admission
+    assert await one_each.admit(BOB, "AAPL", CLOSED_NOW)  # already admitted: free for Bob
+    assert await one_each.admit(BOB, "MSFT", CLOSED_NOW)  # so Bob's own budget is still whole
+    assert not await one_each.admit(ALICE, "NVDA", CLOSED_NOW)
+
+
+async def test_refresh_job_never_backfills_a_symbol_nobody_was_admitted_for(
+    services: Services, db: Database, news_provider: FakeNews
+) -> None:
+    await services.admission.admit(ALICE, "AAPL")  # the one admission of the day
+    repo = WatchlistsRepository(db)
+    await repo.add(ALICE, "AAPL", 50)
+    await repo.add(ALICE, "MSFT", 50)  # watchlisted, but the budget is gone
+
+    await refresh_exchange(services, db, "US")
+
+    assert (await services.news.progress("AAPL")).months_done == 24
+    assert not await services.news.has_history("MSFT")
+    assert {q.symbol for q in news_provider.queries} == {"AAPL"}
+
+
+async def test_watchlist_add_with_the_budget_spent_still_adds_but_is_not_admitted(
+    services: Services, db: Database
+) -> None:
+    await services.admission.admit(ALICE, "AAPL")
+
+    assert not await services.admission.admit(ALICE, "MSFT")  # what PUT /watchlist does
+    await WatchlistsRepository(db).add(ALICE, "MSFT", 50)
+
+    assert await WatchlistsRepository(db).get(ALICE) == ["MSFT"]
+    assert not await services.admission.is_admitted("MSFT")
+
+
+async def test_admission_is_recorded_at_admit_time_so_a_queued_symbol_is_free_for_others(
+    services: Services,
+) -> None:
+    await services.admission.admit(ALICE, "AAPL")  # admitted; ingestion not started yet
+    assert not await services.news.has_history("AAPL")
+
+    assert await services.admission.admit(BOB, "AAPL")  # free
+    assert await services.admission.admit(BOB, "MSFT")  # Bob's own budget untouched

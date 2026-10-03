@@ -1,10 +1,20 @@
 import httpx
 import pytest
+from limits import parse
 
+from app.config import RateLimits, Settings
 from tests.integration.conftest import ClientFactory, register
 from tests.services.fakes import FakeMarketData
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+def settings(settings: Settings) -> Settings:
+    settings.rate_limits = RateLimits(
+        watchlist=parse("1000/minute")
+    )  # the cap test makes 50+ writes
+    return settings
 
 
 async def test_watchlist_requires_authentication(client: httpx.AsyncClient) -> None:

@@ -10,7 +10,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
 from app.db import Database
+from app.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 COLLECTION = "analysis_cache"
 STALE_GRACE = timedelta(days=7)
@@ -31,6 +36,14 @@ class CacheEntry:
 
     def is_fresh(self, now: datetime) -> bool:
         return self.expires_at > now
+
+    def parse[M: BaseModel](self, model: type[M], key: str) -> M | None:
+        """The payload as ``model``, or None (a miss) if an older build saved another shape."""
+        try:
+            return model.model_validate(self.payload)
+        except ValidationError:
+            log.warning("cache_entry_invalid", key=key)
+            return None
 
 
 class CacheRepository:

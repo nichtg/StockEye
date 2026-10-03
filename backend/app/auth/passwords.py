@@ -7,6 +7,7 @@ worker thread: a burst of logins must not freeze every other request on the even
 import asyncio
 import os
 import re
+import weakref
 from functools import cache
 from importlib.resources import files
 
@@ -20,8 +21,11 @@ _hasher = PasswordHasher()  # library defaults are argon2id with current RFC 910
 # Verified against when an email is unknown so login timing does not reveal which emails exist.
 _DUMMY_HASH = _hasher.hash("stockeye-dummy-password-for-timing")
 # argon2 is memory-hard (tens of MiB per call), so cap parallel hashes at the core count; extra
-# logins queue here instead of exhausting memory or the default thread pool.
-_slots = asyncio.Semaphore(os.cpu_count() or 1)
+# logins queue here instead of exhausting memory or the default thread pool. A semaphore belongs
+# to the event loop it first waits on, so each running loop gets its own.
+_slots: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
 
 # Trailing digits and punctuation: "letmein2024!" is "letmein" with a suffix attackers try first.
 _SUFFIX = re.compile(r"[\d\W_]+$")
@@ -29,6 +33,13 @@ _SUFFIX = re.compile(r"[\d\W_]+$")
 
 class PasswordPolicyError(ValueError):
     """The password violates the policy; the message is safe to show to the user."""
+
+
+def _slot() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    if loop not in _slots:
+        _slots[loop] = asyncio.Semaphore(os.cpu_count() or 1)
+    return _slots[loop]
 
 
 @cache
@@ -63,13 +74,13 @@ def validate_password(password: str, email: str | None = None) -> None:
 
 
 async def hash_password(password: str) -> str:
-    async with _slots:
+    async with _slot():
         return await asyncio.to_thread(_hasher.hash, password)
 
 
 async def verify_password(password: str, password_hash: str) -> bool:
     """True when the password matches. Never raises on a mismatch or a malformed hash."""
-    async with _slots:
+    async with _slot():
         return await asyncio.to_thread(_verify, password, password_hash)
 
 

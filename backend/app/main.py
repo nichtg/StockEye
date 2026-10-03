@@ -9,8 +9,9 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-from app.api import admin, auth, health, limits, me, providers_status, stocks, watchlist
+from app.api import admin, auth, health, me, providers_status, stocks, watchlist
 from app.api.errors import install_error_handlers
+from app.api.limits import RateLimiter
 from app.api.middleware import CsrfMiddleware, RequestContextMiddleware
 from app.config import Settings, get_settings
 from app.db import IndexInstaller, create_client, ensure_indexes
@@ -67,7 +68,6 @@ def create_app(
         db = client[settings.mongodb_db]
         app.state.db = db
         app.state.settings = settings
-        limits.limiter.reset()  # fresh counters per app instance (matters for tests)
         try:
             await ensure_indexes(db, INDEX_INSTALLERS)
             services = await services_factory(settings, db)
@@ -96,7 +96,7 @@ def create_app(
         redoc_url=None if hide_docs else "/redoc",
         openapi_url=None if hide_docs else "/openapi.json",
     )
-    app.state.limiter = limits.limiter
+    app.state.rate_limiter = RateLimiter()
     install_error_handlers(app)
     for router in ROUTERS:
         app.include_router(router, prefix="/api")

@@ -165,12 +165,11 @@ async def test_search_results_are_cached(services: Services, provider: FakeMarke
 async def test_events_stale_fallback_keeps_saved_events(
     services: Services, clock: FakeClock, provider: FakeMarketData
 ) -> None:
-    start, end = date(2025, 1, 1), date(2026, 10, 2)
-    saved, _ = await services.market.events("AAPL", start, end)
+    saved, _ = await services.market.standard_events("AAPL")
     clock.now = CLOSED_NOW + timedelta(days=2)
     provider.fail_with = RateLimitedError("yahoo")
 
-    events, status = await services.market.events("AAPL", start, end)
+    events, status = await services.market.standard_events("AAPL")
 
     assert events == saved
     assert saved
@@ -182,7 +181,7 @@ async def test_events_without_cache_and_provider_down_is_unavailable_not_error(
 ) -> None:
     provider.fail_with = RateLimitedError("yahoo")
 
-    events, status = await services.market.events("AAPL", date(2025, 1, 1), date(2026, 10, 2))
+    events, status = await services.market.standard_events("AAPL")
 
     assert events == []
     assert status.state == "unavailable"

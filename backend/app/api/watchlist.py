@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.api.deps import DbDep, UserDep
-from app.api.limits import OVERVIEW, limited
+from app.api.limits import OVERVIEW, WATCHLIST, limited
 from app.repositories.watchlists import WatchlistFullError, WatchlistsRepository
 from app.services.container import ServicesDep
 from app.services.errors import AppError
@@ -41,9 +41,14 @@ async def overview(user: UserDep, db: DbDep, services: ServicesDep) -> list[Over
     return await build_overview(services.market, services.analysis, symbols)
 
 
-@router.put("/watchlist/{symbol}")
+@router.put("/watchlist/{symbol}", dependencies=[Depends(limited(WATCHLIST))])
 async def add_symbol(symbol: str, user: UserDep, db: DbDep, services: ServicesDep) -> WatchlistOut:
-    """Add a stock the vendor knows (looked up cache-first, so repeats cost nothing)."""
+    """Add a stock the vendor knows (looked up cache-first, so repeats cost nothing).
+
+    Adding always succeeds. As a side benefit the symbol is offered for news admission: if the
+    user's daily budget allows, the scheduled job will collect its news; if not, it simply will
+    not (and an analysis request can still admit it later).
+    """
     wanted = _normalise(symbol)
     await services.market.quote(wanted)  # unknown symbol: 404, nothing is saved
     repo = WatchlistsRepository(db)
@@ -53,10 +58,11 @@ async def add_symbol(symbol: str, user: UserDep, db: DbDep, services: ServicesDe
         raise AppError(
             409, "conflict", f"Your watchlist is full ({MAX_SYMBOLS} symbols maximum)."
         ) from exc
+    await services.admission.admit(user.id, wanted)
     return WatchlistOut(symbols=await repo.get(user.id))
 
 
-@router.delete("/watchlist/{symbol}")
+@router.delete("/watchlist/{symbol}", dependencies=[Depends(limited(WATCHLIST))])
 async def remove_symbol(symbol: str, user: UserDep, db: DbDep) -> WatchlistOut:
     repo = WatchlistsRepository(db)
     await repo.remove(user.id, _normalise(symbol))

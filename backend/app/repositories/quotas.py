@@ -105,7 +105,7 @@ class QuotaLedger:
                 {"provider": provider, "window": "minute", "start": minute},
                 {"$inc": {"used": -1}},
             )
-            await self._log_day_block(provider, day, limits, day_cap, resets_at)
+            await self._log_day_block(provider, day, limits, resets_at, priority)
             used = await self._used_today(provider, day)
             return QuotaDecision(False, "day", used, limits.per_day, resets_at)
 
@@ -135,11 +135,12 @@ class QuotaLedger:
         provider: str,
         day: datetime,
         limits: ProviderLimits,
-        day_cap: int,
         resets_at: datetime,
+        priority: Priority,
     ) -> None:
         """Log (once per day) why the day window refused a call: exhausted, or reserved."""
-        if day_cap == limits.per_day:
+        day_cap = daily_cap(limits.per_day, priority)
+        if priority == "scheduled":  # nothing is reserved from scheduled work: the day is spent
             if await self._flag_once(provider, "day", day, "blocked_logged"):
                 log.error(
                     "provider_quota_exhausted",

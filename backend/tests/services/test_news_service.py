@@ -246,8 +246,8 @@ async def test_incremental_skips_providers_that_do_not_cover_the_exchange_and_sp
     google = FakeNews()
     news = NewsService(
         db,
-        guard.wrap_news(google, wait_minute_quota=True),
-        [guard.wrap_news(us_only, wait_minute_quota=True), guard.wrap_news(google)],
+        guard.wrap_news(google),
+        [guard.wrap_news(us_only), guard.wrap_news(google)],
         scorer,
         clock=clock,
     )

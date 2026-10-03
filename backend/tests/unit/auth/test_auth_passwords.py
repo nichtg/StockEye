@@ -121,6 +121,7 @@ async def test_concurrent_hashes_are_capped_by_the_semaphore(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     in_flight = peak = 0
+    slots = asyncio.Semaphore(2)
 
     async def fake_to_thread(func: Callable[..., object], /, *args: object) -> object:
         nonlocal in_flight, peak
@@ -130,7 +131,7 @@ async def test_concurrent_hashes_are_capped_by_the_semaphore(
         in_flight -= 1
         return "hash"
 
-    monkeypatch.setattr(passwords, "_slots", asyncio.Semaphore(2))
+    monkeypatch.setattr(passwords, "_slot", lambda: slots)
     monkeypatch.setattr(passwords.asyncio, "to_thread", fake_to_thread)
 
     await asyncio.gather(*(hash_password("a-long-enough-password") for _ in range(6)))

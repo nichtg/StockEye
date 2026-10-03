@@ -10,7 +10,7 @@ importing the API.
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn
+from typing import NoReturn, TypeIs
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -47,7 +47,7 @@ class SessionTokens:
     refresh: str
 
 
-def _eligible(user: UserRecord | None) -> bool:
+def _eligible(user: UserRecord | None) -> TypeIs[UserRecord]:
     """Whether an existing session may keep working: the user exists and is not disabled.
 
     A lockout is deliberately not part of this. It only stops new password logins; someone who
@@ -152,7 +152,7 @@ class AccountService:
         except (TokenError, InvalidId) as exc:
             raise AppError(401, "unauthenticated", _SIGN_IN_REQUIRED) from exc
         user = await self._users.get_by_id(user_id)
-        if user is None or not _eligible(user):
+        if not _eligible(user):
             raise AppError(401, "unauthenticated", _SIGN_IN_REQUIRED)
         return Principal(id=user.id, email=user.email, role=user.role, created_at=user.created_at)
 
@@ -172,7 +172,7 @@ class AccountService:
         if rotated is None:
             raise AppError(401, "unauthenticated", _SESSION_EXPIRED)
         user = await self._users.get_by_id(rotated.user_id)
-        if user is None or not _eligible(user):
+        if not _eligible(user):
             await self._tokens.revoke_family(rotated.family_id)
             raise AppError(401, "unauthenticated", _SESSION_EXPIRED)
         return await self._issue(user.id, rotated.family_id), user

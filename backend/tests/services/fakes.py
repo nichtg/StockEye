@@ -21,8 +21,10 @@ from app.providers.models import (
     SymbolMatch,
 )
 from app.providers.resilience import ProviderGuard
+from app.repositories.ingest_budget import IngestBudget
 from app.repositories.quotas import QuotaLedger
 from app.sentiment.scorer import SentimentScore, SentimentUnavailableError
+from app.services.admission import NewSymbolAdmission
 from app.services.analysis import AnalysisService
 from app.services.calendars import exchange_for, session_calendar
 from app.services.container import Services
@@ -262,11 +264,8 @@ def build_fake_services(
     )
     market = MarketDataService(db, provider, clock)
     news = NewsService(db, news_provider, [news_provider], scorer, clock=clock)
-    analysis = AnalysisService(
-        db,
-        market,
-        news,
-        clock,
-        max_new_symbols_per_user_per_day=settings.max_new_symbols_per_user_per_day,
+    admission = NewSymbolAdmission(
+        IngestBudget(db, settings.max_new_symbols_per_user_per_day), news, clock
     )
-    return Services(market, news, analysis, guard)
+    analysis = AnalysisService(db, market, news, admission, clock)
+    return Services(market, news, analysis, admission, guard)

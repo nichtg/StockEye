@@ -294,7 +294,7 @@
           "watchlist"
         ],
         "summary": "Add Symbol",
-        "description": "Add a stock the vendor knows (looked up cache-first, so repeats cost nothing).",
+        "description": "Add a stock the vendor knows (looked up cache-first, so repeats cost nothing).\n\nAdding always succeeds. As a side benefit the symbol is offered for news admission: if the\nuser's daily budget allows, the scheduled job will collect its news; if not, it simply will\nnot (and an analysis request can still admit it later).",
         "operationId": "add_symbol_api_watchlist__symbol__put",
         "parameters": [
           {

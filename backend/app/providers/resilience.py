@@ -104,14 +104,14 @@ class ProviderGuard:
         self._require_limits(adapter.name)
         return _GuardedMarket(self, adapter)
 
-    def wrap_news(self, adapter: NewsProvider, *, wait_minute_quota: bool = False) -> NewsProvider:
+    def wrap_news(self, adapter: NewsProvider) -> NewsProvider:
         """``adapter`` with ``fetch`` run under the guard. Raises ValueError if unconfigured.
 
-        With ``wait_minute_quota`` a per-minute throttle pauses and retries (background
-        ingestion can afford to) instead of raising; a daily quota error always propagates.
+        News is only ever fetched by background ingestion, so a per-minute throttle pauses and
+        retries instead of raising; a daily quota error always propagates.
         """
         self._require_limits(adapter.name)
-        return _GuardedNews(self, adapter, wait_minute_quota)
+        return _GuardedNews(self, adapter)
 
     def _require_limits(self, provider: str) -> None:
         # Checked at wrap time so a misnamed adapter fails at startup, not on its first call.
@@ -291,13 +291,13 @@ class _GuardedMarket:
 
 
 class _GuardedNews:
-    """A ``NewsProvider`` whose ``fetch`` runs under the guard (and may wait out minute quotas)."""
+    """A ``NewsProvider`` whose ``fetch`` runs under the guard (and waits out minute quotas)."""
 
-    def __init__(self, guard: ProviderGuard, adapter: NewsProvider, patient: bool) -> None:
+    def __init__(self, guard: ProviderGuard, adapter: NewsProvider) -> None:
         self.name = adapter.name
         self.exchanges = adapter.exchanges
-        self._call = guard.call_patiently if patient else guard.call
+        self._guard = guard
         self._adapter = adapter
 
     async def fetch(self, query: NewsQuery) -> list[NewsItem]:
-        return await self._call(self.name, partial(self._adapter.fetch, query))
+        return await self._guard.call_patiently(self.name, partial(self._adapter.fetch, query))

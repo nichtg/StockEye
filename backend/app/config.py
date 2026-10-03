@@ -3,9 +3,10 @@
 import secrets
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, SecretStr, model_validator
+from limits import RateLimitItem, parse
+from pydantic import BaseModel, BeforeValidator, ConfigDict, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_JWT_SECRET_LENGTH = 32
@@ -19,6 +20,31 @@ class ProviderLimits(BaseModel):
 
     per_minute: int
     per_day: int
+
+
+def _parse_rate(value: object) -> object:
+    """A ``limits`` rate string such as "20/minute" becomes a rate item; a bad one fails startup."""
+    return parse(value) if isinstance(value, str) else value
+
+
+type Rate = Annotated[RateLimitItem, BeforeValidator(_parse_rate)]
+
+
+class RateLimits(BaseModel):
+    """Request budgets, each a ``limits`` rate string such as "20/minute" (see app.api.limits).
+
+    The data endpoints are budgeted per signed-in user and several routes may share one bucket;
+    ``auth`` is budgeted per client address, since nobody is signed in yet.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    search: Rate = parse("60/minute")
+    stock: Rate = parse("120/minute")  # the quote, chart and technical endpoints share it
+    macro: Rate = parse("20/minute")
+    overview: Rate = parse("20/minute")
+    watchlist: Rate = parse("30/minute")
+    auth: Rate = parse("10/minute")
 
 
 class Settings(BaseSettings):
@@ -57,14 +83,7 @@ class Settings(BaseSettings):
     }
     quota_warning_ratio: float = 0.8
 
-    # Per-user request budgets for the data endpoints, as `limits` rate strings. Several routes
-    # may share one bucket (see app.api.limits).
-    rate_limits: dict[str, str] = {
-        "search": "60/minute",
-        "stock": "120/minute",
-        "macro": "20/minute",
-        "overview": "20/minute",
-    }
+    rate_limits: RateLimits = RateLimits()
     # Symbols never ingested before that one user may trigger a news backfill for, per UTC day.
     max_new_symbols_per_user_per_day: int = 10
     max_concurrent_ingestions: int = 2

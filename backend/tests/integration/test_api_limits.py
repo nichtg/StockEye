@@ -1,12 +1,8 @@
-from types import SimpleNamespace
-
 import httpx
 import pytest
-from fastapi import Request
+from limits import parse
 
-from app.api.limits import MACRO, OVERVIEW, SEARCH, STOCK, user_or_ip_key
-from app.auth.tokens import create_access_token
-from app.config import Settings
+from app.config import RateLimits, Settings
 from tests.integration.conftest import ClientFactory, register
 
 pytestmark = pytest.mark.integration
@@ -14,12 +10,13 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def settings(settings: Settings) -> Settings:
-    settings.rate_limits = {
-        SEARCH: "2/minute",
-        STOCK: "3/minute",
-        MACRO: "1/minute",
-        OVERVIEW: "1/minute",
-    }
+    settings.rate_limits = RateLimits(
+        search=parse("2/minute"),
+        stock=parse("3/minute"),
+        macro=parse("1/minute"),
+        overview=parse("1/minute"),
+        watchlist=parse("2/minute"),
+    )
     return settings
 
 
@@ -67,27 +64,16 @@ async def test_budget_is_per_user_not_per_address(
     assert (await bob.get("/api/stocks/search?q=app")).status_code == 200
 
 
-def _request(settings: Settings, cookie: str | None, client_host: str = "10.0.0.7") -> Request:
-    headers = [(b"cookie", f"se_access={cookie}".encode())] if cookie else []
+async def test_watchlist_writes_share_one_budget(alice: httpx.AsyncClient) -> None:
+    statuses = [
+        (await alice.put("/api/watchlist/AAPL")).status_code,
+        (await alice.delete("/api/watchlist/AAPL")).status_code,
+        (await alice.put("/api/watchlist/AAPL")).status_code,
+    ]
 
-    app = SimpleNamespace(state=SimpleNamespace(settings=settings))
-    scope = {
-        "type": "http",
-        "headers": headers,
-        "client": (client_host, 1234),
-        "app": app,
-    }
-    return Request(scope)
+    assert statuses == [200, 200, 429]
 
 
-def test_user_or_ip_key_uses_the_user_id_from_a_valid_access_cookie(settings: Settings) -> None:
-    token = create_access_token("64b7f0c2a1b2c3d4e5f60718", settings)
-
-    assert user_or_ip_key(_request(settings, token)) == "user:64b7f0c2a1b2c3d4e5f60718"
-
-
-def test_user_or_ip_key_falls_back_to_the_address_without_a_usable_cookie(
-    settings: Settings,
-) -> None:
-    assert user_or_ip_key(_request(settings, None)) == "ip:10.0.0.7"
-    assert user_or_ip_key(_request(settings, "forged.token.value")) == "ip:10.0.0.7"
+def test_rate_limits_reject_an_unparsable_rate_string() -> None:
+    with pytest.raises(ValueError, match="macro"):
+        RateLimits(macro="often")  # type: ignore[arg-type]  # the point of the test

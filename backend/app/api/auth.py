@@ -7,14 +7,12 @@ cookies and JSON.
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Request, Response
+from fastapi import APIRouter, Cookie, Depends, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.api.deps import AccountsDep, SettingsDep
-from app.api.limits import limiter
+from app.api.limits import AUTH, limited_by_ip
 from app.auth.cookies import (
-    ACCESS_COOKIE,
-    REFRESH_COOKIE,
     clear_auth_cookies,
     set_auth_cookies,
     set_csrf_cookie,
@@ -26,8 +24,6 @@ from app.repositories.users import Role, UserRecord
 from app.services.accounts import SessionTokens
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-_AUTH_LIMIT = "10/minute"
 
 
 class Credentials(BaseModel):
@@ -76,10 +72,8 @@ async def csrf(response: Response, settings: SettingsDep) -> CsrfOut:
     return CsrfOut(csrf_token=token)
 
 
-@router.post("/register", status_code=201)
-@limiter.limit(_AUTH_LIMIT)
+@router.post("/register", status_code=201, dependencies=[Depends(limited_by_ip(AUTH))])
 async def register(
-    request: Request,
     body: RegisterIn,
     response: Response,
     accounts: AccountsDep,
@@ -90,10 +84,8 @@ async def register(
     return SessionOut(user=UserOut.of(user))
 
 
-@router.post("/login")
-@limiter.limit(_AUTH_LIMIT)
+@router.post("/login", dependencies=[Depends(limited_by_ip(AUTH))])
 async def login(
-    request: Request,
     body: Credentials,
     response: Response,
     accounts: AccountsDep,
@@ -126,6 +118,3 @@ async def logout(
     out = Response(status_code=204)
     clear_auth_cookies(out, settings)
     return out
-
-
-__all__ = ["ACCESS_COOKIE", "REFRESH_COOKIE", "limiter", "router"]

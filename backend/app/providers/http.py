@@ -1,13 +1,12 @@
 """HTTP helpers that map httpx failures onto the provider error taxonomy.
 
 Error messages never contain the request URL's query string, so API keys cannot leak into logs
-or the admin page. ``redact_url`` is for callers that want to log a URL anyway.
+or the admin page. Callers that must log a URL anyway use ``app.redaction.redact_text``.
 """
 
 import email.utils
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -17,17 +16,6 @@ from app.providers.errors import (
     RateLimitedError,
     TransientProviderError,
 )
-
-_SECRET_PARAMS = frozenset({"token", "apikey", "api_token", "api_key"})
-
-
-def redact_url(url: str) -> str:
-    parts = urlsplit(url)
-    query = [
-        (k, "REDACTED" if k.lower() in _SECRET_PARAMS else v)
-        for k, v in parse_qsl(parts.query, keep_blank_values=True)
-    ]
-    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 def parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:

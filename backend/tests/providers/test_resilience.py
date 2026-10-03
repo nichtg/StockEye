@@ -406,21 +406,10 @@ def test_wrap_news_unknown_provider_name_raises_value_error_at_wrap_time() -> No
         h.guard.wrap_news(adapter)
 
 
-async def test_wrap_news_without_waiting_raises_minute_quota_error() -> None:
-    h = _harness(FakeLedger(minute_blocks=1))
-    news = h.guard.wrap_news(_News())
-
-    with pytest.raises(QuotaExhaustedError) as caught:
-        await news.fetch(QUERY)
-
-    assert caught.value.window == "minute"
-    assert h.sleeps == []
-
-
-async def test_wrap_news_waiting_sleeps_until_retry_at_then_retries_the_same_call() -> None:
+async def test_wrap_news_sleeps_until_retry_at_then_retries_the_same_call() -> None:
     h = _harness(FakeLedger(minute_blocks=2))
     adapter = _News()
-    news = h.guard.wrap_news(adapter, wait_minute_quota=True)
+    news = h.guard.wrap_news(adapter)
 
     with capture_logs() as logs:
         await news.fetch(QUERY)
@@ -430,19 +419,19 @@ async def test_wrap_news_waiting_sleeps_until_retry_at_then_retries_the_same_cal
     assert [e["event"] for e in logs if e["log_level"] == "info"] == ["news_backfill_paused"] * 2
 
 
-async def test_wrap_news_waiting_caps_the_wait_at_65_seconds() -> None:
+async def test_wrap_news_caps_the_wait_at_65_seconds() -> None:
     h = _harness(FakeLedger(minute_blocks=1))
     h.clock.now = NOW - timedelta(minutes=10)  # retry_at is now 10 minutes and 20s away
-    news = h.guard.wrap_news(_News(), wait_minute_quota=True)
+    news = h.guard.wrap_news(_News())
 
     await news.fetch(QUERY)
 
     assert h.sleeps == [65.0]
 
 
-async def test_wrap_news_waiting_gives_up_after_five_pauses() -> None:
+async def test_wrap_news_gives_up_after_five_pauses() -> None:
     h = _harness(FakeLedger(minute_blocks=100))
-    news = h.guard.wrap_news(_News(), wait_minute_quota=True)
+    news = h.guard.wrap_news(_News())
 
     with pytest.raises(QuotaExhaustedError):
         await news.fetch(QUERY)
@@ -451,9 +440,9 @@ async def test_wrap_news_waiting_gives_up_after_five_pauses() -> None:
     assert len(h.ledger.priorities) == MAX_QUOTA_WAITS + 1  # every pause is followed by a try
 
 
-async def test_wrap_news_waiting_does_not_wait_out_a_daily_quota() -> None:
+async def test_wrap_news_does_not_wait_out_a_daily_quota() -> None:
     h = _harness(FakeLedger(allow=0))
-    news = h.guard.wrap_news(_News(), wait_minute_quota=True)
+    news = h.guard.wrap_news(_News())
 
     with pytest.raises(QuotaExhaustedError) as caught:
         await news.fetch(QUERY)

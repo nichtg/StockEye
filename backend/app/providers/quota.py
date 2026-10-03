@@ -24,6 +24,10 @@ INTERACTIVE_SHARE = 0.8
 
 # Who is calling. A context variable (rather than a parameter on every service method) because
 # background tasks started by a scheduled job inherit it, which is exactly the attribution wanted.
+#
+# Caveat: calls deduplicated by a ``SingleFlight`` run in the task of whichever caller started the
+# flight, so they carry that caller's priority, and joiners with another priority inherit it. This
+# is accepted: a shared fetch is charged once, to whoever happened to ask first.
 _priority: ContextVar[Priority] = ContextVar("quota_priority", default="interactive")
 
 
