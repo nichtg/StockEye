@@ -1,5 +1,6 @@
 import type { ChartMarker, RangeKey } from '../../api/types';
 import type { TermId } from '../../glossary';
+import { readStored, writeStored } from '../../lib/storage';
 
 export type MarkerKind = ChartMarker['kind'];
 
@@ -55,17 +56,9 @@ export function parseMarkerOverrides(raw: string | null): MarkerOverrides {
 }
 
 export function loadMarkerOverrides(): MarkerOverrides {
-  try {
-    return parseMarkerOverrides(localStorage.getItem(MARKERS_STORAGE_KEY));
-  } catch {
-    return {};
-  }
+  return readStored(MARKERS_STORAGE_KEY, parseMarkerOverrides, {});
 }
 
 export function saveMarkerOverrides(overrides: MarkerOverrides): void {
-  try {
-    localStorage.setItem(MARKERS_STORAGE_KEY, JSON.stringify(overrides));
-  } catch {
-    // Storage may be blocked; the choice still works for this visit.
-  }
+  writeStored(MARKERS_STORAGE_KEY, overrides);
 }

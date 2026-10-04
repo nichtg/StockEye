@@ -57,40 +57,37 @@ const SWAP_ON_ENGAGE = {
 
 function WatchlistToggle({ symbol }: { symbol: string }) {
   const symbols = useWatchlistSymbols();
-  const { toggle, snackbar } = useWatchlistToggle();
+  const { toggle } = useWatchlistToggle();
   const theme = useTheme();
   const compact = useMediaQuery(theme.breakpoints.down('sm'));
   const inList = symbols.data?.includes(symbol) ?? false;
 
   return (
-    <>
-      <Button
-        variant={inList ? 'outlined' : 'contained'}
-        color="primary"
-        size={compact ? 'small' : 'medium'}
-        disabled={symbols.isPending}
-        startIcon={inList ? <Star /> : <StarBorder />}
-        onClick={() => {
-          toggle(symbol, !inList);
-        }}
-        sx={{ flexShrink: 0, minWidth: { xs: 0, sm: 210 }, ...(inList && SWAP_ON_ENGAGE) }}
-      >
-        {inList ? (
-          <>
-            <span className="when-rest">
-              In watchlist
-              <Box component="span" sx={visuallyHidden}>
-                , activate to remove
-              </Box>
-            </span>
-            <span className="when-engaged">Remove from watchlist</span>
-          </>
-        ) : (
-          'Add to watchlist'
-        )}
-      </Button>
-      {snackbar}
-    </>
+    <Button
+      variant={inList ? 'outlined' : 'contained'}
+      color="primary"
+      size={compact ? 'small' : 'medium'}
+      disabled={symbols.isPending}
+      startIcon={inList ? <Star /> : <StarBorder />}
+      onClick={() => {
+        toggle(symbol, !inList);
+      }}
+      sx={{ flexShrink: 0, minWidth: { xs: 0, sm: 210 }, ...(inList && SWAP_ON_ENGAGE) }}
+    >
+      {inList ? (
+        <>
+          <span className="when-rest">
+            In watchlist
+            <Box component="span" sx={visuallyHidden}>
+              , activate to remove
+            </Box>
+          </span>
+          <span className="when-engaged">Remove from watchlist</span>
+        </>
+      ) : (
+        'Add to watchlist'
+      )}
+    </Button>
   );
 }
 

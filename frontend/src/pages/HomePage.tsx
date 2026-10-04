@@ -11,7 +11,7 @@ import { useDocumentTitle } from '../hooks';
 export default function HomePage() {
   useDocumentTitle('Watchlist');
   const overview = useWatchlistOverview();
-  const { toggle, snackbar } = useWatchlistToggle();
+  const { toggle } = useWatchlistToggle();
   const count = overview.data?.length ?? 0;
 
   return (
@@ -50,7 +50,6 @@ export default function HomePage() {
           )
         }
       </QueryRegion>
-      {snackbar}
     </Box>
   );
 }

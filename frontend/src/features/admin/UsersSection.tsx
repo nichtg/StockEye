@@ -31,7 +31,7 @@ export function UsersSection() {
 
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const [toDelete, setToDelete] = useState<AdminUser | null>(null);
-  const notice = useNotice();
+  const showNotice = useNotice();
 
   const setView = (nextSearch: string, nextPage: number) => {
     const next = new URLSearchParams(params);
@@ -43,7 +43,7 @@ export function UsersSection() {
   };
 
   const fail = (error: unknown) => {
-    notice.show(userMessage(error));
+    showNotice(userMessage(error));
   };
 
   const patch = (user: AdminUser, change: AdminUserPatch, success: string) => {
@@ -52,7 +52,7 @@ export function UsersSection() {
       { id: user.id, patch: change },
       {
         onSuccess: () => {
-          notice.show(success);
+          showNotice(success);
         },
         onError: fail,
       },
@@ -63,7 +63,7 @@ export function UsersSection() {
     setToDelete(null);
     remove.mutate(user.id, {
       onSuccess: () => {
-        notice.show(`Deleted ${user.email}`);
+        showNotice(`Deleted ${user.email}`);
       },
       onError: fail,
     });
@@ -141,8 +141,6 @@ export function UsersSection() {
         }}
         onConfirm={confirmDelete}
       />
-
-      {notice.element}
     </Box>
   );
 }

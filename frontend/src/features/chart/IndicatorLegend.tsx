@@ -18,6 +18,7 @@ export function IndicatorLegend({
   return (
     <Box
       sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 2.5, rowGap: 0.5, mb: 1.5 }}
+      role="group"
       aria-label="Indicator legend"
     >
       {active.map((ind) => {

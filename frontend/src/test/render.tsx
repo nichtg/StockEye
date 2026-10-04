@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
+import { NoticeProvider } from '../components/NoticeProvider';
 import { ColorModeProvider } from '../theme/ColorModeProvider';
 
 export function renderApp(ui: ReactElement, { route = '/' }: { route?: string } = {}) {
@@ -11,7 +12,9 @@ export function renderApp(ui: ReactElement, { route = '/' }: { route?: string } 
     ...render(
       <ColorModeProvider>
         <QueryClientProvider client={client}>
-          <MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>
+          <NoticeProvider>
+            <MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>
+          </NoticeProvider>
         </QueryClientProvider>
       </ColorModeProvider>,
     ),

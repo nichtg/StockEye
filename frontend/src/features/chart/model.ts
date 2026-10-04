@@ -14,6 +14,7 @@ import {
 } from 'lightweight-charts';
 import type { Candle, ChartData, ChartMarker, SeriesPoint } from '../../api/types';
 import type { Tokens } from '../../theme/tokens';
+import type { Band } from './bandFill';
 import { INDICATORS, type IndicatorDef, type IndicatorId } from './indicators';
 
 export const SUB_PANE_HEIGHT = 100;
@@ -74,7 +75,7 @@ export interface SpecOf<K extends keyof SpecData> {
   /** Horizontal guide lines (the RSI 30/70 levels). */
   levels?: { prices: number[]; color: string };
   /** Shaded area between this line and `lower` (Bollinger bands). */
-  band?: { lower: LineData[]; color: string };
+  band?: Band;
 }
 
 export type SeriesSpec = SpecOf<'Candlestick'> | SpecOf<'Histogram'> | SpecOf<'Line'>;

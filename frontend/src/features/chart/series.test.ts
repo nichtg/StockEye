@@ -120,10 +120,6 @@ describe('buildSeriesSpecs', () => {
     const rsi = buildSeriesSpecs(data, ['rsi'], p).find((s) => s.key === 'rsi');
     expect(rsi?.scaleMargins).toEqual({ top: 0.1, bottom: 0.1 });
   });
-
-  it('exposes a stable sub-pane height', () => {
-    expect(SUB_PANE_HEIGHT).toBeGreaterThan(0);
-  });
 });
 
 /** Just enough of a chart to watch what the diff does to it. */

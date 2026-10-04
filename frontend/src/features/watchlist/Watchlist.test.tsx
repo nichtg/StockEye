@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { OverviewRow } from '../../api/types';
 import HomePage from '../../pages/HomePage';
@@ -124,6 +124,42 @@ describe('watchlist overview', () => {
       expect(seen.some((r) => r.method === 'PUT')).toBe(true);
     });
     expect(await screen.findByRole('link', { name: 'AAPL' })).toBeInTheDocument();
+  });
+
+  it('gives each of two quick removals its own Undo', async () => {
+    const msft: OverviewRow = { ...aapl, symbol: 'MSFT', name: 'Microsoft Corp.' };
+    let saved = ['AAPL', 'MSFT'];
+    const seen = stubFetch((req) => {
+      if (req.path === '/watchlist/overview')
+        return { body: [aapl, msft].filter((r) => saved.includes(r.symbol)) };
+      if (req.path === '/watchlist' && req.method === 'GET') return { body: { symbols: saved } };
+      if (req.method === 'DELETE') {
+        saved = saved.filter((symbol) => !req.path.endsWith(`/${symbol}`));
+        return { body: { symbols: saved } };
+      }
+      if (req.method === 'PUT') {
+        const added = /\/([^/]+)$/.exec(req.path)?.[1];
+        if (added) saved = [...saved, added];
+        return { body: { symbols: saved } };
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderApp(<HomePage />);
+    const removeAapl = await screen.findByRole('button', { name: 'Remove AAPL from watchlist' });
+    const removeMsft = screen.getByRole('button', { name: 'Remove MSFT from watchlist' });
+    // Back to back: the first toast is still arriving when the second removal lands.
+    fireEvent.click(removeAapl);
+    fireEvent.click(removeMsft);
+    // The two DELETEs may settle in either order; each removal still gets its toast, in turn.
+    const first = await screen.findByText(/^Removed (AAPL|MSFT)$/);
+    const other = first.textContent === 'Removed AAPL' ? 'MSFT' : 'AAPL';
+    expect(await screen.findByText(`Removed ${other}`)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => {
+      expect(seen.some((r) => r.method === 'PUT' && r.path.endsWith(`/${other}`))).toBe(true);
+    });
+    expect(await screen.findByRole('link', { name: other })).toBeInTheDocument();
   });
 });
 

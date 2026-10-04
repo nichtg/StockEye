@@ -68,29 +68,24 @@ export class BandFill implements ISeriesPrimitive {
     draw: (target) => {
       const { chart, series } = this;
       if (!chart || !series) return;
-      const xs: number[] = [];
-      const tops: number[] = [];
-      const bottoms: number[] = [];
+      const points: { x: number; top: number; bottom: number }[] = [];
       for (const p of this.upper) {
         const low = this.lowerAt.get(p.time);
         const x = chart.timeScale().timeToCoordinate(p.time);
         const top = series.priceToCoordinate(p.value);
         const bottom = low === undefined ? null : series.priceToCoordinate(low);
         if (x === null || top === null || bottom === null) continue;
-        xs.push(x);
-        tops.push(top);
-        bottoms.push(bottom);
+        points.push({ x, top, bottom });
       }
-      if (xs.length < 2) return;
+      if (points.length < 2) return;
       target.useBitmapCoordinateSpace(
         ({ context: c, horizontalPixelRatio: h, verticalPixelRatio: v }) => {
           c.beginPath();
-          xs.forEach((x, i) => {
-            if (i === 0) c.moveTo(x * h, (tops[i] ?? 0) * v);
-            else c.lineTo(x * h, (tops[i] ?? 0) * v);
+          points.forEach(({ x, top }, i) => {
+            if (i === 0) c.moveTo(x * h, top * v);
+            else c.lineTo(x * h, top * v);
           });
-          for (let i = xs.length - 1; i >= 0; i -= 1)
-            c.lineTo((xs[i] ?? 0) * h, (bottoms[i] ?? 0) * v);
+          for (const { x, bottom } of points.toReversed()) c.lineTo(x * h, bottom * v);
           c.closePath();
           c.fillStyle = this.band.color;
           c.fill();

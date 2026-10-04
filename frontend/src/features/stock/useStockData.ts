@@ -30,8 +30,7 @@ export function useChart(symbol: string, range: RangeKey) {
         query: { range, indicators: ALL_INDICATORS },
       }),
     // Keep the old bars while a new range loads, but never another symbol's under this header.
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === symbol ? previous : undefined,
+    placeholderData: (previous) => (previous?.symbol === symbol ? previous : undefined),
   });
 }
 

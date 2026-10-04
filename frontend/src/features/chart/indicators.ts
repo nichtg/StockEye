@@ -1,6 +1,7 @@
 import { LineStyle } from 'lightweight-charts';
 import type { RangeKey } from '../../api/types';
 import type { TermId } from '../../glossary';
+import { readStored, writeStored } from '../../lib/storage';
 
 export type IndicatorId =
   'vwap' | 'sma20' | 'sma50' | 'ema9' | 'ema21' | 'bollinger' | 'rsi' | 'macd';
@@ -100,17 +101,9 @@ export function parseIndicatorSelection(raw: string | null): IndicatorId[] {
 }
 
 export function loadIndicatorSelection(): IndicatorId[] {
-  try {
-    return parseIndicatorSelection(localStorage.getItem(INDICATORS_STORAGE_KEY));
-  } catch {
-    return DEFAULT_INDICATORS;
-  }
+  return readStored(INDICATORS_STORAGE_KEY, parseIndicatorSelection, DEFAULT_INDICATORS);
 }
 
 export function saveIndicatorSelection(selection: IndicatorId[]): void {
-  try {
-    localStorage.setItem(INDICATORS_STORAGE_KEY, JSON.stringify(selection));
-  } catch {
-    // Storage may be blocked; the selection still works for this visit.
-  }
+  writeStored(INDICATORS_STORAGE_KEY, selection);
 }

@@ -1,5 +1,5 @@
 import { alpha, createTheme, type Theme } from '@mui/material/styles';
-import { FONT_FAMILY, MOTION_MS, tokens, type ColorMode } from './tokens';
+import { FONT_FAMILY, MOTION_MS, radius, tokens, type ColorMode } from './tokens';
 
 const TRANSITION = `${MOTION_MS}ms ease`;
 
@@ -118,7 +118,7 @@ export function createAppTheme(mode: ColorMode): Theme {
       MuiButton: {
         defaultProps: { disableElevation: true },
         styleOverrides: {
-          root: { borderRadius: 8, minHeight: 40, padding: '8px 16px', boxShadow: 'none' },
+          root: { borderRadius: radius.sm, minHeight: 40, padding: '8px 16px', boxShadow: 'none' },
           sizeSmall: { minHeight: 32, padding: '4px 12px', fontSize: '0.8125rem' },
           sizeLarge: { minHeight: 48 },
           containedPrimary: {
@@ -177,7 +177,7 @@ export function createAppTheme(mode: ColorMode): Theme {
       MuiOutlinedInput: {
         styleOverrides: {
           root: {
-            borderRadius: 8,
+            borderRadius: radius.sm,
             backgroundColor: t.bg,
             '& .MuiOutlinedInput-notchedOutline': {
               borderColor: t.line,
@@ -212,7 +212,7 @@ export function createAppTheme(mode: ColorMode): Theme {
       MuiChip: {
         styleOverrides: {
           root: {
-            borderRadius: 8,
+            borderRadius: radius.sm,
             fontWeight: 500,
             fontSize: '0.75rem',
             color: t.ink,
@@ -225,7 +225,7 @@ export function createAppTheme(mode: ColorMode): Theme {
       },
       MuiTabs: {
         styleOverrides: {
-          root: { minHeight: 40, backgroundColor: t.raised, borderRadius: 8, padding: 4 },
+          root: { minHeight: 40, backgroundColor: t.raised, borderRadius: radius.sm, padding: 4 },
           indicator: { display: 'none' },
         },
       },
@@ -275,7 +275,7 @@ export function createAppTheme(mode: ColorMode): Theme {
             backgroundColor: t.bg,
             color: t.ink2,
             border: `1px solid ${t.line}`,
-            borderRadius: 8,
+            borderRadius: radius.sm,
             boxShadow: shadow,
             fontSize: '0.8125rem',
             lineHeight: 1.45,
@@ -293,7 +293,7 @@ export function createAppTheme(mode: ColorMode): Theme {
       MuiMenu: {
         styleOverrides: {
           paper: {
-            borderRadius: 8,
+            borderRadius: radius.sm,
             border: `1px solid ${t.line}`,
             boxShadow: shadow,
             backgroundImage: 'none',
@@ -316,7 +316,7 @@ export function createAppTheme(mode: ColorMode): Theme {
       },
       MuiDialog: {
         styleOverrides: {
-          paper: { borderRadius: 12, border: `1px solid ${t.line}`, boxShadow: shadow },
+          paper: { borderRadius: radius.lg, border: `1px solid ${t.line}`, boxShadow: shadow },
         },
       },
       MuiDialogTitle: {
@@ -328,7 +328,7 @@ export function createAppTheme(mode: ColorMode): Theme {
         defaultProps: { variant: 'standard' },
         styleOverrides: {
           root: {
-            borderRadius: 8,
+            borderRadius: radius.sm,
             border: `1px solid ${t.line}`,
             backgroundColor: t.raised,
             color: t.ink2,
@@ -347,7 +347,7 @@ export function createAppTheme(mode: ColorMode): Theme {
           root: {
             backgroundColor: t.ink,
             color: t.bg,
-            borderRadius: 8,
+            borderRadius: radius.sm,
             boxShadow: 'none',
             fontSize: '0.9375rem',
           },
