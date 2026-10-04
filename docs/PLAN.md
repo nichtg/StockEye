@@ -230,17 +230,17 @@ Architecture rule: `domain/` is pure, with no I/O and nothing imported from `pro
 
 ---
 
-## Status (2026-10-03)
+## Status (2026-10-04)
 
 ### Branches
-Each branch is stacked on the one before it, and nothing is pushed yet except `main`.
+Each branch is stacked on the one before it. All four are pushed, with PRs open (see "Remaining steps").
 
 | Branch | Contents | State |
 |---|---|---|
 | `main` | Initial scaffold | Pushed |
-| `feat/backend-foundation` | Skeleton, auth, accounts, admin, watchlist, provider resilience | Passes CI-equivalent gates on its own (135 tests) |
+| `feat/backend-foundation` | Skeleton, auth, accounts, admin, watchlist, provider resilience | 135 tests |
 | `feat/backend-analysis` | Providers, FinBERT, technical and macro engines, services and API, refactors, security hardening, docs, Docker | 726 tests. **Thermo-nuclear review: APPROVED (round 5).** |
-| `feat/frontend` | The whole UI, frontend CI, nginx and Dockerfile, curated screenshots | 107 tests. **Frontend review round 2: NOT APPROVED**; all 4 Majors and 8 Minors since fixed and committed; round-3 re-review pending. |
+| `feat/frontend` | The whole UI, frontend CI, nginx and Dockerfile, curated screenshots in `docs/screenshots/` | 110 tests. **Frontend review: APPROVED (round 3).** |
 
 ### Review history
 - **Analysis-logic audit (Opus):** 1 Critical, 9 Major and 12 Minor findings. All fixed, with regression tests.
@@ -249,22 +249,18 @@ Each branch is stacked on the one before it, and nothing is pushed yet except `m
 - **Backend security review:** 0 Critical, 3 High, 4 Medium and 9 Low. All High and Medium fixed; the Lows were fixed or documented.
 - **Frontend thermo-nuclear plus Web Interface Guidelines:**
   - Round 1: NOT APPROVED. Fixed in passes FA and FB.
-  - Round 2: NOT APPROVED, with 4 small Majors. Fixed in commit 585f1f9.
+  - Round 2: NOT APPROVED, with 4 Majors. Fixed in commit 585f1f9.
+  - Round 3: APPROVED, with 8 Minors. They were fixed (an app-wide notice host, so toasts survive navigation), and the fix delta was re-reviewed until APPROVED.
+
+### Known non-blocking minors
+- The RSI "40.00" axis label sits close to the value badge.
+- Two cache payload formats share one collection (backend).
+- A crash-only state where `last_bar_at` is set but no bars exist answers 404 for up to 15 minutes.
+- A sentiment `scoring_error` is cleared only on the next news ingestion, so after installing the model the banner lingers until the next refresh.
 
 ### Remaining steps
-1. **Frontend re-review round 3.** Check against `.handoff/sdd/frontend-fix-round-2.md`. If it isn't approved, fix and re-review.
-2. **Re-shoot `frontend/screenshots/admin-desktop-light.png`.** It is stale. Create an admin via `uv run python -m app.cli create-admin`, with credentials only in shell env, then run `node scripts/screenshots.mjs` with `SE_ADMIN_EMAIL` and `SE_ADMIN_PASSWORD` set.
-3. **Known non-blocking minors:**
-   - The RSI "40.00" axis label sits close to the value badge.
-   - The watchlist Undo toast is lost when navigating away (a toast host would belong in AppShell).
-   - Two cache payload formats share one collection (backend).
-   - A crash-only state where `last_bar_at` is set but no bars exist answers 404 for up to 15 minutes.
-4. **Push and open PRs**, merged in order 1 → 2 → 3:
-   - `git push -u origin feat/backend-foundation feat/backend-analysis feat/frontend`
-   - PR 1: `feat/backend-foundation` → `main`
-   - PR 2: `feat/backend-analysis` → `feat/backend-foundation`
-   - PR 3: `feat/frontend` → `feat/backend-analysis`
-
-   Each PR description covers scope, design notes, test evidence and the merge order, and ends with the 🤖 Claude Code attribution line. Commits use the `Co-Authored-By: Claude Opus 5.5` trailer.
-5. **Watch CI on the PRs** and fix any failures. The workflows are `backend.yml` (with a mongo:8 service), `frontend.yml`, `docker.yml` and pip-audit/npm audit.
-6. **Give the user the final report**, summarizing `docs/REPORT.md`, with the PR links.
+1. ~~Frontend re-review round 3~~ (done, APPROVED).
+2. ~~Re-shoot the screenshots~~ (done, including `admin-desktop-light.png`).
+3. **Push and open the PRs**, merged in order 1 → 2 → 3.
+4. **Make CI pass on every PR.**
+5. **Give the user the final report.**
