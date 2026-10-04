@@ -11,6 +11,7 @@ from tests.services.fakes import (
     CLOSED_NOW,
     FakeClock,
     FakeMarketData,
+    FakeNews,
 )
 
 pytestmark = pytest.mark.integration
@@ -23,7 +24,12 @@ async def user(client: httpx.AsyncClient) -> httpx.AsyncClient:
 
 
 async def test_stocks_endpoints_without_session_return_401(client: httpx.AsyncClient) -> None:
-    for path in ("/api/stocks/AAPL", "/api/stocks/AAPL/technical", "/api/watchlist/overview"):
+    for path in (
+        "/api/stocks/AAPL",
+        "/api/stocks/AAPL/technical",
+        "/api/stocks/AAPL/news",
+        "/api/watchlist/overview",
+    ):
         assert (await client.get(path)).status_code == 401
 
 
@@ -143,7 +149,10 @@ async def test_macro_reports_ingestion_progress_then_completes(
     await app.state.services.news.wait("AAPL")
     done = (await user.get("/api/stocks/AAPL/macro")).json()
 
-    assert done["ingestion"] == {"months_done": 24, "months_total": 24, "in_progress": False}
+    assert done["ingestion"]["months_done"] == 24
+    assert done["ingestion"]["months_total"] == 24
+    assert done["ingestion"]["in_progress"] is False
+    assert done["ingestion"]["updated_at"] is not None
     assert done["report"]["events_total"] > 0
     assert set(done["report"]["stats_all"]["buckets"]) == {"positive", "neutral", "negative"}
     assert done["data_status"]["overall"]["state"] == "ok"
@@ -207,3 +216,21 @@ async def test_admin_providers_for_normal_user_returns_403(user: httpx.AsyncClie
     resp = await user.get("/api/admin/providers")
 
     assert resp.status_code == 403
+
+
+async def test_news_endpoint_starts_collection_once_and_reports_progress(
+    user: httpx.AsyncClient, app: FastAPI, news_provider: FakeNews
+) -> None:
+    first = await user.get("/api/stocks/AAPL/news")
+    second = await user.get("/api/stocks/AAPL/news")
+    await app.state.services.news.wait("AAPL")
+    done = await user.get("/api/stocks/AAPL/news")
+
+    assert first.status_code == 200
+    assert first.json()["in_progress"] is True
+    assert first.json()["months_total"] == 24
+    assert second.json()["in_progress"] is True
+    assert len([q for q in news_provider.queries if q.start.day == 1]) == 24  # one run only
+    assert done.json()["months_done"] == 24
+    assert done.json()["updated_at"] is not None
+    assert done.json()["status"]["state"] == "ok"

@@ -4,7 +4,7 @@ Explicit pydantic classes (rather than the domain dataclasses) so the OpenAPI sc
 for the frontend's generated types. Field names are snake_case throughout.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -192,6 +192,13 @@ class IngestionOut(BaseModel):
     months_done: int
     months_total: int
     in_progress: bool
+    updated_at: datetime | None = None  # last successful news top-up (UTC); None if never
+
+
+class NewsProgressOut(IngestionOut):
+    """Answer of the cheap, pollable news endpoint: progress plus an honest status."""
+
+    status: DataStatus
 
 
 class MacroResponse(BaseModel):
