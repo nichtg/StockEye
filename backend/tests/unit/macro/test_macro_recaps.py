@@ -104,6 +104,15 @@ NEWS = [
     "Apple could rise 20%, analyst says",
     # A4: "up for grabs" is an idiom.
     "Why Apple Stock Is Up For Grabs",
+    # Rule 7 is anchored to the Zacks phrasing; "market" in an industry sense is news.
+    "Apple declines to comment on market rumors",
+    "Apple lags rivals in smartphone market",
+    "ServiceNow outpaces rivals in AI market",
+    "Nvidia ascends to top of AI chip market",
+    "Walmart lags Amazon in the online grocery market",
+    "Apple outpaces Samsung in the smartphone market",
+    "Top space stocks Rocket Lab and AST SpaceMobile to watch",
+    "3 space stocks Rocket Lab investors should know",
     "Walmart stock moves to Nasdaq-100 listing",
 ]
 

@@ -40,7 +40,8 @@ _VERBS = (
     r"|climbs?|climbed|climbing|tumbles?|tumbled|tumbling|rall(?:y|ies|ied|ying)"
     r"|slips?|slipped|slipping|dips?|dipped|spikes?|spiked|sags?|sagged|sheds?"
     r"|crash(?:es|ed)?|skyrockets?|skyrocketed|pops?|popped|gaps?|gapped"
-    r"|dives?|dived|dove|craters?|cratered|rockets?|rocketed|rebounds?|rebounded|slumps?|slumped"
+    r"|dives?|dived|dove|craters?|cratered|rockets?(?!\s+lab\b)|rocketed|rebounds?|rebounded"
+    r"|slumps?|slumped"
     r"|retreats?|retreated|declines?|declined|edges?\s+(?:higher|lower)"
     rf"|extends?\s+(?:the\s+)?rally|{_GAIN}|{_MOVE})"
 )
@@ -118,8 +119,10 @@ _SIMPLE_RULES: tuple[re.Pattern[str], ...] = (
     re.compile(rf"\bafter\s+an?\s+{_NUM}{_PCT}\s+(?:gain|drop|jump|decline|rise|fall)\b", _FLAGS),
     # 7. Zacks-style: "Apple outpaces stock market gains", "dips more than the market".
     re.compile(
-        r"\b(?:outpaces|lags|ascends|declines|dips\s+more\s+than|rises\s+more\s+than)\b"
-        r".{0,30}\b(?:stock\s+)?market\b",
+        r"\b(?:outpaces\s+(?:the\s+)?stock\s+market"
+        r"|(?:ascends|declines|dips|rises|falls|gains)\s+(?:more\s+than|while|as)\s+"
+        r"(?:the\s+)?(?:broader\s+|overall\s+)?(?:stock\s+)?market"
+        r"|lags\s+(?:the\s+)?(?:broader\s+)?(?:stock\s+)?market)\b",
         _FLAGS,
     ),
 )
