@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router';
 import { api } from '../../api/client';
 import { isApiError } from '../../api/errors';
 import { meKey } from '../../api/keys';
@@ -44,6 +45,29 @@ export function useLogout() {
     onSettled: () => {
       // Even if the call failed we drop local state; the cookies expire server-side regardless.
       clearSession(client);
+    },
+  });
+}
+
+/** Router state that carries a one-line notice to the login page, which has no toast host. */
+export interface LoginNotice {
+  notice: string;
+}
+
+export const ACCOUNT_DELETED_NOTICE = 'Your account was deleted.';
+
+/** Deletes the signed-in account after re-checking the password, then leaves for the login page. */
+export function useDeleteAccount() {
+  const client = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: (password: string) => api.delete('/me', { body: { password } }),
+    onSuccess: () => {
+      clearSession(client);
+      void navigate('/login', {
+        replace: true,
+        state: { notice: ACCOUNT_DELETED_NOTICE } satisfies LoginNotice,
+      });
     },
   });
 }

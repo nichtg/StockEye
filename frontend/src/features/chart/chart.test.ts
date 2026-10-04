@@ -8,7 +8,9 @@ import {
   saveIndicatorSelection,
 } from './indicators';
 import {
+  emptyMarkerText,
   loadMarkerOverrides,
+  markerCounts,
   markerVisible,
   parseMarkerOverrides,
   saveMarkerOverrides,
@@ -71,12 +73,55 @@ describe('marker mapping', () => {
     expect(find('square', 'S')).toBeDefined();
     expect(find('arrowUp')).toMatchObject({ color: tokens.light.up });
     expect(find('arrowDown')).toMatchObject({ color: tokens.light.down });
-    // Neutral (doji) patterns are never drawn. News: ink dot.
+    // Neutral (doji) patterns are never drawn. A news beat is an up-toned dot.
     expect(mapped.some((m) => m.color === tokens.light.ink3)).toBe(false);
     expect(mapped).toHaveLength(6);
-    expect(
-      mapped.some((m) => m.shape === 'circle' && m.color === tokens.light.ink && !m.text),
-    ).toBe(true);
+    expect(mapped.some((m) => m.shape === 'circle' && m.color === tokens.light.up && !m.text)).toBe(
+      true,
+    );
+  });
+});
+
+describe('news marker size', () => {
+  const news = (car: number | null): ChartMarker => ({
+    time: '2026-10-01',
+    kind: 'news',
+    label: 'x',
+    car_0_1: car,
+  });
+  const sizeOf = (car: number | null) => markerData([news(car)], tokens.light)[0]?.size;
+
+  it('steps by the size of the move, whichever way it went', () => {
+    expect(sizeOf(0.004)).toBe(0.6);
+    expect(sizeOf(-0.004)).toBe(0.6);
+    expect(sizeOf(0.01)).toBe(1);
+    expect(sizeOf(-0.03)).toBe(1);
+    expect(sizeOf(0.031)).toBe(1.6);
+    expect(sizeOf(-0.08)).toBe(1.6);
+    expect(sizeOf(null)).toBe(0.6);
+  });
+
+  it('colours by direction', () => {
+    expect(markerData([news(0.02)], tokens.light)[0]?.color).toBe(tokens.light.up);
+    expect(markerData([news(-0.02)], tokens.light)[0]?.color).toBe(tokens.light.down);
+  });
+});
+
+describe('marker counts', () => {
+  it('counts the markers drawn for each kind, leaving out neutral patterns', () => {
+    const counts = markerCounts([
+      { time: 'a', kind: 'news', label: 'x', car_0_1: 0.01 },
+      { time: 'b', kind: 'news', label: 'y', car_0_1: -0.01 },
+      { time: 'a', kind: 'pattern', label: 'Doji', bias: 'neutral', pattern: 'doji' },
+      { time: 'b', kind: 'pattern', label: 'Hammer', bias: 'bullish', pattern: 'hammer' },
+      { time: 'a', kind: 'dividend', label: 'Dividend' },
+    ]);
+    expect(counts).toEqual({ earnings: 0, dividend: 1, split: 0, pattern: 1, news: 2 });
+  });
+
+  it('words the empty case per kind', () => {
+    expect(emptyMarkerText('news')).toBe('No news events in this range');
+    expect(emptyMarkerText('dividend')).toBe('No dividends in this range');
   });
 });
 
@@ -147,7 +192,7 @@ describe('tooltip text', () => {
       }),
     ).toBe('Hammer');
     expect(eventText({ time: 'x', kind: 'news', label: 'DBS beats', car_0_1: 0.021 })).toBe(
-      'News: “DBS beats” (2.1% better than the market predicted, that day and the next)',
+      'News: “DBS beats” (2.1% better than expected over 2 days)',
     );
     expect(eventText({ time: 'x', kind: 'news', label: 'Probe', car_0_1: -0.014 })).toContain(
       '1.4% worse',

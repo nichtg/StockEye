@@ -9,11 +9,11 @@ import Link from '@mui/material/Link';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { useRef, useState, type SyntheticEvent } from 'react';
-import { Link as RouterLink, useSearchParams } from 'react-router';
+import { Link as RouterLink, useLocation, useSearchParams } from 'react-router';
 import { isApiError, userMessage } from '../../api/errors';
 import { Wordmark } from '../../components/Wordmark';
 import { useDocumentTitle } from '../../hooks';
-import { useAuthMutation } from './useAuth';
+import { useAuthMutation, type LoginNotice } from './useAuth';
 import {
   MIN_PASSWORD_LENGTH,
   validateLogin,
@@ -51,11 +51,18 @@ function lengthHint(length: number): string {
   return `At least ${MIN_PASSWORD_LENGTH} characters: ${MIN_PASSWORD_LENGTH - length} more to go`;
 }
 
+/** A one-line message the previous page left in router state, such as "Your account was deleted." */
+function noticeFrom(state: unknown): string | undefined {
+  const notice = (state as Partial<LoginNotice> | null)?.notice;
+  return typeof notice === 'string' ? notice : undefined;
+}
+
 export function AuthForm({ mode }: { mode: Mode }) {
   const copy = COPY[mode];
   useDocumentTitle(copy.title);
 
   const [params] = useSearchParams();
+  const notice = noticeFrom(useLocation().state);
   const next = params.get('next');
   const switchTo = next ? `${copy.switchTo}?next=${encodeURIComponent(next)}` : copy.switchTo;
 
@@ -139,6 +146,11 @@ export function AuthForm({ mode }: { mode: Mode }) {
           {copy.title}
         </Typography>
 
+        {notice && (
+          <Alert severity="info" icon={false} sx={{ mb: 3 }} role="status">
+            {notice}
+          </Alert>
+        )}
         {formError && (
           <Alert severity="error" sx={{ mb: 3 }} role="alert">
             {formError}

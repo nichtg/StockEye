@@ -39,6 +39,7 @@ export const TERM_IDS = [
   'market_adjusted_return',
   'benchmark',
   'news_event',
+  'preliminary',
   'p_value',
   'statistical_reliability',
   'earnings',
@@ -193,6 +194,10 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   market_adjusted_return: {
     title: 'Market-adjusted move',
     body: 'How much better or worse the stock did than expected, given how the overall market moved that day and how this stock usually tracks the market.',
+  },
+  preliminary: {
+    title: 'Preliminary',
+    body: 'News is still being collected, so these results will change.',
   },
   benchmark: {
     title: 'Benchmark',

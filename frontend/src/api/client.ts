@@ -24,7 +24,8 @@ export interface ApiClient {
   post: <T>(path: string, body?: unknown, opts?: RequestOptions) => Promise<T>;
   put: <T>(path: string, body?: unknown, opts?: RequestOptions) => Promise<T>;
   patch: <T>(path: string, body?: unknown, opts?: RequestOptions) => Promise<T>;
-  delete: <T = void>(path: string, opts?: RequestOptions) => Promise<T>;
+  /** `body` is for the rare DELETE that must carry a confirmation, such as a password. */
+  delete: <T = void>(path: string, opts?: RequestOptions & { body?: unknown }) => Promise<T>;
   /** Fetches the CSRF cookie. Call once at app start; unsafe requests also self-heal. */
   initCsrf: () => Promise<void>;
   setSessionExpiredHandler: (handler: (() => void) | undefined) => void;
@@ -203,7 +204,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     post: (path, body, opts) => request('POST', path, body, opts),
     put: (path, body, opts) => request('PUT', path, body, opts),
     patch: (path, body, opts) => request('PATCH', path, body, opts),
-    delete: (path, opts) => request('DELETE', path, undefined, opts),
+    delete: (path, opts) => request('DELETE', path, opts?.body, opts),
     initCsrf,
     setSessionExpiredHandler: (handler) => {
       onSessionExpired = handler;

@@ -3,7 +3,7 @@ import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { DataStatus, StockOut } from '../../api/types';
 import { QueryRegion } from '../../components/QueryRegion';
 import { exchangeCurrency, exchangeOfSymbol } from '../../lib/exchange';
@@ -13,6 +13,7 @@ import { useChart } from '../stock/useStockData';
 import { ChartToolbar } from './ChartToolbar';
 import { IndicatorLegend } from './IndicatorLegend';
 import { MarkerKey } from './MarkerKey';
+import { markerCounts } from './markers';
 import { PriceChart } from './PriceChart';
 import { useChartSettings } from './useChartSettings';
 
@@ -38,6 +39,9 @@ export function StockChart({ symbol, stock, onStatus }: Props) {
   useEffect(() => {
     onStatus(status);
   }, [onStatus, status]);
+
+  const markers = chart.data?.markers;
+  const counts = useMemo(() => (markers ? markerCounts(markers) : undefined), [markers]);
 
   const exchange = stock?.exchange ?? exchangeOfSymbol(symbol);
   const currency = stock?.currency ?? exchangeCurrency(exchange);
@@ -100,7 +104,7 @@ export function StockChart({ symbol, stock, onStatus }: Props) {
         }
       </QueryRegion>
 
-      <MarkerKey shown={settings.shownMarkers} onToggle={settings.toggleMarker} />
+      <MarkerKey shown={settings.shownMarkers} counts={counts} onToggle={settings.toggleMarker} />
     </Box>
   );
 }

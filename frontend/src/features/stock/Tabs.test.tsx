@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { stubFetch } from '../../test/mockApi';
 import { renderApp } from '../../test/render';
@@ -6,7 +6,6 @@ import { macroFixture, technicalFixture } from '../../test/fixtures';
 import { MacroTab } from './MacroTab';
 import { TechnicalTab } from './TechnicalTab';
 import { patternSentence, wilsonInterval } from './technicalText';
-import { MACRO_POLL_MS } from './useStockData';
 
 describe('Technical tab', () => {
   it('explains reliability in plain language and never shows n= or p=', async () => {
@@ -54,41 +53,42 @@ describe('Technical tab', () => {
 });
 
 describe('Macro tab', () => {
-  afterEach(() => {
-    vi.useRealTimers();
+  it('shows the Preliminary chip and the progress bar while news is being collected', async () => {
+    stubFetch((req) =>
+      req.path === '/stocks/AAPL/macro'
+        ? {
+            body: macroFixture({
+              ingestion: { months_done: 8, months_total: 24, in_progress: true },
+            }),
+          }
+        : undefined,
+    );
+    renderApp(<MacroTab symbol="AAPL" exchange="US" />);
+    expect(await screen.findByText('Collecting news: 8 of 24 months')).toBeInTheDocument();
+    expect(screen.getByText('Preliminary')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'What is Preliminary?' })).toBeInTheDocument();
+    expect(screen.queryByText(/News complete/)).not.toBeInTheDocument();
   });
 
-  it('polls while news is being collected and stops when done', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    let calls = 0;
-    stubFetch((req) => {
-      if (req.path !== '/stocks/AAPL/macro') return undefined;
-      calls += 1;
-      const done = calls >= 3;
-      return {
-        body: macroFixture({
-          ingestion: { months_done: done ? 24 : calls * 8, months_total: 24, in_progress: !done },
-        }),
-      };
-    });
-    renderApp(<MacroTab symbol="AAPL" exchange="US" />);
-
-    expect(await screen.findByText('Collecting news: 8 of 24 months')).toBeInTheDocument();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(MACRO_POLL_MS + 100);
-    });
+  it("prefers the page poller's live progress over the macro answer's copy", async () => {
+    stubFetch((req) => (req.path === '/stocks/AAPL/macro' ? { body: macroFixture() } : undefined));
+    renderApp(
+      <MacroTab
+        symbol="AAPL"
+        exchange="US"
+        news={{ months_done: 16, months_total: 24, in_progress: true, status: { state: 'ok' } }}
+      />,
+    );
     expect(await screen.findByText('Collecting news: 16 of 24 months')).toBeInTheDocument();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(MACRO_POLL_MS + 100);
-    });
-    await waitFor(() => {
-      expect(screen.queryByText(/Collecting news/)).not.toBeInTheDocument();
-    });
-    const before = calls;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(MACRO_POLL_MS * 3);
-    });
-    expect(calls).toBe(before);
+    expect(screen.getByText('Preliminary')).toBeInTheDocument();
+  });
+
+  it('replaces the bar with a quiet complete line, and no chip, once done', async () => {
+    stubFetch((req) => (req.path === '/stocks/AAPL/macro' ? { body: macroFixture() } : undefined));
+    renderApp(<MacroTab symbol="AAPL" exchange="US" />);
+    expect(await screen.findByText(/News complete: 24 months · updated .+/)).toBeInTheDocument();
+    expect(screen.queryByText('Preliminary')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Collecting news/)).not.toBeInTheDocument();
   });
 
   it('shows findings with a reliability chip, and the p-value only inside Details', async () => {

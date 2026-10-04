@@ -1,6 +1,7 @@
 import type { Candle, ChartMarker } from '../../api/types';
 import { exchangeTimeZone, hour12For, type Exchange } from '../../lib/exchange';
 import { formatDate, formatPct, formatPrice, formatSigned, formatVolume } from '../../lib/format';
+import { moveText } from '../stock/macroText';
 
 /** Pattern key -> plain-language reliability sentence (see `usePatternReliability`). */
 export type PatternSentences = Record<string, string | undefined>;
@@ -19,9 +20,7 @@ export function eventText(marker: ChartMarker, sentences?: PatternSentences): st
     case 'news': {
       const car = marker.car_0_1;
       if (car == null) return `News: “${marker.label}”`;
-      const pct = formatPct(Math.abs(car * 100));
-      const verdict = car >= 0 ? 'better' : 'worse';
-      return `News: “${marker.label}” (${pct} ${verdict} than the market predicted, that day and the next)`;
+      return `News: “${marker.label}” (${moveText(car)} over 2 days)`;
     }
   }
 }

@@ -16,6 +16,7 @@ import type { Candle, ChartData, ChartMarker, SeriesPoint } from '../../api/type
 import type { Tokens } from '../../theme/tokens';
 import type { Band } from './bandFill';
 import { INDICATORS, type IndicatorDef, type IndicatorId } from './indicators';
+import { isDrawnMarker, newsMarkerSize } from './markers';
 
 export const SUB_PANE_HEIGHT = 100;
 /** The time scale under the lowest pane. */
@@ -246,8 +247,7 @@ export function markerData(
   const out: { at: string | number; marker: SeriesMarker<Time> }[] = [];
   for (const m of markers) {
     if (visible && !visible(m.kind)) continue;
-    // Neutral (doji-like) patterns are noise on the chart; they stay in the Technical tab.
-    if (m.kind === 'pattern' && m.bias !== 'bullish' && m.bias !== 'bearish') continue;
+    if (!isDrawnMarker(m)) continue;
     const time = chartTime(m.time);
     let marker: SeriesMarker<Time>;
     switch (m.kind) {
@@ -267,7 +267,14 @@ export function markerData(
             : { time, position: 'aboveBar', shape: 'arrowDown', color: p.down };
         break;
       case 'news':
-        marker = { time, position: 'aboveBar', shape: 'circle', color: p.ink, size: 0.6 };
+        // Direction in tone, size by impact; the tooltip says it in words.
+        marker = {
+          time,
+          position: 'aboveBar',
+          shape: 'circle',
+          color: m.car_0_1 == null ? p.ink : m.car_0_1 >= 0 ? p.up : p.down,
+          size: newsMarkerSize(m.car_0_1),
+        };
         break;
     }
     out.push({ at: m.time, marker });

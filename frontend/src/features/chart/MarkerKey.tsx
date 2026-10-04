@@ -1,14 +1,21 @@
 import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
+import Tooltip from '@mui/material/Tooltip';
 import { Term } from '../../components/Term';
-import { MARKER_DEFS, type MarkerKind } from './markers';
+import { MARKER_DEFS, emptyMarkerText, type MarkerKind } from './markers';
 
-/** Key to the chart's markers; each entry is also the switch that shows or hides that kind. */
+/**
+ * Key to the chart's markers; each entry is also the switch that shows or hides that kind. It
+ * counts what the chart's data holds, and a kind with nothing there is disabled and says why.
+ */
 export function MarkerKey({
   shown,
+  counts,
   onToggle,
 }: {
   shown: MarkerKind[];
+  /** Markers of each kind in the chart's current range; absent while the chart has no data. */
+  counts: Record<MarkerKind, number> | undefined;
   onToggle: (kind: MarkerKind) => void;
 }) {
   return (
@@ -27,46 +34,63 @@ export function MarkerKey({
       }}
     >
       {MARKER_DEFS.map((m) => {
-        const on = shown.includes(m.kind);
+        const count = counts?.[m.kind];
+        const empty = count === 0;
+        const on = shown.includes(m.kind) && !empty;
         return (
           <Box key={m.kind} component="li" sx={{ display: 'inline-flex', alignItems: 'center' }}>
             <Term id={m.term}>
-              <ButtonBase
-                aria-pressed={on}
-                onClick={() => {
-                  onToggle(m.kind);
-                }}
-                sx={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 0.75,
-                  height: 28,
-                  px: 1,
-                  borderRadius: '999px',
-                  border: 1,
-                  borderColor: on ? 'line' : 'transparent',
-                  bgcolor: on ? 'raised' : 'transparent',
-                  color: on ? 'ink2' : 'ink3',
-                  fontFamily: 'inherit',
-                  fontSize: '0.8125rem',
-                  transition: 'background-color 150ms ease',
-                  '&:hover': { bgcolor: 'raised' },
-                }}
-              >
-                <Box
-                  component="span"
-                  aria-hidden="true"
-                  sx={{
-                    fontWeight: 600,
-                    color: on ? 'ink' : 'ink3',
-                    minWidth: 14,
-                    textAlign: 'center',
-                  }}
-                >
-                  {m.glyph}
+              {/* The span carries the tooltip: a disabled button can't take hover. */}
+              <Tooltip title={empty ? emptyMarkerText(m.kind) : ''} placement="top">
+                <Box component="span" sx={{ display: 'inline-flex' }}>
+                  <ButtonBase
+                    aria-pressed={on}
+                    disabled={empty}
+                    onClick={() => {
+                      onToggle(m.kind);
+                    }}
+                    sx={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 0.75,
+                      height: 28,
+                      px: 1,
+                      borderRadius: '999px',
+                      border: 1,
+                      borderColor: on ? 'line' : 'transparent',
+                      bgcolor: on ? 'raised' : 'transparent',
+                      color: on ? 'ink2' : 'ink3',
+                      fontFamily: 'inherit',
+                      fontSize: '0.8125rem',
+                      transition: 'background-color 150ms ease',
+                      '&:hover': { bgcolor: 'raised' },
+                      '&.Mui-disabled': { color: 'ink3', opacity: 0.6 },
+                    }}
+                  >
+                    <Box
+                      component="span"
+                      aria-hidden="true"
+                      sx={{
+                        fontWeight: 600,
+                        color: on ? 'ink' : 'ink3',
+                        minWidth: 14,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {m.glyph}
+                    </Box>
+                    {m.label}
+                    {count !== undefined && (
+                      <Box
+                        component="span"
+                        sx={{ color: 'ink3', fontVariantNumeric: 'tabular-nums' }}
+                      >
+                        {count}
+                      </Box>
+                    )}
+                  </ButtonBase>
                 </Box>
-                {m.label}
-              </ButtonBase>
+              </Tooltip>
             </Term>
           </Box>
         );

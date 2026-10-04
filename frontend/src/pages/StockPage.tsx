@@ -11,7 +11,7 @@ import { StockChart } from '../features/chart/StockChart';
 import { MacroTab } from '../features/stock/MacroTab';
 import { StockHeader } from '../features/stock/StockHeader';
 import { TechnicalTab } from '../features/stock/TechnicalTab';
-import { useStock } from '../features/stock/useStockData';
+import { useNewsProgress, useStock } from '../features/stock/useStockData';
 import { useDocumentTitle } from '../hooks';
 import { exchangeOfSymbol } from '../lib/exchange';
 
@@ -34,6 +34,8 @@ export default function StockPage() {
   );
 
   const stock = useStock(symbol);
+  // On every tab, so opening a stock starts news collection. It is also the header's news line.
+  const news = useNewsProgress(symbol);
 
   if (stock.isError && isApiError(stock.error) && stock.error.status === 404) {
     return <StockNotFound symbol={symbol} />;
@@ -56,7 +58,7 @@ export default function StockPage() {
         symbol={symbol}
         stock={stock.data}
         loading={stock.isPending}
-        statuses={[stock.data?.data_status, chartStatus]}
+        statuses={[stock.data?.data_status, news.data?.status ?? chartStatus]}
       />
 
       <Box sx={{ mt: 4 }}>
@@ -104,7 +106,7 @@ export default function StockPage() {
           {tab === 'technical' ? (
             <TechnicalTab symbol={symbol} exchange={exchange} />
           ) : (
-            <MacroTab symbol={symbol} exchange={exchange} />
+            <MacroTab symbol={symbol} exchange={exchange} news={news.data} />
           )}
         </Box>
       </Box>

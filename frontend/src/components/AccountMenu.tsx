@@ -7,10 +7,12 @@ import Typography from '@mui/material/Typography';
 import { useId, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import type { User } from '../api/types';
+import { DeleteAccountDialog } from '../features/auth/DeleteAccountDialog';
 import { useLogout } from '../features/auth/useAuth';
 
 export function AccountMenu({ user }: { user: User }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const menuId = useId();
   const navigate = useNavigate();
   const logout = useLogout();
@@ -67,7 +69,22 @@ export function AccountMenu({ user }: { user: User }) {
         >
           Log out
         </MenuItem>
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            close();
+            setDeleting(true);
+          }}
+        >
+          Delete account…
+        </MenuItem>
       </Menu>
+      <DeleteAccountDialog
+        open={deleting}
+        onClose={() => {
+          setDeleting(false);
+        }}
+      />
     </>
   );
 }
