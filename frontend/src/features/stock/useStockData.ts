@@ -23,6 +23,8 @@ import type {
 } from '../../api/types';
 
 export const NEWS_POLL_MS = 5000;
+/** Newest months arrive first, so by now there are news dots worth drawing; later months just wait for the finish. */
+export const CHART_REFRESH_MONTHS = 3;
 
 export function useStock(symbol: string) {
   return useQuery({
@@ -94,8 +96,13 @@ export function useNewsProgress(symbol: string) {
     if (finished || data.months_done > before.monthsDone) {
       void client.invalidateQueries({ queryKey: macroKey(symbol) });
     }
-    if (finished) {
+    // The backend rebuilds markers on every month, so refresh the chart once early, not each time.
+    const firstDots =
+      before.monthsDone < CHART_REFRESH_MONTHS && data.months_done >= CHART_REFRESH_MONTHS;
+    if (finished || firstDots) {
       void client.invalidateQueries({ queryKey: chartRootKey(symbol) });
+    }
+    if (finished) {
       notice('News collection finished. Results updated.');
     }
   }, [data, symbol, client, notice]);

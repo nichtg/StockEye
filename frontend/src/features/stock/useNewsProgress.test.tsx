@@ -82,6 +82,39 @@ describe('useNewsProgress', () => {
     expect(seen.length).toBe(before);
   });
 
+  it('refreshes the chart once when the first few months land, and again at the finish', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const steps = [1, 2, 4, 6, 24];
+    let calls = 0;
+    stubFetch((req) => {
+      if (req.path !== '/stocks/AAPL/news') return undefined;
+      const done = steps[Math.min(calls, steps.length - 1)] ?? 24;
+      calls += 1;
+      return { body: progress(done === 24, done) };
+    });
+    const { client } = renderApp(<Poller symbol="AAPL" />);
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const chartCalls = () =>
+      spy.mock.calls.filter(([filters]) => filters?.queryKey?.[2] === 'chart').length;
+
+    expect(await screen.findByText('1 months')).toBeInTheDocument();
+    await tick();
+    expect(await screen.findByText('2 months')).toBeInTheDocument();
+    expect(chartCalls()).toBe(0);
+
+    await tick();
+    expect(await screen.findByText('4 months')).toBeInTheDocument();
+    expect(chartCalls()).toBe(1);
+
+    await tick();
+    expect(await screen.findByText('6 months')).toBeInTheDocument();
+    expect(chartCalls()).toBe(1);
+
+    await tick();
+    expect(await screen.findByText('24 months')).toBeInTheDocument();
+    expect(chartCalls()).toBe(2);
+  });
+
   it('stays quiet when a stock is already complete on first load', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     stubFetch((req) =>
