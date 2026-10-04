@@ -9,7 +9,8 @@ import Typography from '@mui/material/Typography';
 import type { MacroStatsOut, Reliability } from '../../api/types';
 import { Term } from '../../components/Term';
 import { formatPct, formatSigned } from '../../lib/format';
-import { RELIABILITY_LABEL, pValueText } from './macroText';
+import { RELIABILITY_LABEL, SCOPE_NAME, pValueText, type Scope } from './macroText';
+import { ScopeLabel } from './ScopeLabel';
 
 interface Row {
   measure: string;
@@ -59,14 +60,14 @@ function rowsOf(stats: MacroStatsOut): Row[] {
 }
 
 /** The raw numbers behind a set of findings: one row per measure. Lives inside Details. */
-export function ScopeTable({ title, stats }: { title: string; stats: MacroStatsOut }) {
+export function ScopeTable({ scope, stats }: { scope: Scope; stats: MacroStatsOut }) {
   return (
     <Box sx={{ mb: 3 }}>
       <Typography variant="subtitle1" sx={{ color: 'ink', px: 2, pt: 1.5 }}>
-        {title}
+        <ScopeLabel scope={scope} />
       </Typography>
       <TableContainer>
-        <Table aria-label={title}>
+        <Table aria-label={SCOPE_NAME[scope]}>
           <TableHead>
             <TableRow>
               <TableCell>Measure</TableCell>

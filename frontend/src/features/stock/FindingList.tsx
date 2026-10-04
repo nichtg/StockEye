@@ -3,7 +3,7 @@ import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
 import type { FindingOut, Reliability } from '../../api/types';
 import { Term } from '../../components/Term';
-import { RELIABILITY_LABEL, newsDaysPhrase, stripReliabilityLead } from './macroText';
+import { RELIABILITY_LABEL, stripReliabilityLead } from './macroText';
 
 const CHIP_STYLE = {
   // Strength shows as fill and weight on the monochrome scale, never as a good or bad colour.
@@ -44,14 +44,7 @@ export function FindingList({ findings }: { findings: FindingOut[] }) {
               {stripReliabilityLead(f.text)}
             </Typography>
           ) : (
-            <>
-              <Typography sx={{ color: 'ink' }}>{f.text}</Typography>
-              {f.based_on_events > 0 && (
-                <Typography variant="caption" sx={{ color: 'ink3' }}>
-                  {newsDaysPhrase(f.based_on_events)}
-                </Typography>
-              )}
-            </>
+            <Typography sx={{ color: 'ink' }}>{f.text}</Typography>
           )}
         </li>
       ))}

@@ -453,12 +453,14 @@ describe('Macro tab period and counts', () => {
       await detailsText((r) => {
         r.events_total = 42;
         r.events_insufficient = 3;
-        r.stats_all = stats(39, '2024-10-01', '2026-10-02');
-        r.stats_ex_earnings = stats(34, '2024-10-01', '2026-10-02');
+        r.stats_all = stats(35, '2024-10-01', '2026-10-02');
+        r.stats_ex_earnings = stats(30, '2024-10-01', '2026-10-02');
       }),
     ).toBe(
-      '42 news days found; 3 left out because there was too little price history around them, and 5 near earnings releases.',
+      '42 news days found; 3 left out because there was too little price history around them, 5 near earnings releases and 4 too recent to measure yet (the next trading day hasn’t closed).',
     );
+    // 42 found - 3 short history - 5 near earnings - 4 too recent = the 30 studied
+    expect(countsLine(/^30 news days studied/)).toBeInTheDocument();
   });
 
   it('handles singular and zero in the Details line', async () => {
@@ -480,6 +482,6 @@ describe('Macro tab period and counts', () => {
         r.stats_all = stats(1, null, null);
         r.stats_ex_earnings = stats(0, null, null);
       }),
-    ).toBe('1 news day found; 1 left out for being near earnings releases.');
+    ).toBe('1 news day found; 1 near earnings release.');
   });
 });

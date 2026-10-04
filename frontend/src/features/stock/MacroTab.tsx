@@ -20,23 +20,12 @@ import type { Exchange } from '../../lib/exchange';
 import { formatMonthRange, formatRelative } from '../../lib/format';
 import { radius } from '../../theme/tokens';
 import { FindingList } from './FindingList';
-import { NOT_ENOUGH_NEWS, regimeSentence, type Scope } from './macroText';
+import { NOT_ENOUGH_NEWS, regimeSentence } from './macroText';
+import { ScopeLabel } from './ScopeLabel';
 import { ScopeTable } from './ScopeTable';
 import { TopEvents } from './TopEvents';
 import { useMacro } from './useStockData';
 import { WeeklySentiment } from './WeeklySentiment';
-
-/** Quiet label saying which news days a set of findings covers. Renders nothing for no scope. */
-function ScopeLabel({ scope }: { scope: Scope | null | undefined }) {
-  if (!scope) return null;
-  return scope === 'excluding_earnings' ? (
-    <>
-      Excluding days near <Term id="earnings">earnings releases</Term>
-    </>
-  ) : (
-    <>All news days</>
-  );
-}
 
 /**
  * The period and the size of the evidence behind a set of findings, from the very stats the
@@ -77,20 +66,35 @@ function NewsBasis({ stats }: { stats: MacroStatsOut | null | undefined }) {
   );
 }
 
-/** "34 news days found; 3 left out because …, and 5 near earnings releases." Adds up with the counts above. */
+/** The list "a, b and c". */
+function joinClauses(parts: string[]): string {
+  return parts.length > 1
+    ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+    : (parts[0] ?? '');
+}
+
+/**
+ * Accounts for every news day found: studied (the primary scope's count), too little price history,
+ * near earnings (when that scope drops them) and too recent (status ok but no 2-day result yet).
+ */
 function detailsLine(report: MacroReportOut): string {
-  const found = `${String(report.events_total)} news ${report.events_total === 1 ? 'day' : 'days'} found`;
+  const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+  const found = `${String(report.events_total)} news ${plural(report.events_total, 'day', 'days')} found`;
   const short = report.events_insufficient;
+  const all = report.stats_all.n_used;
   const near =
     report.primary_scope === 'excluding_earnings'
-      ? Math.max(0, report.stats_all.n_used - report.stats_ex_earnings.n_used)
+      ? Math.max(0, all - report.stats_ex_earnings.n_used)
       : 0;
-  const shortText = `${String(short)} left out because there was too little price history around ${short === 1 ? 'it' : 'them'}`;
-  const nearText = `${String(near)} near earnings ${near === 1 ? 'release' : 'releases'}`;
-  if (short > 0 && near > 0) return `${found}; ${shortText}, and ${nearText}.`;
-  if (short > 0) return `${found}; ${shortText}.`;
-  if (near > 0) return `${found}; ${String(near)} left out for being near earnings releases.`;
-  return `${found}.`;
+  const recent = Math.max(0, report.events_total - short - all);
+  const clauses = [
+    short > 0 &&
+      `${String(short)} left out because there was too little price history around ${plural(short, 'it', 'them')}`,
+    near > 0 && `${String(near)} near earnings ${plural(near, 'release', 'releases')}`,
+    recent > 0 &&
+      `${String(recent)} too recent to measure yet (the next trading day hasn’t closed)`,
+  ].filter((c): c is string => c !== false);
+  return clauses.length ? `${found}; ${joinClauses(clauses)}.` : `${found}.`;
 }
 
 function Results({
@@ -180,10 +184,10 @@ function Results({
           </Box>
         )}
         <ScopeTable
-          title={showScopes ? 'Excluding earnings periods' : 'All news days'}
+          scope={showScopes ? 'excluding_earnings' : 'all_events'}
           stats={report.stats_ex_earnings}
         />
-        {showScopes && <ScopeTable title="Including earnings periods" stats={report.stats_all} />}
+        {showScopes && <ScopeTable scope="all_events" stats={report.stats_all} />}
         <Typography variant="body2" sx={{ px: 2, pb: 2, color: 'ink2' }}>
           {detailsLine(report)}
         </Typography>

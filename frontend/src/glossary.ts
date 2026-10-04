@@ -217,7 +217,7 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   },
   news_days_studied: {
     title: 'News days studied',
-    body: 'At most one news day in any six trading days is studied (the most notable), keeping moves separate. Days in a stock’s first four months of trading (too little earlier price history), or near earnings where noted, are left out.',
+    body: 'At most one news day in any six trading days is studied (the most notable), so moves don’t overlap. Days too early in the price history we hold to compare with, too recent to measure yet, or near earnings where noted, are left out.',
   },
   p_value: {
     title: 'P-value',

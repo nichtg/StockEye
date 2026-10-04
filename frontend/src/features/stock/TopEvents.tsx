@@ -6,7 +6,7 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import type { Theme } from '@mui/material/styles';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { TopEventOut } from '../../api/types';
 import { Direction } from '../../components/Direction';
 import { SectionTitle } from '../../components/SectionTitle';
@@ -114,13 +114,14 @@ function EventRow({ event: e, exchange }: { event: TopEventOut; exchange: Exchan
 
 /** The days news moved the price most, newest first or biggest move first, five at a time. */
 export function TopEvents({ events, exchange }: { events: TopEventOut[]; exchange: Exchange }) {
+  const headingId = useId();
   const [all, setAll] = useState(false);
   const [order, setOrder] = useState<Order>('newest');
   const sorted = ordered(events, order);
   const shown = all ? sorted : sorted.slice(0, TOP_SHOWN);
   return (
-    <section aria-labelledby="top-news-days">
-      <SectionTitle id="top-news-days">Biggest news days</SectionTitle>
+    <section aria-labelledby={headingId}>
+      <SectionTitle id={headingId}>Biggest news days</SectionTitle>
       <Box
         sx={{
           display: 'flex',
