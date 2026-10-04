@@ -377,7 +377,7 @@ One Sonnet task (F1), after the types are regenerated.
 ### Phase 4 status
 - [x] B1 period dates and averaged wording (counts say "news days studied"; sign-aware pre-move caveat)
 - [x] Backend methodology audit and thermo review approved (896 tests)
-- [ ] F1 icon alignment, period line and breakdown line
-- [ ] Frontend Opus review approved
-- [ ] Live verification and screenshots
+- [x] F1 icon alignment, period line and breakdown line (plus one "news days" noun, reconciled Details counts)
+- [x] Frontend Opus review approved (round 3; 155 tests)
+- [x] Live verification and screenshots (admin shot unchanged: admin page untouched)
 - [ ] PRs open and CI green
