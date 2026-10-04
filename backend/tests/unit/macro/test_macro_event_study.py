@@ -60,6 +60,18 @@ def test_run_event_study_estimation_window_spans_250_sessions_back():
     assert outside.beta == pytest.approx(1.5, abs=TOL)
 
 
+def test_run_event_study_estimation_window_upper_edge_is_t_minus_20():
+    # A jump at t-20 is inside the window, so it must bias beta; one at t-19 must not.
+    stock, bench, index = build_market(n=700, jumps={580: 0.3})
+    sent = sent_frame(index, {600: (0.9, 3)})
+    (inside,) = run_event_study(stock, bench, sent, [])
+    stock2, bench2, _ = build_market(n=700, jumps={581: 0.3})
+    (outside,) = run_event_study(stock2, bench2, sent, [])
+
+    assert inside.beta != pytest.approx(1.5, abs=TOL)
+    assert outside.beta == pytest.approx(1.5, abs=TOL)
+
+
 def test_run_event_study_every_six_sessions_news_is_mostly_evaluated():
     # Regression: masking every event's [0, +5] window left no clean days on heavily covered
     # stocks, so almost all events were insufficient_estimation.
@@ -76,13 +88,14 @@ def test_run_event_study_every_six_sessions_news_is_mostly_evaluated():
 def test_run_event_study_future_bars_and_news_never_change_earlier_event():
     stock, bench, index = build_market(n=700, jumps={450: 0.02})
     sent = sent_frame(index, dict.fromkeys(range(300, 500, 6), (0.5, 3)))
-    base = run_event_study(stock, bench, sent, [])
+    base = run_event_study(stock, bench, sent, [index[300].date()])
     cut = index[480]  # events up to here have all their forward windows inside the data
     early = [r for r in base if r.date <= cut.date()]
 
     longer_stock, longer_bench, longer_index = build_market(n=900, jumps={450: 0.02, 600: -0.1})
     more = sent_frame(longer_index, dict.fromkeys(range(300, 800, 6), (0.5, 3)))
-    redo = run_event_study(longer_stock, longer_bench, more, [])
+    earnings = [index[300].date(), longer_index[650].date()]
+    redo = run_event_study(longer_stock, longer_bench, more, earnings)
     redo_early = [r for r in redo if r.date <= cut.date()]
 
     assert early

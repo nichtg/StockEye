@@ -76,7 +76,7 @@ def _news_markers(cached: MacroResponse | None) -> list[tuple[date, str, float]]
     report = cached.report if cached is not None else None
     if report is None:
         return []
-    return [(e.date, e.headline or "High-impact news", e.car_0_1) for e in report.events]
+    return [(e.date, e.headline or "News event", e.car_0_1) for e in report.events]
 
 
 class AnalysisService:
