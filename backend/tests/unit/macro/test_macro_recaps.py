@@ -63,6 +63,10 @@ RECAPS = [
     "Nvidia stock declines as chips weaken",
     "Apple moves up 3% in early trading",
     "Apple stock moves lower",
+    "RKLB Rockets Higher As Defense Deals And Guidance Ignite Momentum",
+    "RKLB Rockets Higher As Earnings, Defense Wins Fuel Breakout",
+    "AAPL jumps higher after the keynote",
+    "Intel trades lower on weak outlook",
     "Walmart stock dives into oversold territory, eyeing $100 support (WMT:NASDAQ)",
 ]
 
@@ -104,6 +108,9 @@ NEWS = [
     "Apple could rise 20%, analyst says",
     # A4: "up for grabs" is an idiom.
     "Why Apple Stock Is Up For Grabs",
+    "Walmart aims higher with drone delivery",
+    "Apple sets a higher bar for privacy",
+    "Costco pays lower prices to suppliers under new contract",
     # Rule 7 is anchored to the Zacks phrasing; "market" in an industry sense is news.
     "Apple declines to comment on market rumors",
     "Apple lags rivals in smartphone market",

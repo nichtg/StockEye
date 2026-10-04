@@ -128,6 +128,27 @@ _SIMPLE_RULES: tuple[re.Pattern[str], ...] = (
 )
 
 
+# 8. Move verb directly before higher/lower with any subject ("RKLB Rockets Higher As ...",
+#    "trades lower"). "aims higher" / "sets a higher bar" have no move verb right before it.
+_VERB_DIRECTION = re.compile(
+    rf"\b(?:{_VERBS}|trades?|trading)\s+(?:even\s+)?(?:higher|lower)\b", _FLAGS
+)
+# Like _CLAUSE_BREAK but a ticker colon ("NASDAQ:SNDK") does not end the clause.
+_TEXT_BREAK = re.compile(r"[,;|\u2013\u2014]|:\s")
+# A modal earlier in the clause makes it a forecast ("Can Reclaim Its Highs And Move Higher").
+_MODAL = re.compile(r"\b(?:could|can|may|might|will|would|should)\b", _FLAGS)
+
+
+def _is_verb_direction(title: str) -> bool:
+    """Rule 8, skipping forecasts and fundamentals ("Revenue Estimates Are Surging Higher")."""
+    for m in _VERB_DIRECTION.finditer(title):
+        starts = [b.end() for b in _TEXT_BREAK.finditer(title, 0, m.start())]
+        prefix = title[max(starts, default=0) : m.start()]
+        if not (_MODAL.search(prefix) or _FUNDAMENTALS.search(prefix)):
+            return True
+    return False
+
+
 def _is_price_percent(title: str, match: re.Match[str]) -> bool:
     """True when the percent figure is a price move rather than a fundamentals number."""
     clause_start = max(
@@ -148,7 +169,9 @@ def is_price_recap(title: str) -> bool:
     """
     if any(rule.search(title) for rule in _SIMPLE_RULES):
         return True
-    return any(_is_price_percent(title, m) for m in _MOVE_PCT.finditer(title))
+    if any(_is_price_percent(title, m) for m in _MOVE_PCT.finditer(title)):
+        return True
+    return _is_verb_direction(title)
 
 
 def exclude_price_recaps(articles: Iterable[ScoredArticle]) -> list[ScoredArticle]:
