@@ -3,8 +3,9 @@
 Finding text is written for non-statisticians: it never contains the bare letters used as
 statistical symbols for sample size or probability. The raw p-value travels in
 ``Finding.p_value`` so the UI can show it in a "Details" row. Every finding is an average
-over past news days, never a statement about today's price, so the sentences say "On
-average" or "Across the N news days" and carry the day count.
+over past news days, never a statement about today's price. Sentences say "On average" or
+"Across N news days studied" and carry the day count. The counts are the sessions the study
+selected (at most one per 6 trading days, earnings-excluded in that scope), hence "studied".
 """
 
 from __future__ import annotations
@@ -139,24 +140,39 @@ def _reaction_phrase(m: float) -> str:
     return f"did {_pct_abs(m)} {side} than its usual relationship with the market would predict"
 
 
-def _days(n: int) -> str:
-    """ "1 day" / "17 days"; tested buckets have at least ``min_n`` events but stay correct."""
-    return f"{n} day" if n == 1 else f"{n} days"
-
-
-def _gap_sentence(mean_diff: float) -> str:
+def _gap_sentence(mean_diff: float, n_pos: int, n_neg: int) -> str:
     """Positive-versus-negative comparison; a gap that rounds to zero has no direction."""
     rounded = round(mean_diff * 100, 1)
+    lead = f"On average, the {n_pos} positive-news days studied did"
+    tail = f"the {n_neg} negative-news days (that day and the next)."
     if rounded == 0:
-        return (
-            "On average, positive-news days did about the same as negative-news days "
-            "(that day and the next)."
-        )
+        return f"{lead} about the same as {tail}"
     side = "better" if rounded > 0 else "worse"
-    return (
-        f"On average, positive-news days did {_pct_abs(mean_diff)} {side} than "
-        "negative-news days (that day and the next)."
-    )
+    return f"{lead} {_pct_abs(mean_diff)} {side} than {tail}"
+
+
+def _pre_move_finding(bucket: BucketStats, mean_car: float) -> Finding | None:
+    """Caveat for a mean move in the 5 trading days before the news; None when it is small.
+
+    Only claims "part of this move" when the earlier move has the same sign as the move
+    itself; an opposite-sign earlier move is reported without that claim.
+    """
+    pre = bucket.mean_car_pre_5
+    if pre is None or abs(pre) < PRE_MOVE_CAVEAT:
+        return None
+    side = "better" if pre > 0 else "worse"
+    same_direction = round(mean_car * 100, 1) != 0 and (pre > 0) == (mean_car > 0)
+    if same_direction:
+        text = (
+            "Part of this move started earlier: on average, in the 5 trading days before "
+            f"these news days, the stock had already moved {_pct_abs(pre)} {side} than expected."
+        )
+    else:
+        text = (
+            "In the 5 trading days before these news days, the stock had on average moved "
+            f"{_pct_abs(pre)} {side} than expected."
+        )
+    return Finding(text=text, based_on_events=bucket.n_car_pre_5)
 
 
 def _bucket_findings(label: str, bucket: BucketStats) -> list[Finding]:
@@ -166,37 +182,28 @@ def _bucket_findings(label: str, bucket: BucketStats) -> list[Finding]:
     out = [
         Finding(
             text=(
-                f"On average, on the {_days(bucket.n)} with {label} news, the stock "
+                f"On average, on {bucket.n} {label}-news days studied, the stock "
                 f"{_reaction_phrase(bucket.mean_car_0_1)} (that day and the next)."
             ),
             based_on_events=bucket.n,
         ),
         _reliability_finding(bucket.p_value, "a move this large", bucket.n),
     ]
-    pre = bucket.mean_car_pre_5
-    if pre is not None and abs(pre) >= PRE_MOVE_CAVEAT:
-        side = "better" if pre > 0 else "worse"
-        out.append(
-            Finding(
-                text=(
-                    "Part of this move started before the news: on average, in the 5 days before, "
-                    f"the stock had already moved {_pct_abs(pre)} ({side} than expected)."
-                ),
-                based_on_events=bucket.n,
-            )
-        )
+    caveat = _pre_move_finding(bucket, bucket.mean_car_0_1)
+    if caveat is not None:
+        out.append(caveat)
     return out
 
 
 def _untested_finding(buckets: Sequence[tuple[str, BucketStats]], min_n: int) -> Finding:
-    """One "not enough events" finding covering every bucket too thin to test."""
+    """One "not enough days" finding covering every bucket too thin to test."""
     if len(buckets) == 1:
         label, b = buckets[0]
-        text = f"Not enough {label}-news events yet to judge (found {b.n}; need at least {min_n})."
+        text = f"Not enough {label}-news days yet to judge (found {b.n}; need at least {min_n})."
     else:
         found = " and ".join(f"{b.n} {label}-news" for label, b in buckets)
         text = (
-            "Not enough positive-news or negative-news events yet to judge "
+            "Not enough positive-news or negative-news days yet to judge "
             f"(found {found}; need at least {min_n} of each)."
         )
     return Finding(text=text, based_on_events=sum(b.n for _, b in buckets))
@@ -208,7 +215,7 @@ def _scope_findings(stats: MacroStats) -> list[Finding]:
         return [
             Finding(
                 text=(
-                    "Not enough news events yet to judge "
+                    "Not enough news days yet to judge "
                     f"(found {stats.n_used}; need at least {stats.min_n})."
                 ),
                 based_on_events=stats.n_used,
@@ -228,19 +235,24 @@ def _scope_findings(stats: MacroStats) -> list[Finding]:
     diff = stats.difference
     if diff is not None:
         total = diff.n_pos + diff.n_neg
-        out.append(Finding(text=_gap_sentence(diff.mean_diff), based_on_events=total))
+        out.append(
+            Finding(
+                text=_gap_sentence(diff.mean_diff, diff.n_pos, diff.n_neg), based_on_events=total
+            )
+        )
         out.append(_reliability_finding(diff.p_value, "a gap this large", total))
     corr = stats.correlation
     if corr is not None:
         if corr.label == "no_clear_effect" or abs(corr.rho) < MIN_LINK:
             claim = (
-                "there was no clear link between how positive the news was and how the stock moved."
+                "there was no clear link between how positive the news was and how the stock "
+                "moved compared with the market's prediction"
             )
         elif corr.rho > 0:
-            claim = "more positive news tended to go with better-than-expected moves."
+            claim = "more positive news tended to go with better-than-expected moves"
         else:
-            claim = "more positive news tended to go with worse-than-expected moves."
-        text = f"Across the {corr.n} news days, {claim}"
+            claim = "more positive news tended to go with worse-than-expected moves"
+        text = f"Across {corr.n} news days studied, {claim} (that day and the next)."
         out.append(Finding(text=text, based_on_events=corr.n))
         out.append(_reliability_finding(corr.p_value, "a pattern this strong", corr.n))
     return out

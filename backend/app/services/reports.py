@@ -145,6 +145,7 @@ class BucketStatsOut(BaseModel):
     mean_car_0_5: float | None
     median_car_0_5: float | None
     mean_car_pre_5: float | None
+    n_car_pre_5: int
     t: float | None
     p_value: float | None
     label: Reliability | None

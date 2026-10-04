@@ -70,6 +70,7 @@ class BucketStats:
     mean_car_0_5: float | None
     median_car_0_5: float | None
     mean_car_pre_5: float | None
+    n_car_pre_5: int  # events with a pre-event window; the caveat on the mean rests on these
     # One-sample t-test of car_0_1 against zero; None below min_n or with no spread.
     t: float | None = None
     p_value: float | None = None
@@ -139,6 +140,7 @@ def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> 
         mean_car_0_5=_mean(car05),
         median_car_0_5=_median(car05),
         mean_car_pre_5=_mean(pre),
+        n_car_pre_5=len(pre),
         t=None if test is None else test[0],
         p_value=None if test is None else test[1],
         label=None if test is None else reliability_label(test[1]),
@@ -187,6 +189,8 @@ def compute_stats(
         and e.car_0_1 is not None
         and not (exclude_near_earnings and e.near_earnings)
     ]
+    # Built once so sentiment and CAR can never misalign (``used`` all have a car_0_1).
+    pairs = [(e.sentiment, e.car_0_1) for e in used if e.car_0_1 is not None]
     grouped: dict[Bucket, list[EventResult]] = {b: [] for b in BUCKETS}
     for e in used:
         grouped[bucket_of(e.sentiment)].append(e)
@@ -200,9 +204,7 @@ def compute_stats(
         n_used=len(used),
         first_event=min((e.date for e in used), default=None),
         last_event=max((e.date for e in used), default=None),
-        correlation=_correlation(
-            [e.sentiment for e in used], [e.car_0_1 for e in used if e.car_0_1 is not None], min_n
-        ),
+        correlation=_correlation([s for s, _ in pairs], [c for _, c in pairs], min_n),
         buckets={b: _bucket_stats(b, grouped[b], min_n) for b in BUCKETS},
         difference=_difference(car01("positive"), car01("negative"), min_n),
     )
