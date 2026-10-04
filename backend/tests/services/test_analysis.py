@@ -167,12 +167,15 @@ async def test_chart_includes_news_markers_from_cached_macro_report(services: Se
     macro = await services.analysis.macro("AAPL", USER)
     assert macro.report is not None
     assert macro.report.top_events
+    assert macro.report.events
 
     chart = await services.analysis.chart("AAPL", "2Y", [])
 
     news = [m for m in chart.markers if m.kind == "news"]
     assert news
     assert all(m.car_0_1 is not None for m in news)
+    # Markers cover every evaluated event, not just the 10 largest moves.
+    assert sorted(m.time for m in news) == [e.date.isoformat() for e in macro.report.events]
     assert chart.data_status.news.state == "ok"
 
 

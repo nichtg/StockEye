@@ -414,3 +414,24 @@ def test_build_macro_report_end_to_end_with_compute_stats_has_findings():
     reliab = [f for f in report.headline_findings if f.reliability]
     assert reliab
     assert all(f.reliability == "likely_real" and f.p_value is not None for f in reliab)
+
+
+def test_build_macro_report_events_sorted_ok_only_with_headline_mapping():
+    d = [date(2024, 1, 1) + timedelta(days=i) for i in range(4)]
+    events = [
+        make_event(d[2], 0.9, 0.03),
+        make_event(d[0], 0.5, -0.01, near_earnings=True),
+        make_event(d[3], 0.9, 0.09, ok=False),  # insufficient: never listed
+        make_event(d[1], 0.9, None),  # no car_0_1: never listed
+    ]
+    arts = {d[0]: [_art(d[0], 0.1, "mild", 1), _art(d[0], -0.8, "big", 2)]}
+    ex = _stats()
+
+    report = build_macro_report(events, ex, ex, None, [], arts, top_n=1)
+
+    assert [e.date for e in report.events] == [d[0], d[2]]
+    assert report.events[0].headline == "big"  # most extreme story
+    assert report.events[0].near_earnings is True
+    assert report.events[0].car_0_1 == -0.01
+    assert report.events[1].headline is None
+    assert len(report.top_events) == 1  # top_events is unaffected by the full list

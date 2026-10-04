@@ -53,6 +53,18 @@ class TopEvent:
 
 
 @dataclass(frozen=True)
+class EventPoint:
+    """One evaluated event for the price chart (``car_0_1`` is a fraction, 0.01 = 1%)."""
+
+    date: date
+    car_0_1: float
+    sentiment: float
+    article_count: int
+    near_earnings: bool
+    headline: str | None
+
+
+@dataclass(frozen=True)
 class Finding:
     """One plain-English sentence. ``based_on_events`` counts events (or articles for regime)."""
 
@@ -65,6 +77,7 @@ class Finding:
 @dataclass(frozen=True)
 class MacroReport:
     top_events: list[TopEvent]
+    events: list[EventPoint]  # every ok event with a car_0_1, sorted by date
     headline_findings: list[Finding]  # primary + regime, kept for compatibility
     primary_findings: list[Finding]  # shown first: ex-earnings scope (or the only scope)
     secondary_findings: list[Finding]  # all-events scope; the UI shows it under Details
@@ -258,6 +271,29 @@ def _top_events(
     return out
 
 
+def _event_points(
+    events: Sequence[EventResult], session_articles: Mapping[date, Sequence[ScoredArticle]]
+) -> list[EventPoint]:
+    out: list[EventPoint] = []
+    for e in sorted(events, key=lambda e: e.date):
+        if e.status != "ok" or e.car_0_1 is None:
+            continue
+        arts = sorted(
+            session_articles.get(e.date, ()), key=lambda a: (-abs(a.score), a.published_at)
+        )
+        out.append(
+            EventPoint(
+                date=e.date,
+                car_0_1=e.car_0_1,
+                sentiment=e.sentiment,
+                article_count=e.article_count,
+                near_earnings=e.near_earnings,
+                headline=arts[0].title if arts else None,
+            )
+        )
+    return out
+
+
 def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contract
     events: Sequence[EventResult],
     stats_all: MacroStats,
@@ -290,6 +326,7 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
         headline.append(_regime_finding(regime))
     return MacroReport(
         top_events=_top_events(events, session_articles, top_n),
+        events=_event_points(events, session_articles),
         headline_findings=headline,
         primary_findings=primary,
         secondary_findings=secondary,

@@ -21,6 +21,7 @@ from app.domain.macro.sentiment_stats import (
     weekly_timeline,
 )
 from app.domain.macro.summary import (
+    EventPoint,
     Finding,
     Headline,
     MacroReport,
@@ -32,6 +33,7 @@ __all__ = [
     "BucketStats",
     "Correlation",
     "Difference",
+    "EventPoint",
     "EventResult",
     "Finding",
     "Headline",

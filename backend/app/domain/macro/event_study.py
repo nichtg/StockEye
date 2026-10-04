@@ -7,8 +7,13 @@ Guards against four classic errors:
 * overlapping windows: events are thinned so no two are within ``exclusion`` sessions;
 * confounding: events within five sessions of an earnings date are flagged so the statistics
   can exclude them;
-* contaminated baselines: estimation windows skip the post-event windows of selected events
-  and the sessions around earnings announcements.
+* contaminated baselines: estimation windows skip the sessions around earnings announcements.
+
+Estimation uses the 231 sessions [t-250, t-20] and masks only earnings sessions, not other news
+events' [0, +5] windows. On heavily covered stocks there is news almost every session, so
+masking every selected event's window left no clean days and discarded nearly every event
+after the first few months of history. The contamination from nearby news days in a 231-day
+OLS fit of alpha and beta is small, and this follows common practice for frequent events.
 """
 
 from __future__ import annotations
@@ -24,11 +29,9 @@ import pandas as pd
 
 EventStatus = Literal["ok", "insufficient_estimation"]
 
-# Length of the post-event window [0, +5] that is kept out of estimation windows.
-POST_WINDOW = 5
 # An event is flagged near earnings when an earnings session is within this many positions.
 EARNINGS_NEAR = 5
-# Earnings sessions [e-1, e+1] are masked out of estimation windows.
+# Earnings sessions [e-1, e+1] are the only sessions masked out of estimation windows.
 EARNINGS_MASK = 1
 
 FloatArray = npt.NDArray[np.float64]
@@ -123,7 +126,7 @@ def _fit_market_model(
     est_window: tuple[int, int],
     min_obs: int,
 ) -> tuple[float, float] | None:
-    """OLS alpha, beta over positions [t-start, t-end] (inclusive), skipping event windows."""
+    """OLS alpha, beta over positions [t-start, t-end] (inclusive), skipping masked sessions."""
     lo = max(t - est_window[0], 1)
     hi = t - est_window[1]
     if hi < lo:
@@ -160,13 +163,13 @@ def run_event_study(
     earnings_dates: Sequence[date],
     *,
     exclusion: int = 5,
-    est_window: tuple[int, int] = (150, 20),
+    est_window: tuple[int, int] = (250, 20),
     min_est_obs: int = 60,
 ) -> list[EventResult]:
     """Run the event study; one ``EventResult`` per selected event, sorted by date.
 
     ``stock_close`` and ``bench_close`` are daily closes on naive date indexes and are
-    inner-joined. ``est_window=(150, 20)`` means positions [t-150, t-20]. Events with fewer
+    inner-joined. ``est_window=(250, 20)`` means positions [t-250, t-20]. Events with fewer
     than ``min_est_obs`` usable estimation observations are returned with status
     ``insufficient_estimation`` and no statistics.
     """
@@ -184,8 +187,6 @@ def run_event_study(
     counts = dict(zip(daily_sent.index, daily_sent["article_count"].tolist(), strict=True))
 
     excluded = np.zeros(len(index), dtype=bool)
-    for p in sel_pos:
-        excluded[p : p + POST_WINDOW + 1] = True
     earn_pos = _earnings_positions(earnings_dates, index)
     for e in earn_pos:
         excluded[max(0, e - EARNINGS_MASK) : e + EARNINGS_MASK + 1] = True

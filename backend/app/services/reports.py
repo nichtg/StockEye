@@ -103,6 +103,15 @@ class TopEventOut(BaseModel):
     headlines: list[HeadlineOut]
 
 
+class EventPointOut(BaseModel):
+    date: date
+    car_0_1: float
+    sentiment: float
+    article_count: int
+    near_earnings: bool
+    headline: str | None
+
+
 class FindingOut(BaseModel):
     text: str
     based_on_events: int
@@ -165,6 +174,7 @@ class TimelinePointOut(BaseModel):
 
 class MacroReportOut(BaseModel):
     top_events: list[TopEventOut]
+    events: list[EventPointOut]
     headline_findings: list[FindingOut]
     primary_findings: list[FindingOut]
     secondary_findings: list[FindingOut]

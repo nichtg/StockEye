@@ -43,10 +43,13 @@ MIN_HISTORY_BARS = 30
 NEW_SYMBOL_LIMIT_REASON = "Daily limit for analysing new stocks reached; try again tomorrow."
 # Bump when a cached report's shape changes, so a deploy never serves the old shape.
 CACHE_SCHEMA = 2
+# Macro reports have their own version: 3 = estimation window [t-250, t-20] with only earnings
+# masked, plus the ``events`` list. Reports cached under the old method must never be served.
+MACRO_CACHE_SCHEMA = 3
 
 
 def macro_cache_key(symbol: str) -> str:
-    return f"macro:v{CACHE_SCHEMA}:{symbol}"
+    return f"macro:v{MACRO_CACHE_SCHEMA}:{symbol}"
 
 
 def _bad_data(symbol: str) -> AppError:
@@ -65,14 +68,11 @@ def _full_statuses(prices: DataStatus, events: DataStatus, news: DataStatus) -> 
 
 
 def _news_markers(cached: MacroResponse | None) -> list[tuple[date, str, float]]:
-    """High-impact days from a cached macro report; never triggers a computation."""
+    """Every evaluated event from a cached macro report; never triggers a computation."""
     report = cached.report if cached is not None else None
     if report is None:
         return []
-    return [
-        (e.date, e.headlines[0].title if e.headlines else "High-impact news", e.car_0_1)
-        for e in report.top_events
-    ]
+    return [(e.date, e.headline or "High-impact news", e.car_0_1) for e in report.events]
 
 
 class AnalysisService:
