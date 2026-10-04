@@ -154,10 +154,12 @@ def test_compute_stats_bucket_summaries_skip_missing_car_0_5():
     assert pos.mean_car_0_5 == pytest.approx(0.04)
     assert pos.median_car_0_5 == pytest.approx(0.04)
     assert pos.mean_car_pre_5 == pytest.approx(0.01)
+    assert pos.n_car_pre_5 == 2  # the third positive event has no pre-window
     neutral = stats.buckets["neutral"]
     assert neutral.n == 1
     assert neutral.mean_car_0_5 is None
     assert neutral.mean_car_pre_5 is None
+    assert neutral.n_car_pre_5 == 0
     empty = stats.buckets["negative"]
     assert (empty.n, empty.mean_car_0_1, empty.median_car_0_1) == (0, None, None)
 

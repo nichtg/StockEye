@@ -536,3 +536,49 @@ def test_build_macro_report_correlation_sentence_leads_with_its_own_day_count():
         "Across 29 news days studied, more positive news tended to go with "
         "better-than-expected moves (that day and the next)." in texts
     )
+
+
+def test_build_macro_report_pre_move_with_zero_rounded_bucket_mean_makes_no_part_claim():
+    report = _report(_stats(pos=_bucket("positive", 17, 0.0004, pre=0.013)))
+
+    texts = _texts(report)
+    assert (
+        "On average, on 17 positive-news days studied, the stock moved in line with "
+        "what the market predicted (that day and the next)." in texts
+    )
+    assert (
+        "In the 5 trading days before these news days, the stock had on average moved "
+        "1.3% better than expected." in texts
+    )
+    assert not any("Part of this move" in t for t in texts)
+
+
+def test_build_macro_report_findings_never_contain_bare_n_or_p_tokens():
+    corr = Correlation(rho=0.4, p_value=0.01, n=29, label="clear_effect")
+    full = _stats(
+        pos=_bucket("positive", 17, 0.008, pre=0.013),  # same sign: "Part of this move"
+        neg=_bucket("negative", 12, -0.004, pre=0.013),  # opposite sign
+        difference=_diff(0.03),
+        correlation=corr,
+    )
+    reports = [
+        _report(full),
+        _report(
+            _stats(correlation=Correlation(rho=0.0, p_value=0.9, n=29, label="no_clear_effect"))
+        ),
+        _report(_stats(pos=_bucket("positive", 5, 0.01, p=None))),  # one untested bucket
+        _report(
+            _stats(
+                pos=_bucket("positive", 5, 0.01, p=None), neg=_bucket("negative", 3, 0.0, p=None)
+            )
+        ),
+        _report(_stats(n_used=4)),  # overall not enough
+    ]
+
+    texts = [t for r in reports for t in _texts(r)]
+    assert any("Part of this move" in t for t in texts)
+    assert any(t.startswith("In the 5 trading days") for t in texts)
+    assert any(t.startswith("Not enough positive-news or negative-news") for t in texts)
+    assert any(t.startswith("Across 29 news days") for t in texts)
+    for text in texts:
+        assert not BARE_SYMBOL.search(text), text
