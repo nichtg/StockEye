@@ -66,7 +66,12 @@ export function MarkerKey({
                     fontSize: '0.8125rem',
                     transition: 'background-color 150ms ease',
                     '&:hover': { bgcolor: 'raised' },
-                    ...(empty && { color: 'ink3', opacity: 0.6, cursor: 'default' }),
+                    ...(empty && {
+                      color: 'ink3',
+                      opacity: 0.6,
+                      cursor: 'default',
+                      '&:hover': { bgcolor: 'transparent' },
+                    }),
                   }}
                 >
                   <Box

@@ -1,8 +1,9 @@
-import { screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes, useLocation } from 'react-router';
 import { stubFetch } from '../../test/mockApi';
 import { renderApp } from '../../test/render';
+import { SEARCH_DEBOUNCE_MS } from './focusSearch';
 import { SearchBox } from './SearchBox';
 
 function Where() {
@@ -26,15 +27,43 @@ const matches = [
 ];
 
 describe('SearchBox', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('searches after a pause, lists symbol, name and exchange, and Enter opens the stock', async () => {
     const seen = stubFetch((req) => {
       if (req.path === '/stocks/search') return { body: matches };
       return undefined;
     });
-    const user = userEvent.setup();
+    // Fake timers make the debounce deterministic: on real timers a slow keystroke under load can
+    // outlast the 250 ms window and fire an extra request. (user-event stalls on RTL's own
+    // setTimeout under vitest fake timers, so the keystrokes are fired as change events.)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     setup();
-
-    await user.type(screen.getByRole('combobox', { name: 'Search for a stock' }), 'dbs');
+    const input = screen.getByRole('combobox', { name: 'Search for a stock' });
+    act(() => {
+      input.focus();
+    });
+    for (const text of ['d', 'db', 'dbs']) {
+      fireEvent.change(input, { target: { value: text } });
+      act(() => {
+        vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS - 1);
+      });
+    }
+    expect(seen.filter((r) => r.path === '/stocks/search')).toHaveLength(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1); // the debounce fires and the request goes out
+    });
+    // Let the response settle: React Query notifies through setTimeout, so keep ticking the clock.
+    await vi.waitFor(async () => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(screen.getAllByRole('option')).toHaveLength(2);
+    });
+    vi.useRealTimers();
+    const user = userEvent.setup();
     const first = await screen.findByRole('option', { name: /D05\.SI/ });
     expect(first).toHaveTextContent('DBS Group Holdings Ltd');
     expect(first).toHaveTextContent('SGX');

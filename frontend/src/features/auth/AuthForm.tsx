@@ -8,12 +8,14 @@ import InputAdornment from '@mui/material/InputAdornment';
 import Link from '@mui/material/Link';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
-import { Link as RouterLink, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { Link as RouterLink, useSearchParams } from 'react-router';
 import { isApiError, userMessage } from '../../api/errors';
+import { signedOutNoticeKey } from '../../api/keys';
 import { Wordmark } from '../../components/Wordmark';
 import { useDocumentTitle } from '../../hooks';
-import { useAuthMutation, type LoginNotice } from './useAuth';
+import { useAuthMutation } from './useAuth';
 import {
   MIN_PASSWORD_LENGTH,
   validateLogin,
@@ -51,29 +53,17 @@ function lengthHint(length: number): string {
   return `At least ${MIN_PASSWORD_LENGTH} characters: ${MIN_PASSWORD_LENGTH - length} more to go`;
 }
 
-/** A one-line message the previous page left in router state, such as "Your account was deleted." */
-function noticeFrom(state: unknown): string | undefined {
-  const notice = (state as Partial<LoginNotice> | null)?.notice;
-  return typeof notice === 'string' ? notice : undefined;
-}
-
 export function AuthForm({ mode }: { mode: Mode }) {
   const copy = COPY[mode];
   useDocumentTitle(copy.title);
 
   const [params] = useSearchParams();
-  const location = useLocation();
-  const navigate = useNavigate();
-  // Shown once: kept here, then dropped from the history entry so a reload doesn't repeat it.
-  const [notice] = useState(() => noticeFrom(location.state));
+  const client = useQueryClient();
+  // Shown once: read on arrival, then dropped from the cache.
+  const [notice] = useState(() => client.getQueryData<string>(signedOutNoticeKey));
   useEffect(() => {
-    if (notice)
-      void navigate(
-        { pathname: location.pathname, search: location.search },
-        { replace: true, state: null },
-      );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, for the notice we arrived with
-  }, []);
+    client.removeQueries({ queryKey: signedOutNoticeKey });
+  }, [client]);
   const next = params.get('next');
   const switchTo = next ? `${copy.switchTo}?next=${encodeURIComponent(next)}` : copy.switchTo;
 

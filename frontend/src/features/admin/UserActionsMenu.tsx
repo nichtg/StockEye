@@ -56,7 +56,8 @@ export function UserActionsMenu({ menu, onClose, onPatch, onDelete }: Props) {
           <Typography
             key="why"
             variant="caption"
-            component="p"
+            component="li"
+            role="none"
             sx={{ px: 2, py: 0.5, color: 'ink3' }}
           >
             This account is being deleted, so its role and status can’t change.

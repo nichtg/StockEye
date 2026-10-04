@@ -9,7 +9,7 @@ import { PageSkeleton } from '../../components/PageSkeleton';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { Wordmark } from '../../components/Wordmark';
 import { layout } from '../../theme/tokens';
-import { useMe, type LoginNotice } from './useAuth';
+import { useMe } from './useAuth';
 
 /** Minimal frame (wordmark, theme toggle) for states that appear before the real shell can. */
 function Bare({ children }: { children: ReactNode }) {
@@ -48,11 +48,8 @@ export function RequireAuth() {
     );
   }
   if (!me.data) {
-    // Signed out on purpose (account deleted): say so on the login page instead of returning here.
-    const notice = client.getQueryData<string>(signedOutNoticeKey);
-    if (notice) {
-      return <Navigate to="/login" replace state={{ notice } satisfies LoginNotice} />;
-    }
+    // Signed out on purpose (account deleted): there is nothing to come back to.
+    if (client.getQueryData(signedOutNoticeKey)) return <Navigate to="/login" replace />;
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?next=${next}`} replace />;
   }

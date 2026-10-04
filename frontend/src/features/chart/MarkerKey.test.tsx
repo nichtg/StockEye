@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { renderApp } from '../../test/render';
@@ -24,10 +24,11 @@ describe('MarkerKey', () => {
     expect(dividends).toHaveAttribute('aria-disabled', 'true');
     expect(dividends).toHaveAttribute('aria-pressed', 'false');
 
-    // Keyboard users can reach it by tabbing.
-    while (document.activeElement !== dividends) await user.tab();
-    await user.hover(dividends);
-    expect(await screen.findByText('No dividends in this range')).toBeInTheDocument();
+    // Reaching the chip by keyboard is enough to explain it; no hover needed.
+    act(() => {
+      dividends.focus();
+    });
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('No dividends in this range');
     await user.click(dividends);
     expect(onToggle).not.toHaveBeenCalled();
   });
