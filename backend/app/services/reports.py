@@ -82,6 +82,7 @@ class LatestPatternOut(BaseModel):
     pattern: str  # pattern key
     label: str
     bias: Lean
+    # Any hit counts, neutral ones too: the chart draws every hit, so this matches what users see.
     sessions_ago: int  # trading sessions before the last completed bar (0 = the last bar)
 
 

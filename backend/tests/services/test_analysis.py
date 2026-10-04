@@ -6,10 +6,11 @@ from bson import ObjectId
 
 from app.db import Database
 from app.providers.errors import RateLimitedError, TransientProviderError
+from app.providers.models import NewsItem, NewsQuery
 from app.repositories.cache import CacheRepository
 from app.repositories.news import NewsRepository
 from app.services import compute
-from app.services.analysis import macro_cache_key
+from app.services.analysis import RECAP_ONLY_REASON, macro_cache_key
 from app.services.container import Services
 from app.services.errors import AppError
 from tests.services.fakes import CLOSED_NOW, FakeClock, FakeMarketData, FakeNews, FakeScorer
@@ -17,6 +18,7 @@ from tests.services.fakes import CLOSED_NOW, FakeClock, FakeMarketData, FakeNews
 pytestmark = pytest.mark.integration
 
 USER = ObjectId()
+NOW_START = CLOSED_NOW - timedelta(days=800)
 
 
 async def test_technical_returns_outlook_patterns_and_ok_status(services: Services) -> None:
@@ -431,3 +433,87 @@ async def test_news_progress_quote_outage_does_not_admit_or_start_an_unknown_sym
     assert not progress.in_progress
     assert news_provider.queries == []
     assert not await services.admission.is_admitted("MSFT")
+
+
+RECAP = "Apple Stock Soars 12% On Surprise Services Deal"
+
+
+def _with_recap(news_provider: FakeNews, *, only: bool = False) -> None:
+    """Make every collection window also return one recap headline (or only that)."""
+    real = news_provider._answer
+
+    def answer(query: NewsQuery) -> list[NewsItem]:
+        when = query.start + timedelta(days=5)
+        recap = NewsItem.model_validate(
+            {
+                "url": f"https://news.example.com/recap-{query.start:%Y%m}",
+                "title": RECAP,
+                "summary": "Shares jumped.",
+                "source": "Example Wire",
+                "published_at": when,
+                "provider": news_provider.name,
+            }
+        )
+        return [recap] if only else [*real(query), recap]
+
+    news_provider._answer = answer  # type: ignore[method-assign]
+
+
+def _capture_macro_titles(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    seen: list[str] = []
+    real = compute.compute_macro
+
+    def spy(stock: Any, bench: Any, articles: Any, *rest: Any, **kw: Any) -> Any:
+        seen.extend(a.title for a in articles)
+        return real(stock, bench, articles, *rest, **kw)
+
+    monkeypatch.setattr(compute, "compute_macro", spy)
+    return seen
+
+
+async def test_macro_report_never_sees_a_stored_price_recap(
+    services: Services, news_provider: FakeNews, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_recap(news_provider)
+    await services.news.ensure_ingested("AAPL", "Apple Inc.")
+    await services.news.wait("AAPL")
+    stored, _ = await services.news.scored_articles("AAPL", NOW_START, CLOSED_NOW)
+    assert RECAP in {a.title for a in stored}  # kept in storage and on the raw read path
+    seen = _capture_macro_titles(monkeypatch)
+
+    response = await services.analysis.macro("AAPL", USER)
+
+    assert seen
+    assert RECAP not in seen
+    assert response.report is not None
+    headlines = [h.title for t in response.report.top_events for h in t.headlines]
+    headlines += [e.headline for e in response.report.events if e.headline]
+    assert headlines
+    assert RECAP not in headlines
+
+
+async def test_chart_news_markers_are_built_without_price_recaps(
+    services: Services, news_provider: FakeNews, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_recap(news_provider)
+    await services.news.ensure_ingested("AAPL", "Apple Inc.")
+    await services.news.wait("AAPL")
+    seen = _capture_macro_titles(monkeypatch)
+
+    chart = await services.analysis.chart("AAPL", "2Y", [])
+
+    assert [m for m in chart.markers if m.kind == "news"]
+    assert seen
+    assert RECAP not in seen
+
+
+async def test_macro_with_only_recaps_stored_says_so_in_the_news_status(
+    services: Services, news_provider: FakeNews
+) -> None:
+    _with_recap(news_provider, only=True)
+    await services.news.ensure_ingested("AAPL", "Apple Inc.")
+    await services.news.wait("AAPL")
+
+    response = await services.analysis.macro("AAPL", USER)
+
+    assert response.data_status.news.reason == RECAP_ONLY_REASON

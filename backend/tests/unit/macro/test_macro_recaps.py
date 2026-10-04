@@ -40,6 +40,30 @@ RECAPS = [
     "Apple stock price drops 4% following court ruling",
     "Apple Stock Jumps 5%: Is It Time to Buy?",
     "Biggest movers in the S&P 500: Apple leads gainers",
+    # A1: "stock <verb> on ..." names the cause but still reports the move.
+    "Sandisk Stock Soars On Bullish Growth Outlook And AI Flash Bet",
+    "ServiceNow Stock Tumbles On Q1 Earnings",
+    "SoFi Technologies Stock Sinks on Soft Guidance",
+    "Rocket Lab (RKLB) stock jumps on record-breaking contract",
+    "Apple shares rise on strong quarterly sales",
+    "ServiceNow Inc (NYSE:NOW) Beats Q4 Estimates but Stock Falls on Guidance",
+    "Rocket Lab stock (NASDAQ:RKLB) slides to merger collar",
+    "ServiceNow stock gains on a fresh Needham target",
+    # A3: more forms.
+    "Apple stock jumps 5 percent after the keynote",
+    "Rocket Lab rises after a 12% gain in a single session, shares extend rally",
+    "Apple outpaces stock market gains: what you should know",
+    "Nvidia stock craters after export curbs",
+    "Rocket Lab stock rockets on launch success",
+    "Apple stock edges higher ahead of the event",
+    "Tesla shares extend rally into the close",
+    "Intel stock rebounds from lows",
+    "Amazon stock slumps on retail worries",
+    "Microsoft shares retreat from record",
+    "Nvidia stock declines as chips weaken",
+    "Apple moves up 3% in early trading",
+    "Apple stock moves lower",
+    "Walmart stock dives into oversold territory, eyeing $100 support (WMT:NASDAQ)",
 ]
 
 NEWS = [
@@ -67,6 +91,20 @@ NEWS = [
     "How to stock up on iPhone accessories before the holidays",
     "Fed holds rates steady; inflation down to 2.9%",
     "Apple opens new campus in Austin",
+    # A2: forecasts, price targets and fundamentals are not reported moves.
+    "Rocket Lab (RKLB) Stock Could Surge 30%+ - What Analysts Are Betting On",
+    "5 Reasons Why Sandisk Can Rise Another 1,500%",
+    "ServiceNow To Rally More Than 18%? Here Are 10 Top Analyst Forecasts",
+    "Here's Why PepsiCo Stock's FCF is Set to Jump 40%",
+    "Walmart's Membership Fees Jump 17%",
+    "SOFI Stock Gains Spotlight As Softer CPI Data Lifts Fintech",
+    "Walmart Stock Gaining Steam Ahead of Debut on Nasdaq-100",
+    "ServiceNow stock gains a higher 174 USD price target",
+    "Apple price target raised to $250, up 10% from current levels",
+    "Apple could rise 20%, analyst says",
+    # A4: "up for grabs" is an idiom.
+    "Why Apple Stock Is Up For Grabs",
+    "Walmart stock moves to Nasdaq-100 listing",
 ]
 
 

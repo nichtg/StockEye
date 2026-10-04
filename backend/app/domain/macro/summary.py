@@ -89,7 +89,7 @@ class MacroReport:
     timeline: list[TimelinePoint]
     events_total: int
     events_insufficient: int
-    earnings_note: str | None = None  # set by ``_earnings_note``; None when it does not apply
+    earnings_note: str | None  # set by ``_earnings_note``; None when it does not apply
 
 
 def _pct_abs(x: float) -> str:

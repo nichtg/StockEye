@@ -17,6 +17,7 @@ from app.domain.macro import (
 )
 from app.domain.technical import (
     PATTERNS,
+    PatternHit,
     PatternStats,
     anchored_vwap,
     build_outlook,
@@ -86,6 +87,15 @@ def _stats_label(stats: PatternStats, bias: str) -> str:
     return text if stats.sufficient else f"{text} That is too few cases to rely on."
 
 
+def _hit_fields(hit: PatternHit) -> dict[str, object]:
+    """Fields shared by ``RecentPattern`` and ``LatestPatternOut`` for one pattern hit."""
+    return {
+        "label": PATTERNS[hit.key].label,
+        "bias": hit.bias.value,
+        "date": pd.Timestamp(hit.date).date(),
+    }
+
+
 def compute_technical(symbol: str, frame: pd.DataFrame, statuses: PriceStatuses) -> TechnicalReport:
     """Outlook plus the last three sessions' patterns, each with its historical reliability."""
     hits = detect_patterns(frame)
@@ -109,13 +119,7 @@ def compute_technical(symbol: str, frame: pd.DataFrame, statuses: PriceStatuses)
         )
         patterns.append(
             RecentPattern.model_validate(
-                {
-                    "key": hit.key.value,
-                    "label": PATTERNS[hit.key].label,
-                    "bias": bias,
-                    "date": pd.Timestamp(hit.date).date(),
-                    "stats": stats_out,
-                }
+                {"key": hit.key.value, **_hit_fields(hit), "stats": stats_out}
             )
         )
     expected = outlook.expected_range
@@ -126,16 +130,12 @@ def compute_technical(symbol: str, frame: pd.DataFrame, statuses: PriceStatuses)
             "as_of": as_of.date(),
         }
     )
-    # The chart draws every hit, so the latest one is simply the last hit in the history.
     latest = None
     if not recent and hits:
-        hit = max(hits, key=lambda h: h.index)
-        latest = LatestPatternOut(
-            date=pd.Timestamp(hit.date).date(),
-            pattern=hit.key.value,
-            label=PATTERNS[hit.key].label,
-            bias=hit.bias.value,
-            sessions_ago=last - hit.index,
+        # ``detect_patterns`` returns hits sorted by index, so the last one is the most recent.
+        hit = hits[-1]
+        latest = LatestPatternOut.model_validate(
+            {"pattern": hit.key.value, **_hit_fields(hit), "sessions_ago": last - hit.index}
         )
     return TechnicalReport(
         symbol=symbol,
