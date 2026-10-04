@@ -337,3 +337,47 @@ One Sonnet task, after the types are regenerated.
 - [x] F1 frontend, plus the Opus review approved
 - [x] Live verification and screenshots
 - [ ] PRs open and CI green
+
+## Phase 4 (approved 2026-10-04): "?" icon alignment and dated, averaged macro findings
+
+The user reviewed the merged phase-3 app and chose, from `.handoff/sdd/report-P4.md`, 1A and 3A+3B+3C. 1B and 3D were declined.
+
+Branches (stacked, each with its own PR):
+- `feat/backend-macro-clarity`, from `main`
+- `feat/frontend-macro-clarity`, from the backend branch
+
+### Backend
+One Sonnet task (B1).
+- **3A data:** each scope's statistics (`MacroStats` / `MacroStatsOut`) gain `first_event` and `last_event`, the dates of the
+  earliest and latest events that scope used (None when it used none). The UI never re-derives which events a scope used.
+- **3B wording:** findings in `domain/macro/summary.py` say they are averages and name the count, e.g. "On average, on the
+  17 days with positive news, the stock did 0.1% better than its usual relationship with the market would predict (that
+  day and the next)." The gap sentence likewise says "On average". Still no bare statistical letters.
+- Bump `MACRO_CACHE_SCHEMA`; regenerate `openapi.json` and the frontend types.
+- Tests for both; then an Opus methodology audit (the wording must match what is computed: the mean CAR[0,+1] per bucket)
+  and the Opus thermo-nuclear review, fixing until approved. No security review: no new endpoints or auth changes.
+
+### Frontend
+One Sonnet task (F1), after the types are regenerated.
+- **1A:** `<Term>`'s visible "?" is sized from its text (about 1.1em) and centred on the text's middle, so it lines up at
+  every typography size; an invisible hit area of at least 24 px keeps it tappable without changing line height.
+- **3A:** under "What the news has done to the price": "Based on news from <first month> to <last month>. Each result
+  compares the stock's move on a news day and the next trading day with what the market predicted." Taken from the
+  primary scope's stats; the secondary scope in Details gets its own period line.
+- **3C:** a breakdown line that reconciles the counts: "29 news events: 17 positive, 7 neutral, 5 negative", each count
+  with a "?" defining it (positive above +0.3 sentiment, negative below -0.3, neutral in between).
+- Opus review, fixing until approved.
+
+### Verification
+- Live run on `stockeye_shots`: D05.SI, AAPL and RKLB macro tabs; the "?" beside caption, body2, body1, subtitle and chip
+  text, at 1440 and 375 px in light and dark.
+- Re-shoot the curated screenshots into `docs/screenshots`.
+- Push, open two PRs (backend → main, frontend → backend branch), get CI green, and merge only when the user asks.
+
+### Phase 4 status
+- [ ] B1 period dates and averaged wording
+- [ ] Backend methodology audit and thermo review approved
+- [ ] F1 icon alignment, period line and breakdown line
+- [ ] Frontend Opus review approved
+- [ ] Live verification and screenshots
+- [ ] PRs open and CI green
