@@ -37,8 +37,12 @@ export const TERM_IDS = [
   'finbert',
   'sentiment_regime',
   'market_adjusted_return',
+  'positive_news_day',
+  'neutral_news_day',
+  'negative_news_day',
   'benchmark',
   'news_event',
+  'news_days_studied',
   'preliminary',
   'p_value',
   'statistical_reliability',
@@ -197,6 +201,18 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
     title: 'Market-adjusted move',
     body: 'The stock’s actual move minus the move its usual link to the market would predict, added up over the news day and the next trading day. The usual link is measured over about a year of trading before the news.',
   },
+  positive_news_day: {
+    title: 'Positive news day',
+    body: 'A day whose headlines averaged a sentiment score above +0.3, on a scale from −1 (very negative) to +1 (very positive).',
+  },
+  neutral_news_day: {
+    title: 'Neutral news day',
+    body: 'A day whose headlines averaged a sentiment score between −0.3 and +0.3, on a scale from −1 (very negative) to +1 (very positive).',
+  },
+  negative_news_day: {
+    title: 'Negative news day',
+    body: 'A day whose headlines averaged a sentiment score below −0.3, on a scale from −1 (very negative) to +1 (very positive).',
+  },
   preliminary: {
     title: 'Preliminary',
     body: 'News is still being collected, so these results will change.',
@@ -209,13 +225,17 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
     title: 'News event',
     body: 'A day with a cluster of notable headlines. We check what the price did around it to see whether news moved it. On the chart, the dot’s tone shows the direction of the move and its size shows how big it was.',
   },
+  news_days_studied: {
+    title: 'News days studied',
+    body: 'At most one news day in any six trading days is studied (the one with the most notable news), so each move stays separate. Days with too little earlier price history (the first four months) or near earnings, where noted, are left out.',
+  },
   p_value: {
     title: 'P-value',
     body: 'How likely a gap this large would appear by pure chance if news had no effect. Smaller means the effect is less likely to be luck; below 0.05 is the usual cutoff.',
   },
   statistical_reliability: {
     title: 'Statistical reliability',
-    body: 'How much to trust a finding, based on how many events it rests on and how clear the result is. Few events or a noisy result means low reliability.',
+    body: 'How much to trust a finding, based on how many news days it rests on and how clear the result is. Few news days or a noisy result means low reliability.',
   },
   news_effect: {
     title: 'News effect',

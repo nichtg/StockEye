@@ -93,6 +93,8 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
     exclude_near_earnings: true,
     min_n: 10,
     n_used: 34,
+    first_event: '2024-10-03',
+    last_event: '2026-02-12',
     correlation: { rho: 0.31, p_value: 0.0123, n: 34, label: 'possible_effect' as const },
     buckets: {},
     difference: null,
@@ -122,7 +124,7 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
       headline_findings: [],
       primary_findings: [
         {
-          text: 'More positive news tended to go with better-than-expected moves.',
+          text: 'Across 29 news days studied, more positive news tended to go with better-than-expected moves (that day and the next).',
           based_on_events: 34,
           reliability: null,
           p_value: null,

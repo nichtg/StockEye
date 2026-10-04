@@ -34,8 +34,8 @@ export function pValueText(p: number | null): string {
   return p < 0.001 ? 'under 0.001' : p.toFixed(3);
 }
 
-export function newsEventsPhrase(count: number): string {
-  return `Based on ${String(count)} news ${count === 1 ? 'event' : 'events'}`;
+export function newsDaysPhrase(count: number): string {
+  return `Based on ${String(count)} news ${count === 1 ? 'day' : 'days'}`;
 }
 
 export type Scope = NonNullable<MacroReportOut['primary_scope']>;

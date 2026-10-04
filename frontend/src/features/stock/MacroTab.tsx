@@ -5,13 +5,13 @@ import Chip from '@mui/material/Chip';
 import LinearProgress from '@mui/material/LinearProgress';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
-import type { Ingestion, MacroResponse, NewsProgress } from '../../api/types';
+import type { Ingestion, MacroResponse, MacroStatsOut, NewsProgress } from '../../api/types';
 import { DetailsAccordion } from '../../components/DetailsAccordion';
 import { QueryRegion } from '../../components/QueryRegion';
 import { SectionTitle } from '../../components/SectionTitle';
 import { Term } from '../../components/Term';
 import type { Exchange } from '../../lib/exchange';
-import { formatRelative } from '../../lib/format';
+import { formatMonthRange, formatRelative } from '../../lib/format';
 import { radius } from '../../theme/tokens';
 import { FindingList } from './FindingList';
 import { NOT_ENOUGH_NEWS, regimeSentence, type Scope } from './macroText';
@@ -29,6 +29,56 @@ function ScopeLabel({ scope }: { scope: Scope | null | undefined }) {
     </>
   ) : (
     <>All news days</>
+  );
+}
+
+/**
+ * The period and the size of the evidence behind a set of findings, from the very stats the
+ * findings were computed on. Each line is left out when its numbers are missing.
+ */
+function NewsBasis({ stats }: { stats: MacroStatsOut | null | undefined }) {
+  if (!stats) return null;
+  const period = formatMonthRange(stats.first_event, stats.last_event);
+  const total = stats.n_used;
+  const counts = {
+    positive: stats.buckets.positive?.n ?? 0,
+    neutral: stats.buckets.neutral?.n ?? 0,
+    negative: stats.buckets.negative?.n ?? 0,
+  };
+  if (!period && total <= 0) return null;
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 1.5, maxWidth: 720 }}>
+      {period && (
+        <Typography variant="caption" component="p" sx={{ color: 'ink3' }}>
+          Based on news from {period}. Each result compares the stock’s move on a news day and the
+          next trading day with{' '}
+          <Term id="market_adjusted_return">
+            <>what the market predicted</>
+          </Term>
+          .
+        </Typography>
+      )}
+      {total > 0 && (
+        <Typography variant="caption" component="p" sx={{ color: 'ink3' }}>
+          {total}{' '}
+          <Term id="news_days_studied">
+            <>news {total === 1 ? 'day' : 'days'} studied</>
+          </Term>
+          : {counts.positive}{' '}
+          <Term id="positive_news_day">
+            <>positive</>
+          </Term>
+          , {counts.neutral}{' '}
+          <Term id="neutral_news_day">
+            <>neutral</>
+          </Term>
+          , {counts.negative}{' '}
+          <Term id="negative_news_day">
+            <>negative</>
+          </Term>
+        </Typography>
+      )}
+    </Box>
   );
 }
 
@@ -64,9 +114,16 @@ function Results({
         </Box>
         {report.primary_findings.length > 0 ? (
           <>
-            <Typography variant="caption" component="p" sx={{ color: 'ink3', mb: 1.5 }}>
+            <Typography variant="caption" component="p" sx={{ color: 'ink3', mb: 0.5 }}>
               <ScopeLabel scope={report.primary_scope} />
             </Typography>
+            <NewsBasis
+              stats={
+                report.primary_scope === 'excluding_earnings'
+                  ? report.stats_ex_earnings
+                  : report.stats_all
+              }
+            />
             <FindingList findings={report.primary_findings} />
             {report.earnings_note && (
               <Typography variant="body2" sx={{ color: 'ink2', mt: 1.5, maxWidth: 720 }}>
@@ -103,19 +160,20 @@ function Results({
       <DetailsAccordion title="Details" unmountOnExit>
         {showScopes && (
           <Box sx={{ p: 2 }}>
-            <Typography variant="subtitle1" sx={{ color: 'ink', mb: 1 }}>
+            <Typography variant="subtitle1" sx={{ color: 'ink', mb: 0.5 }}>
               <ScopeLabel scope={report.secondary_scope} />
             </Typography>
+            <NewsBasis stats={report.stats_all} />
             <FindingList findings={report.secondary_findings} />
           </Box>
         )}
         <ScopeTable
-          title={showScopes ? 'Excluding earnings periods' : 'All news events'}
+          title={showScopes ? 'Excluding earnings periods' : 'All news days'}
           stats={report.stats_ex_earnings}
         />
         {showScopes && <ScopeTable title="Including earnings periods" stats={report.stats_all} />}
         <Typography variant="body2" sx={{ px: 2, pb: 2, color: 'ink2' }}>
-          {report.events_total} news {report.events_total === 1 ? 'event' : 'events'} found;{' '}
+          {report.events_total} news {report.events_total === 1 ? 'day' : 'days'} found;{' '}
           {report.events_insufficient} left out because there was too little price history around
           them.
         </Typography>

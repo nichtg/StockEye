@@ -650,6 +650,10 @@ export interface components {
       min_n: number;
       /** N Used */
       n_used: number;
+      /** First Event */
+      first_event: string | null;
+      /** Last Event */
+      last_event: string | null;
       correlation: components['schemas']['CorrelationOut'] | null;
       /** Buckets */
       buckets: {

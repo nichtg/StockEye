@@ -70,7 +70,7 @@ export function ScopeTable({ title, stats }: { title: string; stats: MacroStatsO
           <TableHead>
             <TableRow>
               <TableCell>Measure</TableCell>
-              <TableCell align="right">Events</TableCell>
+              <TableCell align="right">News days</TableCell>
               <TableCell align="right">
                 <Term id="market_adjusted_return">Market-adjusted move</Term>
               </TableCell>
@@ -89,7 +89,7 @@ export function ScopeTable({ title, stats }: { title: string; stats: MacroStatsO
                 <TableCell align="right">{r.events}</TableCell>
                 <TableCell align="right">{r.result}</TableCell>
                 <TableCell align="right">{pValueText(r.p)}</TableCell>
-                <TableCell>{r.label ? RELIABILITY_LABEL[r.label] : 'Too few events'}</TableCell>
+                <TableCell>{r.label ? RELIABILITY_LABEL[r.label] : 'Too few news days'}</TableCell>
               </TableRow>
             ))}
           </TableBody>

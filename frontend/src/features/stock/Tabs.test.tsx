@@ -301,3 +301,134 @@ describe('Macro tab', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('Macro tab period and counts', () => {
+  const bucket = (bucket: 'positive' | 'neutral' | 'negative', n: number) => ({
+    bucket,
+    n,
+    mean_car_0_1: 0.001,
+    median_car_0_1: 0.001,
+    n_car_0_5: n,
+    mean_car_0_5: null,
+    median_car_0_5: null,
+    mean_car_pre_5: null,
+    t: null,
+    p_value: null,
+    label: null,
+  });
+
+  function withStats(
+    mutate: (r: NonNullable<ReturnType<typeof macroFixture>['report']>) => void,
+  ): ReturnType<typeof macroFixture> {
+    const data = macroFixture();
+    if (!data.report) throw new Error('fixture has no report');
+    mutate(data.report);
+    return data;
+  }
+
+  const stats = (n_used: number, first: string | null, last: string | null, b = {}) => ({
+    ...macroFixture().report!.stats_all,
+    n_used,
+    first_event: first,
+    last_event: last,
+    buckets: b,
+  });
+
+  function show(data: ReturnType<typeof macroFixture>) {
+    stubFetch((req) => (req.path === '/stocks/AAPL/macro' ? { body: data } : undefined));
+    return renderApp(<MacroTab symbol="AAPL" exchange="US" />);
+  }
+
+  const isLine = (re: RegExp) => (_: string, el: Element | null) =>
+    el?.tagName === 'P' && re.test(el.textContent);
+  const countsLine = (re: RegExp) => screen.getByText(isLine(re));
+  const findCounts = (re: RegExp) => screen.findByText(isLine(re));
+
+  const PERIOD =
+    'Based on news from Oct 2024 to Oct 2026. Each result compares the stock’s move on a news day and the next trading day with what the market predicted.';
+
+  it('says which months the findings cover and how the events split', async () => {
+    show(
+      withStats((r) => {
+        r.stats_ex_earnings = stats(29, '2024-10-01', '2026-10-02', {
+          positive: bucket('positive', 17),
+          neutral: bucket('neutral', 7),
+          negative: bucket('negative', 5),
+        });
+      }),
+    );
+    const period = await screen.findByText(/Based on news from/);
+    expect(period.textContent).toBe(PERIOD);
+    expect(
+      within(period).getByRole('button', { name: 'What is Market-adjusted move?' }),
+    ).toBeInTheDocument();
+    const counts = countsLine(/^29 news days studied:/);
+    expect(counts.textContent).toBe('29 news days studied: 17 positive, 7 neutral, 5 negative');
+    for (const name of ['Positive news day', 'Neutral news day', 'Negative news day']) {
+      expect(within(counts).getByRole('button', { name: `What is ${name}?` })).toBeInTheDocument();
+    }
+  });
+
+  it('uses one month, the singular, and zero for a missing bucket', async () => {
+    show(
+      withStats((r) => {
+        r.stats_ex_earnings = stats(1, '2026-10-02', '2026-10-20', {
+          positive: bucket('positive', 1),
+        });
+      }),
+    );
+    expect((await screen.findByText(/Based on news from/)).textContent).toContain(
+      'Based on news from Oct 2026. Each',
+    );
+    expect(countsLine(/^1 news day studied:/).textContent).toBe(
+      '1 news day studied: 1 positive, 0 neutral, 0 negative',
+    );
+  });
+
+  it('takes the numbers from the stats the primary scope names', async () => {
+    show(
+      withStats((r) => {
+        r.primary_scope = 'all_events';
+        r.stats_all = stats(40, '2023-03-01', '2026-02-01');
+        r.stats_ex_earnings = stats(30, '2024-10-01', '2026-10-02');
+      }),
+    );
+    expect(await findCounts(/^40 news days studied:/)).toBeInTheDocument();
+    expect(screen.getByText(/Mar 2023 to Feb 2026/)).toBeInTheDocument();
+    expect(screen.queryByText(/30 news days studied/)).not.toBeInTheDocument();
+  });
+
+  it('leaves out the period without both dates, and the counts for an empty scope', async () => {
+    show(
+      withStats((r) => {
+        r.stats_ex_earnings = stats(0, null, '2026-10-02');
+      }),
+    );
+    await screen.findByText('Possible news effect');
+    expect(screen.queryByText(/Based on news from/)).not.toBeInTheDocument();
+    expect(screen.queryByText(isLine(/^[0-9]+ news days? studied/))).not.toBeInTheDocument();
+  });
+
+  it('gives the secondary scope in Details its own period and counts', async () => {
+    show(
+      withStats((r) => {
+        r.secondary_scope = 'all_events';
+        r.secondary_findings = [
+          {
+            text: 'Across every day, moves were similar.',
+            based_on_events: 40,
+            reliability: null,
+            p_value: null,
+          },
+        ];
+        r.stats_ex_earnings = stats(30, '2024-10-01', '2026-10-02');
+        r.stats_all = stats(40, '2023-03-01', '2026-02-01', { neutral: bucket('neutral', 40) });
+      }),
+    );
+    const user = userEvent.setup();
+    await findCounts(/^30 news days studied:/);
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(await findCounts(/^40 news days studied:/)).toBeInTheDocument();
+    expect(screen.getByText(/Mar 2023 to Feb 2026/)).toBeInTheDocument();
+  });
+});

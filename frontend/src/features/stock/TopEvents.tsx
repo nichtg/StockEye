@@ -119,7 +119,7 @@ export function TopEvents({ events, exchange }: { events: TopEventOut[]; exchang
   const sorted = ordered(events, order);
   const shown = all ? sorted : sorted.slice(0, TOP_SHOWN);
   return (
-    <section aria-label="Top news events">
+    <section aria-label="Top news days">
       <SectionTitle>Biggest news days</SectionTitle>
       <Box
         sx={{
