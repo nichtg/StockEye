@@ -12,7 +12,11 @@ from pymongo.errors import DuplicateKeyError
 from app.db import Database, Document
 
 type Role = Literal["user", "admin"]
-type Status = Literal["active", "disabled"]
+# "deleting" is internal: a record claimed by an in-flight account deletion (see ``claim_admin``).
+# It counts as neither an active admin nor a session-eligible user.
+type Status = Literal["active", "disabled", "deleting"]
+# What an admin may set; "deleting" is only ever written by the deletion flow.
+type SettableStatus = Literal["active", "disabled"]
 
 
 class EmailTakenError(Exception):
@@ -104,13 +108,34 @@ class UsersRepository:
         if not changes:
             return await self.get_by_id(user_id)
         doc = await self._col.find_one_and_update(
-            {"_id": user_id}, {"$set": changes}, return_document=ReturnDocument.AFTER
+            {"_id": user_id, "status": {"$ne": "deleting"}},  # a claimed record is frozen
+            {"$set": changes},
+            return_document=ReturnDocument.AFTER,
         )
         return _record(doc) if doc else None
 
     async def delete(self, user_id: ObjectId) -> bool:
         result = await self._col.delete_one({"_id": user_id})
         return result.deleted_count == 1
+
+    async def claim_admin(self, user_id: ObjectId) -> bool:
+        """Atomically mark an active admin as ``deleting``; False if it is not one any more.
+
+        Step one of removing an admin: the claim takes them out of the active-admin count, so
+        the caller can check that someone is left *before* deleting, and nothing is ever
+        re-inserted. A crash after the claim leaves a ``deleting`` record, never zero admins.
+        """
+        claimed = await self._col.find_one_and_update(
+            {"_id": user_id, "role": "admin", "status": "active"},
+            {"$set": {"status": "deleting"}},
+        )
+        return claimed is not None
+
+    async def release_claim(self, user_id: ObjectId) -> None:
+        """Undo ``claim_admin`` (the deletion would have removed the last active admin)."""
+        await self._col.update_one(
+            {"_id": user_id, "status": "deleting"}, {"$set": {"status": "active"}}
+        )
 
     async def promote_to_admin(self, email: str) -> UserRecord | None:
         """Make the user with this email an active admin; None when no such user exists."""
@@ -150,6 +175,12 @@ class UsersRepository:
         )
         return result.modified_count == 1
 
+    async def reset_failures(self, user_id: ObjectId) -> None:
+        """Zero the failure counter and drop any lock (a verified password, as after a login)."""
+        await self._col.update_one(
+            {"_id": user_id}, {"$set": {"failed_logins": 0, "locked_until": None}}
+        )
+
     async def clear_expired_lock(self, user_id: ObjectId, now: datetime) -> None:
         """Reset the failure counter if (and only if) a lock has run out.
 
@@ -159,22 +190,6 @@ class UsersRepository:
         await self._col.update_one(
             {"_id": user_id, "locked_until": {"$lte": now}},
             {"$set": {"failed_logins": 0, "locked_until": None}},
-        )
-
-    async def restore(self, user: UserRecord) -> None:
-        """Re-insert a record deleted a moment ago (undoing a delete that left no admin)."""
-        await self._col.insert_one(
-            {
-                "_id": user.id,
-                "email": user.email,
-                "password_hash": user.password_hash,
-                "role": user.role,
-                "status": user.status,
-                "failed_logins": user.failed_logins,
-                "locked_until": user.locked_until,
-                "created_at": user.created_at,
-                "last_login_at": user.last_login_at,
-            }
         )
 
     async def record_login(

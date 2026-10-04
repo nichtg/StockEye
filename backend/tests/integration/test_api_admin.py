@@ -195,3 +195,16 @@ async def test_admin_user_search_query_longer_than_100_chars_returns_422(
     resp = await admin.get("/api/admin/users", params={"query": "a" * 101})
 
     assert resp.status_code == 422
+
+
+async def test_admin_patch_status_deleting_is_rejected_by_validation(
+    new_client: ClientFactory, db: Database
+) -> None:
+    admin = await _admin_client(new_client, db)
+    alice = await new_client()
+    uid = (await register(alice, "alice@example.com")).json()["user"]["id"]
+
+    resp = await admin.patch(f"/api/admin/users/{uid}", json={"status": "deleting"})
+
+    assert resp.status_code == 422
+    assert (await db.users.find_one({"_id": ObjectId(uid)}))["status"] == "active"  # type: ignore[index]

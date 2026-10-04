@@ -303,3 +303,68 @@ async def test_has_history_is_false_until_ingestion_starts_then_true(services: S
     await _ingest(services)
 
     assert await services.news.has_history("AAPL")
+
+
+async def test_backfill_requests_months_newest_first(
+    services: Services, news_provider: FakeNews
+) -> None:
+    await _ingest(services)
+
+    starts = [q.start for q in news_provider.queries if q.start.day == 1]
+    assert len(starts) == 24
+    assert starts == sorted(starts, reverse=True)
+
+
+async def test_status_while_collecting_says_collecting_with_progress(services: Services) -> None:
+    await services.news.ensure_ingested("AAPL", "Apple Inc.")
+
+    status = await services.news.status("AAPL")
+
+    assert status.state == "partial"
+    assert status.reason == "Collecting news: 0 of 24 months so far."
+    await services.news.wait("AAPL")
+
+
+async def test_status_never_attempted_says_not_collected_yet(services: Services) -> None:
+    status = await services.news.status("AAPL")
+
+    assert status.state == "partial"
+    assert status.reason == "News for this stock hasn't been collected yet."
+
+
+async def test_status_attempted_incomplete_and_idle_says_retried_automatically(
+    services: Services, news_provider: FakeNews
+) -> None:
+    news_provider.fail_windows = {"2025-03"}
+    await _ingest(services)
+
+    status = await services.news.status("AAPL")
+
+    assert status.reason is not None
+    assert "23 of 24 months collected" in status.reason
+    assert "retried automatically" in status.reason
+
+
+async def test_progress_updated_at_is_none_before_and_set_after_a_run(
+    services: Services,
+) -> None:
+    assert (await services.news.progress("AAPL")).updated_at is None
+
+    await _ingest(services)
+
+    assert (await services.news.progress("AAPL")).updated_at == CLOSED_NOW
+
+
+async def test_foreign_run_counts_as_active_in_progress_and_status(
+    services: Services, db: Database, news_provider: FakeNews
+) -> None:
+    await NewsRepository(db).begin_run("AAPL", CLOSED_NOW)  # another process holds the run
+
+    progress = await services.news.progress("AAPL")
+    status = await services.news.status("AAPL")
+    ensured = await services.news.ensure_ingested("AAPL", "Apple Inc.")
+
+    assert progress.in_progress
+    assert status.reason == "Collecting news: 0 of 24 months so far."
+    assert ensured.in_progress
+    assert news_provider.queries == []  # no second run started

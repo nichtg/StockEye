@@ -82,6 +82,7 @@ class IngestProgress:
     months_done: int
     months_total: int
     in_progress: bool
+    updated_at: datetime | None = None  # last successful top-up; None until a run has finished
 
 
 def _month_start(moment: datetime) -> datetime:
@@ -97,7 +98,12 @@ def _missing(
 def _progress(
     windows: list[tuple[datetime, datetime]], state: IngestState, in_progress: bool
 ) -> IngestProgress:
-    return IngestProgress(len(windows) - len(_missing(windows, state)), len(windows), in_progress)
+    return IngestProgress(
+        len(windows) - len(_missing(windows, state)),
+        len(windows),
+        in_progress,
+        state.last_incremental_at,
+    )
 
 
 class NewsService:
@@ -137,7 +143,7 @@ class NewsService:
         now = self._clock()
         windows = self._windows(now)
         state = await self._repo.get_state(symbol)
-        progress = _progress(windows, state, self._running(symbol))
+        progress = self._progress_of(symbol, state)
         if progress.in_progress:
             return progress
         complete = progress.months_done == progress.months_total
@@ -147,11 +153,8 @@ class NewsService:
         recently_tried = (
             state.last_attempt_at is not None and now - state.last_attempt_at < RETRY_AFTER_ATTEMPT
         )
-        foreign_run = (
-            state.in_progress_since is not None and now - state.in_progress_since < STALE_RUN_AFTER
-        )
-        if not due or recently_tried or foreign_run:
-            return replace(progress, in_progress=foreign_run)
+        if not due or recently_tried:
+            return progress
         # No await between the running check above and this insert, so two callers cannot both
         # start a task for one symbol.
         task = asyncio.create_task(self._run(symbol, company_name, windows))
@@ -232,13 +235,16 @@ class NewsService:
     async def _backfill_months(
         self, symbol: str, company_name: str, windows: list[tuple[datetime, datetime]]
     ) -> int:
-        """Fetch and store each missing month; returns how many months were skipped.
+        """Fetch and store each missing month, newest first; returns how many were skipped.
 
         A skipped month is retried on the next run. Only a daily quota error propagates, since
         it dooms every remaining window.
         """
         failures = 0
-        for start, end in windows:
+        # Newest first: recent news is what users care about, so it must arrive in the first
+        # requests. ``windows`` stays oldest-first (see ``monthly_windows``); only the order
+        # we walk it in changes, and ``months_done`` counts finished months in any order.
+        for start, end in reversed(windows):
             month = start.strftime("%Y-%m")
             try:
                 items = await self._backfill.fetch(self._query(symbol, company_name, start, end))
@@ -306,7 +312,12 @@ class NewsService:
         return self._progress_of(symbol, state)
 
     def _progress_of(self, symbol: str, state: IngestState) -> IngestProgress:
-        return _progress(self._windows(self._clock()), state, self._running(symbol))
+        now = self._clock()
+        # A run another process holds (fresh marker, no local task) counts as active too.
+        foreign_run = (
+            state.in_progress_since is not None and now - state.in_progress_since < STALE_RUN_AFTER
+        )
+        return _progress(self._windows(now), state, self._running(symbol) or foreign_run)
 
     async def status(self, symbol: str) -> DataStatus:
         """News status from ingest state alone (no fetching, no scoring)."""
@@ -318,11 +329,13 @@ class NewsService:
         if state.scoring_error is not None:
             return DataStatus(state="unavailable", as_of=None, reason=SENTIMENT_DOWN_REASON)
         if progress.months_done < progress.months_total:
-            if progress.in_progress or state.last_attempt_at is None:
+            if progress.in_progress:
                 reason = (
-                    f"News is still being collected ({progress.months_done} of "
-                    f"{progress.months_total} months so far)."
+                    f"Collecting news: {progress.months_done} of {progress.months_total} "
+                    "months so far."
                 )
+            elif state.last_attempt_at is None:
+                reason = "News for this stock hasn't been collected yet."
             else:
                 reason = (
                     f"News is incomplete ({progress.months_done} of {progress.months_total} "

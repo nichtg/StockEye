@@ -20,28 +20,86 @@ def test_run_event_study_recovers_beta_and_known_abnormal_returns():
     assert [r.date for r in res] == [index[200].date(), index[300].date()]
     first, second = res
     assert first.status == second.status == "ok"
-    for r in res:
-        assert r.beta == pytest.approx(1.5, abs=TOL)
-        assert r.alpha == pytest.approx(0.0002, abs=TOL)
+    assert first.beta == pytest.approx(1.5, abs=TOL)
+    assert first.alpha == pytest.approx(0.0002, abs=TOL)
+    # The second event's window still contains the first event's jumps (not masked): the fit
+    # is slightly biased but close.
+    assert second.beta == pytest.approx(1.5, abs=0.1)
     assert first.car_0_0 == pytest.approx(0.03, abs=TOL)
     assert first.car_0_1 == pytest.approx(0.02, abs=TOL)  # 0.03 - 0.01
     assert first.car_0_5 == pytest.approx(0.02, abs=TOL)
     assert first.car_pre_5 == pytest.approx(0.0, abs=TOL)
-    assert second.car_0_0 == pytest.approx(-0.02, abs=TOL)
-    assert second.car_0_5 == pytest.approx(-0.02, abs=TOL)
+    assert second.car_0_0 == pytest.approx(-0.02, abs=0.01)
+    assert second.car_0_5 == pytest.approx(-0.02, abs=0.01)
     assert first.sentiment == 0.8
     assert first.article_count == 3
 
 
-def test_run_event_study_estimation_window_skips_earlier_event_windows():
-    # The second event's window [150, 280] contains day 200's jumps. If they were not
-    # excluded, beta would be badly biased; exact recovery proves they are skipped.
-    stock, bench, index = build_market(jumps={200: 0.05, 203: 0.05, 300: 0.01})
-    sent = sent_frame(index, {200: (0.9, 3), 300: (0.5, 3)})
+def test_run_event_study_estimation_window_keeps_other_events_windows():
+    # Day 200's event window lies inside the second event's [t-250, t-20] window. It is not
+    # masked, so the event is still estimated (the old masking left too few clean days).
+    stock, bench, index = build_market(n=700, jumps={400: 0.05, 403: 0.05})
+    sent = sent_frame(index, {400: (0.9, 3), 600: (0.5, 3)})
 
-    second = run_event_study(stock, bench, sent, [])[1]
+    first, second = run_event_study(stock, bench, sent, [])
 
-    assert second.beta == pytest.approx(1.5, abs=TOL)
+    assert second.status == "ok"
+    assert second.beta == pytest.approx(1.5, abs=0.1)  # 2 jumps in 231 days: small bias
+    assert first.status == "ok"
+
+
+def test_run_event_study_estimation_window_spans_250_sessions_back():
+    # A jump at t-250 is inside the window, so it must bias beta; one at t-251 must not.
+    stock, bench, index = build_market(n=700, jumps={350: 0.3})
+    sent = sent_frame(index, {600: (0.9, 3)})
+    (inside,) = run_event_study(stock, bench, sent, [])
+    stock2, bench2, _ = build_market(n=700, jumps={349: 0.3})
+    (outside,) = run_event_study(stock2, bench2, sent, [])
+
+    assert inside.beta != pytest.approx(1.5, abs=TOL)
+    assert outside.beta == pytest.approx(1.5, abs=TOL)
+
+
+def test_run_event_study_estimation_window_upper_edge_is_t_minus_20():
+    # A jump at t-20 is inside the window, so it must bias beta; one at t-19 must not.
+    stock, bench, index = build_market(n=700, jumps={580: 0.3})
+    sent = sent_frame(index, {600: (0.9, 3)})
+    (inside,) = run_event_study(stock, bench, sent, [])
+    stock2, bench2, _ = build_market(n=700, jumps={581: 0.3})
+    (outside,) = run_event_study(stock2, bench2, sent, [])
+
+    assert inside.beta != pytest.approx(1.5, abs=TOL)
+    assert outside.beta == pytest.approx(1.5, abs=TOL)
+
+
+def test_run_event_study_every_six_sessions_news_is_mostly_evaluated():
+    # Regression: masking every event's [0, +5] window left no clean days on heavily covered
+    # stocks, so almost all events were insufficient_estimation.
+    stock, bench, index = build_market(n=780)
+    sent = sent_frame(index, dict.fromkeys(range(260, 780, 6), (0.5, 4)))
+
+    results = run_event_study(stock, bench, sent, [])
+
+    ok = sum(1 for r in results if r.status == "ok")
+    assert len(results) > 80
+    assert ok / len(results) >= 0.9
+
+
+def test_run_event_study_future_bars_and_news_never_change_earlier_event():
+    stock, bench, index = build_market(n=700, jumps={450: 0.02})
+    sent = sent_frame(index, dict.fromkeys(range(300, 500, 6), (0.5, 3)))
+    base = run_event_study(stock, bench, sent, [index[300].date()])
+    cut = index[480]  # events up to here have all their forward windows inside the data
+    early = [r for r in base if r.date <= cut.date()]
+
+    longer_stock, longer_bench, longer_index = build_market(n=900, jumps={450: 0.02, 600: -0.1})
+    more = sent_frame(longer_index, dict.fromkeys(range(300, 800, 6), (0.5, 3)))
+    earnings = [index[300].date(), longer_index[650].date()]
+    redo = run_event_study(longer_stock, longer_bench, more, earnings)
+    redo_early = [r for r in redo if r.date <= cut.date()]
+
+    assert early
+    assert redo_early == early
 
 
 def test_run_event_study_pre_event_car_captures_run_up():
@@ -77,12 +135,14 @@ def test_run_event_study_requires_min_estimation_observations():
     assert below.status == "insufficient_estimation"
 
 
-def test_run_event_study_excluded_event_window_observations_do_not_count():
+def test_run_event_study_only_earnings_sessions_reduce_observation_count():
     stock, bench, index = build_market()
     sent = sent_frame(index, {80: (0.9, 3), 105: (0.8, 3)})
-    # Event 105 estimates on positions 1..85 (85 obs) minus event 80's window 80..85 (6) = 79.
-    ok = run_event_study(stock, bench, sent, [], min_est_obs=79)
-    short = run_event_study(stock, bench, sent, [], min_est_obs=80)
+    # Event 105 estimates on positions 1..85 (85 obs). Event 80's window is NOT masked, but
+    # earnings at 50 masks positions 49..51 (3 obs), leaving 82.
+    earn = [index[50].date()]
+    ok = run_event_study(stock, bench, sent, earn, min_est_obs=82)
+    short = run_event_study(stock, bench, sent, earn, min_est_obs=83)
     assert ok[1].status == "ok"
     assert short[1].status == "insufficient_estimation"
 

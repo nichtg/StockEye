@@ -6,7 +6,8 @@ to every result.
 """
 
 import asyncio
-from collections.abc import Callable
+import dataclasses
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
@@ -16,6 +17,7 @@ from pydantic import BaseModel
 from app.clock import utc_now
 from app.db import Database
 from app.domain.macro import ScoredArticle
+from app.logging_setup import get_logger
 from app.repositories.cache import CacheRepository
 from app.services import compute
 from app.services.admission import NewSymbolAdmission
@@ -30,23 +32,57 @@ from app.services.reports import (
     IngestionOut,
     MacroReportOut,
     MacroResponse,
+    NewsProgressOut,
     PriceStatuses,
     RangeKey,
     TechnicalReport,
 )
 from app.services.status import DataStatus, combine
 
+log = get_logger(__name__)
+
 TECHNICAL_TTL = timedelta(minutes=15)
 MACRO_TTL = timedelta(hours=1)
+MARKERS_TTL = timedelta(minutes=5)
 NEWS_WINDOW_DAYS = 730  # two years of news
 MIN_HISTORY_BARS = 30
 NEW_SYMBOL_LIMIT_REASON = "Daily limit for analysing new stocks reached; try again tomorrow."
 # Bump when a cached report's shape changes, so a deploy never serves the old shape.
 CACHE_SCHEMA = 2
+# Macro reports have their own version: 3 = estimation window [t-250, t-20] with only earnings
+# masked, plus the ``events`` list. Reports cached under the old method must never be served.
+MACRO_CACHE_SCHEMA = 3
+
+
+type _NewsInputs = tuple[IngestProgress, list[ScoredArticle], DataStatus]
+
+
+class _MarkerEntry(BaseModel):
+    date: date
+    label: str
+    car_0_1: float
+
+
+class _MarkerCache(BaseModel):
+    """Chart news markers only; never a macro report, so it may hold a partial build."""
+
+    markers: list[_MarkerEntry]
+
+
+_QUOTE_OUTAGE_STATUS = DataStatus(
+    state="unavailable",
+    reason="Prices for this stock can't be checked right now, so news collection will start later.",
+)
+
+
+def markers_cache_key(symbol: str, progress: IngestProgress) -> str:
+    """Changes whenever stored news changes (a month finishes or a top-up lands)."""
+    stamp = progress.updated_at.isoformat() if progress.updated_at is not None else "never"
+    return f"markers:v{MACRO_CACHE_SCHEMA}:{symbol}:{progress.months_done}:{stamp}"
 
 
 def macro_cache_key(symbol: str) -> str:
-    return f"macro:v{CACHE_SCHEMA}:{symbol}"
+    return f"macro:v{MACRO_CACHE_SCHEMA}:{symbol}"
 
 
 def _bad_data(symbol: str) -> AppError:
@@ -65,14 +101,11 @@ def _full_statuses(prices: DataStatus, events: DataStatus, news: DataStatus) -> 
 
 
 def _news_markers(cached: MacroResponse | None) -> list[tuple[date, str, float]]:
-    """High-impact days from a cached macro report; never triggers a computation."""
+    """Every evaluated event of a macro report (cached or built from stored news) as a marker."""
     report = cached.report if cached is not None else None
     if report is None:
         return []
-    return [
-        (e.date, e.headlines[0].title if e.headlines else "High-impact news", e.car_0_1)
-        for e in report.top_events
-    ]
+    return [(e.date, e.headline or "News event", e.car_0_1) for e in report.events]
 
 
 class AnalysisService:
@@ -130,9 +163,46 @@ class AnalysisService:
         without news and says why.
         """
         now = self._clock()
-        key = macro_cache_key(symbol)
-        if (cached := await self._fresh(key, now, MacroResponse)) is not None:
+        if (cached := await self._fresh(macro_cache_key(symbol), now, MacroResponse)) is not None:
             return cached
+        return await self._build_macro(
+            symbol, now, lambda name: self._news_inputs(symbol, name, user_id, now)
+        )
+
+    async def news_progress(self, symbol: str, user_id: ObjectId) -> NewsProgressOut:
+        """Start news collection if needed and report progress; cheap enough to poll.
+
+        Shares the admission-then-ensure path with ``macro``. An unknown symbol raises 404; a
+        refused symbol starts nothing and reports the refusal as its status.
+        """
+        # Validate first (404 for an unknown symbol), so junk symbols never reach admission.
+        try:
+            name = (await self._market.quote(symbol))[0].name
+        except AppError as exc:
+            if exc.code == "not_found":
+                raise
+            # Provider down, so the symbol cannot be validated. Only an already admitted symbol
+            # may proceed; admitting a possibly made-up ticker during an outage would reopen the
+            # unknown-symbol hole.
+            if not await self._admission.is_admitted(symbol):
+                progress = await self._news.progress(symbol)
+                return NewsProgressOut(**dataclasses.asdict(progress), status=_QUOTE_OUTAGE_STATUS)
+            name = await self._market.company_name(symbol)
+        progress, refused = await self._start_news(symbol, name, user_id)
+        status = refused if refused is not None else await self._news.status(symbol)
+        return NewsProgressOut(**dataclasses.asdict(progress), status=status)
+
+    async def _build_macro(
+        self,
+        symbol: str,
+        now: datetime,
+        news_inputs: Callable[[str], Awaitable[_NewsInputs]],
+    ) -> MacroResponse:
+        """Build the macro response from prices plus whatever news ``news_inputs`` yields.
+
+        Caches it only when complete and fully ok, so a half-built report is never served for an
+        hour. ``news_inputs`` receives the company name and decides whether collection may start.
+        """
         today = now.astimezone(UTC).date()
         (
             (stock, price_status),
@@ -145,7 +215,7 @@ class AnalysisService:
             self._benchmark(symbol),
             self._market.standard_events(symbol),
         )
-        progress, articles, news_status = await self._news_inputs(symbol, name, user_id, now)
+        progress, articles, news_status = await news_inputs(name)
         report: MacroReportOut | None = None
         if bench is not None:
             cal = session_calendar(
@@ -165,22 +235,31 @@ class AnalysisService:
             and ingestion.months_done == ingestion.months_total
             and statuses.overall.state == "ok"
         )
-        if complete:  # a half-built report must not be served for an hour
-            await self._cache.put(key, response.model_dump(mode="json"), MACRO_TTL, now)
+        if complete:
+            await self._cache.put(
+                macro_cache_key(symbol), response.model_dump(mode="json"), MACRO_TTL, now
+            )
         return response
+
+    async def _start_news(
+        self, symbol: str, name: str, user_id: ObjectId
+    ) -> tuple[IngestProgress, DataStatus | None]:
+        """Admission, then ensure ingestion. A refused symbol gets (progress, refusal status)."""
+        if not await self._admission.admit(user_id, symbol):
+            refused = DataStatus(state="unavailable", reason=NEW_SYMBOL_LIMIT_REASON)
+            return await self._news.progress(symbol), refused
+        return await self._news.ensure_ingested(symbol, name), None
 
     async def _news_inputs(
         self, symbol: str, name: str, user_id: ObjectId, now: datetime
-    ) -> tuple[IngestProgress, list[ScoredArticle], DataStatus]:
+    ) -> _NewsInputs:
         """Ingestion progress, scored articles and news status; no news for a refused symbol."""
-        if not await self._admission.admit(user_id, symbol):
-            refused = DataStatus(state="unavailable", reason=NEW_SYMBOL_LIMIT_REASON)
-            return await self._news.progress(symbol), [], refused
-        progress = await self._news.ensure_ingested(symbol, name)
-        articles, status = await self._news.scored_articles(
+        progress, refused = await self._start_news(symbol, name, user_id)
+        if refused is not None:
+            return progress, [], refused
+        return progress, *await self._news.scored_articles(
             symbol, now - timedelta(days=NEWS_WINDOW_DAYS), now
         )
-        return progress, articles, status
 
     async def _benchmark(self, symbol: str) -> tuple[pd.DataFrame | None, DataStatus]:
         """Daily closes of the first benchmark with data; (None, partial) if none responds."""
@@ -193,6 +272,47 @@ class AnalysisService:
         return None, DataStatus(state="partial", as_of=None, reason=reason)
 
     # --- chart -----------------------------------------------------------------------------
+
+    async def _chart_news_markers(
+        self, symbol: str, now: datetime
+    ) -> list[tuple[date, str, float]]:
+        """News markers for the chart from stored news only; never starts collection.
+
+        Uses the fresh cached macro report when there is one. Otherwise it builds from stored
+        articles, but only when some exist, and caches just the marker list for a few minutes
+        (keyed by what is stored), so chart loads never recompute on every request. A failure
+        only costs the news markers, never the chart.
+        """
+        try:
+            return await self._markers(symbol, now)
+        except Exception:
+            log.warning("chart_news_markers_failed", symbol=symbol, exc_info=True)
+            return []
+
+    async def _markers(self, symbol: str, now: datetime) -> list[tuple[date, str, float]]:
+        if (cached := await self._fresh(macro_cache_key(symbol), now, MacroResponse)) is not None:
+            return _news_markers(cached)
+        progress = await self._news.progress(symbol)
+        if progress.months_done == 0:
+            return []
+        key = markers_cache_key(symbol, progress)
+        if (hit := await self._fresh(key, now, _MarkerCache)) is not None:
+            return [(m.date, m.label, m.car_0_1) for m in hit.markers]
+        articles, status = await self._news.scored_articles(
+            symbol, now - timedelta(days=NEWS_WINDOW_DAYS), now
+        )
+        if not articles:
+            return []
+
+        async def stored(_name: str) -> _NewsInputs:
+            return progress, articles, status
+
+        markers = _news_markers(await self._build_macro(symbol, now, stored))
+        entry = _MarkerCache(
+            markers=[_MarkerEntry(date=d, label=h, car_0_1=c) for d, h, c in markers]
+        )
+        await self._cache.put(key, entry.model_dump(mode="json"), MARKERS_TTL, now)
+        return markers
 
     async def chart(self, symbol: str, range_key: RangeKey, indicators: list[str]) -> ChartData:
         """Candles, requested indicator lines and markers for ``range_key``."""
@@ -214,12 +334,12 @@ class AnalysisService:
             (frame, price_status),
             (events, event_status),
             news_status,
-            macro_payload,
+            news_markers,
         ) = await asyncio.gather(
             prices,
             self._market.standard_events(symbol),
             self._news.status(symbol),
-            self._fresh(macro_cache_key(symbol), now, MacroResponse),
+            self._chart_news_markers(symbol, now),
         )
         try:
             return await asyncio.to_thread(
@@ -229,7 +349,7 @@ class AnalysisService:
                 indicators,
                 frame=frame,
                 events=events,
-                news=_news_markers(macro_payload),
+                news=news_markers,
                 statuses=_full_statuses(price_status, event_status, news_status),
             )
         except ValueError as exc:

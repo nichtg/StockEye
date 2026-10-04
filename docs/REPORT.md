@@ -73,7 +73,7 @@ This report covers what StockEye is built with, what each piece is for, how the 
    - News days are turned into non-overlapping events using causal, bounded windows. Future news cannot change which past events were selected.
    - This prevents overlapping windows from inflating significance on heavily covered stocks.
 4. **Event study.**
-   - A market model (α, β from OLS against SPY for US stocks or the STI for SGX stocks, estimated on sessions −150 to −20 before the event, excluding other event windows and earnings days) gives the **abnormal return**: how much better or worse the stock did than its usual relationship with the market would predict.
+   - A market model (α, β from OLS against SPY for US stocks or the STI for SGX stocks, estimated on the 231 sessions from −250 to −20 before the event, excluding only earnings days; other news days stay in, because heavily covered stocks have news almost daily and masking them all would leave no clean days, while their effect on a 231-day fit is small) gives the **abnormal return**: how much better or worse the stock did than its usual relationship with the market would predict.
    - We measure that over the news day and the next day, and over 5 days.
    - The pre-event drift (−5 to −1) is reported as a caveat.
 5. **Statistics.**

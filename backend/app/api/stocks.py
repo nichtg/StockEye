@@ -10,7 +10,13 @@ from app.api.deps import UserDep
 from app.api.limits import MACRO, SEARCH, STOCK, limited
 from app.providers.models import Exchange, SymbolMatch
 from app.services.container import ServicesDep
-from app.services.reports import ChartData, MacroResponse, RangeKey, TechnicalReport
+from app.services.reports import (
+    ChartData,
+    MacroResponse,
+    NewsProgressOut,
+    RangeKey,
+    TechnicalReport,
+)
 from app.services.status import DataStatus
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -79,3 +85,9 @@ async def technical(symbol: SymbolPath, _user: UserDep, services: ServicesDep) -
 @router.get("/{symbol}/macro", dependencies=[Depends(limited(MACRO))])
 async def macro(symbol: SymbolPath, user: UserDep, services: ServicesDep) -> MacroResponse:
     return await services.analysis.macro(symbol, user.id)
+
+
+@router.get("/{symbol}/news", dependencies=[Depends(limited(STOCK))])
+async def news(symbol: SymbolPath, user: UserDep, services: ServicesDep) -> NewsProgressOut:
+    """Starts news collection when needed (within the daily budget) and reports its progress."""
+    return await services.analysis.news_progress(symbol, user.id)
