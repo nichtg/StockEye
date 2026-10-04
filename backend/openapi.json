@@ -2450,6 +2450,13 @@
         ],
         "title": "SessionOut"
       },
+      "SettableStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "disabled"
+        ]
+      },
       "SignalOut": {
         "properties": {
           "key": {
@@ -2492,7 +2499,8 @@
         "type": "string",
         "enum": [
           "active",
-          "disabled"
+          "disabled",
+          "deleting"
         ]
       },
       "StockOut": {
@@ -2726,7 +2734,7 @@
           "status": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Status"
+                "$ref": "#/components/schemas/SettableStatus"
               },
               {
                 "type": "null"
