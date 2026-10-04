@@ -396,7 +396,7 @@ export interface components {
       /** P Value */
       p_value: number | null;
       /** Label */
-      label: ('likely_real' | 'weak_evidence' | 'could_be_chance') | null;
+      label: ('clear_effect' | 'possible_effect' | 'no_clear_effect') | null;
     };
     /** Candle */
     Candle: {
@@ -449,7 +449,7 @@ export interface components {
        * Label
        * @enum {string}
        */
-      label: 'likely_real' | 'weak_evidence' | 'could_be_chance';
+      label: 'clear_effect' | 'possible_effect' | 'no_clear_effect';
     };
     /** Credentials */
     Credentials: {
@@ -495,7 +495,7 @@ export interface components {
        * Label
        * @enum {string}
        */
-      label: 'likely_real' | 'weak_evidence' | 'could_be_chance';
+      label: 'clear_effect' | 'possible_effect' | 'no_clear_effect';
       /** N Pos */
       n_pos: number;
       /** N Neg */
@@ -533,7 +533,7 @@ export interface components {
       /** Based On Events */
       based_on_events: number;
       /** Reliability */
-      reliability: ('likely_real' | 'weak_evidence' | 'could_be_chance') | null;
+      reliability: ('clear_effect' | 'possible_effect' | 'no_clear_effect') | null;
       /** P Value */
       p_value: number | null;
     };
@@ -582,6 +582,25 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
+    /** LatestPatternOut */
+    LatestPatternOut: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /** Pattern */
+      pattern: string;
+      /** Label */
+      label: string;
+      /**
+       * Bias
+       * @enum {string}
+       */
+      bias: 'bullish' | 'bearish' | 'neutral';
+      /** Sessions Ago */
+      sessions_ago: number;
+    };
     /** MacroReportOut */
     MacroReportOut: {
       /** Top Events */
@@ -610,6 +629,8 @@ export interface components {
       events_total: number;
       /** Events Insufficient */
       events_insufficient: number;
+      /** Earnings Note */
+      earnings_note?: string | null;
     };
     /** MacroResponse */
     MacroResponse: {
@@ -904,6 +925,7 @@ export interface components {
       outlook: components['schemas']['OutlookOut'];
       /** Recent Patterns */
       recent_patterns: components['schemas']['RecentPattern'][];
+      latest_pattern?: components['schemas']['LatestPatternOut'] | null;
       data_status: components['schemas']['PriceStatuses'];
     };
     /** TimelinePointOut */
