@@ -30,6 +30,7 @@ export type ChartMarker = S['Marker'];
 export type RangeKey = ChartData['range'];
 export type TechnicalReport = S['TechnicalReport'];
 export type SignalOut = S['SignalOut'];
+export type LatestPattern = S['LatestPatternOut'];
 export type RecentPattern = S['RecentPattern'];
 export type PatternStatsOut = S['PatternStatsOut'];
 export type MacroResponse = S['MacroResponse'];

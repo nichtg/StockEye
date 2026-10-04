@@ -192,10 +192,10 @@ describe('tooltip text', () => {
       }),
     ).toBe('Hammer');
     expect(eventText({ time: 'x', kind: 'news', label: 'DBS beats', car_0_1: 0.021 })).toBe(
-      'News: “DBS beats” (2.1% better than expected over 2 days)',
+      'News: “DBS beats” (2.1% above its usual market‑linked move over 2 days)',
     );
     expect(eventText({ time: 'x', kind: 'news', label: 'Probe', car_0_1: -0.014 })).toContain(
-      '1.4% worse',
+      '1.4% below its usual market‑linked move',
     );
   });
 

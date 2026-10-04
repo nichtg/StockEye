@@ -2,11 +2,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
+import { keepSignedOutMark } from '../queryClient';
 import { NoticeProvider } from '../components/NoticeProvider';
 import { ColorModeProvider } from '../theme/ColorModeProvider';
 
 export function renderApp(ui: ReactElement, { route = '/' }: { route?: string } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  keepSignedOutMark(client);
   return {
     client,
     ...render(

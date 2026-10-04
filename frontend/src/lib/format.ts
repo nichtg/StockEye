@@ -187,9 +187,22 @@ export function formatRelative(iso: string, now: number = Date.now()): string {
   return 'just now';
 }
 
-/** Market-adjusted 2-day move from a fraction (0.021 means 2.1% better than expected). */
-export function moveText(fraction: number): string {
+/**
+ * Uses a non-breaking hyphen (U+2011) in "market‑linked" so a wrapping line never splits it.
+ * Market-adjusted 2-day move from a fraction (0.021 means 2.1% above its usual market-linked
+ * move), split so a row can keep the figure on one line and let the rest wrap.
+ */
+export function moveParts(fraction: number): { figure: string | null; rest: string } {
   const size = formatPct(Math.abs(fraction) * 100);
-  if (size === formatPct(0)) return 'In line with expectations';
-  return `${size} ${fraction > 0 ? 'better' : 'worse'} than expected`;
+  if (size === formatPct(0))
+    return { figure: null, rest: 'In line with its usual market‑linked move' };
+  return {
+    figure: size,
+    rest: `${fraction > 0 ? 'above' : 'below'} its usual market‑linked move`,
+  };
+}
+
+export function moveText(fraction: number): string {
+  const { figure, rest } = moveParts(fraction);
+  return figure ? `${figure} ${rest}` : rest;
 }

@@ -68,6 +68,12 @@ function Results({
               <ScopeLabel scope={report.primary_scope} />
             </Typography>
             <FindingList findings={report.primary_findings} />
+            {report.earnings_note && (
+              <Typography variant="body2" sx={{ color: 'ink2', mt: 1.5, maxWidth: 720 }}>
+                {report.earnings_note}
+                <Term id="earnings" />
+              </Typography>
+            )}
           </>
         ) : (
           <Typography>{NOT_ENOUGH_NEWS}</Typography>

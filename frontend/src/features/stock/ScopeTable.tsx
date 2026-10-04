@@ -78,7 +78,7 @@ export function ScopeTable({ title, stats }: { title: string; stats: MacroStatsO
                 <Term id="p_value">p-value</Term>
               </TableCell>
               <TableCell>
-                <Term id="statistical_reliability">Reliability</Term>
+                <Term id="news_effect">News effect</Term>
               </TableCell>
             </TableRow>
           </TableHead>

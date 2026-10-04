@@ -5,12 +5,13 @@ import { radius, type Tokens } from './tokens';
  * track with the chosen item raised in white. Unselected text is ink2, the lightest ink that still
  * meets WCAG AA on the track in light mode.
  */
+// Explicit units: a bare number means px in a theme override but is scaled by `sx`.
 export function segmentedStyles(t: Pick<Tokens, 'bg' | 'raised' | 'line' | 'ink' | 'ink2'>) {
   return {
-    track: { backgroundColor: t.raised, borderRadius: radius.sm, padding: 4 },
+    track: { backgroundColor: t.raised, borderRadius: radius.sm, padding: '4px' },
     item: {
-      minHeight: 32,
-      borderRadius: 6,
+      minHeight: '32px',
+      borderRadius: '6px',
       padding: '4px 16px',
       color: t.ink2,
       '&:hover': { color: t.ink },

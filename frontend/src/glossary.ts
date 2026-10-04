@@ -42,6 +42,8 @@ export const TERM_IDS = [
   'preliminary',
   'p_value',
   'statistical_reliability',
+  'news_effect',
+  'near_earnings',
   'earnings',
   'dividend',
   'split',
@@ -193,7 +195,7 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   },
   market_adjusted_return: {
     title: 'Market-adjusted move',
-    body: 'How much better or worse the stock did than expected, given how the overall market moved that day and how this stock usually tracks the market.',
+    body: 'The stock’s actual move minus the move its usual link to the market would predict, added up over the news day and the next trading day. The usual link is measured over about a year of trading before the news.',
   },
   preliminary: {
     title: 'Preliminary',
@@ -214,6 +216,14 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   statistical_reliability: {
     title: 'Statistical reliability',
     body: 'How much to trust a finding, based on how many events it rests on and how clear the result is. Few events or a noisy result means low reliability.',
+  },
+  news_effect: {
+    title: 'News effect',
+    body: 'How sure we can be that news, rather than luck, is linked to these moves. It is not a buy or sell signal.',
+  },
+  near_earnings: {
+    title: 'Earnings tag',
+    body: 'Within a day of an earnings release, so the move may reflect the results rather than the news.',
   },
   earnings: {
     title: 'Earnings',

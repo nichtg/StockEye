@@ -49,7 +49,11 @@ function Report({ report, exchange }: { report: TechnicalReport; exchange: Excha
 
       <section aria-label="Recent patterns">
         <SectionTitle>Recent patterns</SectionTitle>
-        <RecentPatterns patterns={report.recent_patterns} exchange={exchange} />
+        <RecentPatterns
+          patterns={report.recent_patterns}
+          latest={report.latest_pattern}
+          exchange={exchange}
+        />
       </section>
     </Box>
   );

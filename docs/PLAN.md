@@ -335,5 +335,5 @@ One Sonnet task, after the types are regenerated.
 - [x] C2 wording and data
 - [x] Backend thermo review approved (889 tests)
 - [x] F1 frontend, plus the Opus review approved
-- [ ] Live verification and screenshots
+- [x] Live verification and screenshots
 - [ ] PRs open and CI green

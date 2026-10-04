@@ -1,5 +1,6 @@
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import Link from '@mui/material/Link';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
@@ -11,7 +12,7 @@ import { Direction } from '../../components/Direction';
 import { SectionTitle } from '../../components/SectionTitle';
 import { Term } from '../../components/Term';
 import type { Exchange } from '../../lib/exchange';
-import { formatDate, moveText } from '../../lib/format';
+import { formatDate, moveParts } from '../../lib/format';
 import { segmentedStyles } from '../../theme/segmented';
 
 const TOP_SHOWN = 5;
@@ -43,13 +44,27 @@ function ordered(events: TopEventOut[], order: Order): TopEventOut[] {
   return sorted.sort((a, b) => Math.abs(b.car_0_1) - Math.abs(a.car_0_1));
 }
 
+/** The figure stays on one line with its arrow; the explanation wraps within the column. */
+function MoveText({ fraction }: { fraction: number }) {
+  const { figure, rest } = moveParts(fraction);
+  if (!figure) return <Direction value={0} text={rest} />;
+  return (
+    <>
+      <Direction value={fraction * 100} text={figure} />{' '}
+      <Box component="span" sx={{ color: 'ink2' }}>
+        {rest}
+      </Box>
+    </>
+  );
+}
+
 function EventRow({ event: e, exchange }: { event: TopEventOut; exchange: Exchange }) {
   return (
     <Box
       component="li"
       sx={{
         display: 'grid',
-        gridTemplateColumns: { xs: '1fr', sm: '110px 1fr 210px' },
+        gridTemplateColumns: { xs: '1fr', sm: '110px minmax(0, 1fr) 220px' },
         columnGap: 2,
         rowGap: 0.5,
         py: 1.5,
@@ -57,9 +72,22 @@ function EventRow({ event: e, exchange }: { event: TopEventOut; exchange: Exchan
         borderColor: 'line',
       }}
     >
-      <Typography variant="body2" sx={{ color: 'ink3' }}>
-        {formatDate(e.date, exchange)}
-      </Typography>
+      <Box>
+        <Typography variant="body2" sx={{ color: 'ink3' }}>
+          {formatDate(e.date, exchange)}
+        </Typography>
+        {e.near_earnings && (
+          <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+            <Chip
+              label="Earnings"
+              size="small"
+              variant="outlined"
+              sx={{ height: 20, color: 'ink2', borderColor: 'ink3' }}
+            />
+            <Term id="near_earnings" />
+          </Box>
+        )}
+      </Box>
       <Box sx={{ minWidth: 0 }}>
         {e.headlines.length === 0 && (
           <Typography variant="body2" sx={{ color: 'ink3' }}>
@@ -77,8 +105,8 @@ function EventRow({ event: e, exchange }: { event: TopEventOut; exchange: Exchan
           </Typography>
         ))}
       </Box>
-      <Typography component="div" sx={{ textAlign: { sm: 'right' } }}>
-        <Direction value={e.car_0_1 * 100} text={moveText(e.car_0_1)} />
+      <Typography component="div" sx={{ textAlign: { sm: 'right' }, minWidth: 0 }}>
+        <MoveText fraction={e.car_0_1} />
       </Typography>
     </Box>
   );

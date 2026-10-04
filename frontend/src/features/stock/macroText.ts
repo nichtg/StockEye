@@ -3,15 +3,15 @@ import type { MacroReportOut, Reliability } from '../../api/types';
 export const NOT_ENOUGH_NEWS = 'Not enough news yet to analyse this stock.';
 
 export const RELIABILITY_LABEL: Record<Reliability, string> = {
-  likely_real: 'Likely real',
-  weak_evidence: 'Weak evidence',
-  could_be_chance: 'Could be chance',
+  clear_effect: 'Clear news effect',
+  possible_effect: 'Possible news effect',
+  no_clear_effect: 'No clear news effect',
 };
 
-const LEAD = /^(?:Likely a real effect|Weak evidence|Could be chance): ?(\S)/;
+const LEAD = /^(?:Clear|Possible|No clear) news effect: ?(\S)/;
 
 /**
- * The backend writes reliability sentences as "Likely a real effect: if news had no influence ...".
+ * The backend writes reliability sentences as "Possible news effect: if news had no influence ...".
  * The UI shows that label as a chip instead, so drop it from the text and keep the rest.
  */
 export function stripReliabilityLead(text: string): string {
