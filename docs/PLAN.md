@@ -259,8 +259,12 @@ Each branch is stacked on the one before it. All four are pushed, with PRs open 
 - A sentiment `scoring_error` is cleared only on the next news ingestion, so after installing the model the banner lingers until the next refresh.
 
 ### Remaining steps
-1. ~~Frontend re-review round 3~~ (done, APPROVED).
-2. ~~Re-shoot the screenshots~~ (done, including `admin-desktop-light.png`).
-3. **Push and open the PRs**, merged in order 1 → 2 → 3.
-4. **Make CI pass on every PR.**
-5. **Give the user the final report.**
+All done:
+1. Frontend review round 3: APPROVED.
+2. Screenshots re-shot, including `admin-desktop-light.png`.
+3. PRs open, to be merged in order 1 → 2 → 3:
+   - [#1](https://github.com/nichtg/StockEye/pull/1): `feat/backend-foundation` → `main`
+   - [#2](https://github.com/nichtg/StockEye/pull/2): `feat/backend-analysis` → `feat/backend-foundation`
+   - [#3](https://github.com/nichtg/StockEye/pull/3): `feat/frontend` → `feat/backend-analysis`
+4. CI is green on all three PRs.
+5. Final report delivered.
