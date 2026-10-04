@@ -118,6 +118,7 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
           ],
         },
       ],
+      events: [],
       headline_findings: [],
       primary_findings: [
         {
@@ -152,7 +153,12 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
       events_total: 36,
       events_insufficient: 2,
     },
-    ingestion: { months_done: 24, months_total: 24, in_progress: false },
+    ingestion: {
+      months_done: 24,
+      months_total: 24,
+      in_progress: false,
+      updated_at: '2026-09-25T10:00:00Z',
+    },
     data_status: { prices: okStatus, events: okStatus, news: okStatus, overall: okStatus },
     ...overrides,
   };

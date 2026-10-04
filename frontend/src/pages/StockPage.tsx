@@ -4,14 +4,14 @@ import Tabs from '@mui/material/Tabs';
 import { useCallback, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router';
 import { isApiError, userMessage } from '../api/errors';
-import type { DataStatus } from '../api/types';
+import type { FullStatuses } from '../api/types';
 import { ErrorState } from '../components/ErrorState';
 import { StockNotFound } from '../components/StockNotFound';
 import { StockChart } from '../features/chart/StockChart';
 import { MacroTab } from '../features/stock/MacroTab';
 import { StockHeader } from '../features/stock/StockHeader';
 import { TechnicalTab } from '../features/stock/TechnicalTab';
-import { useStock } from '../features/stock/useStockData';
+import { useNewsProgress, useStock } from '../features/stock/useStockData';
 import { useDocumentTitle } from '../hooks';
 import { exchangeOfSymbol } from '../lib/exchange';
 
@@ -24,16 +24,18 @@ export default function StockPage() {
   const [params, setParams] = useSearchParams();
   const tab: TabKey = params.get('tab') === 'macro' ? 'macro' : 'technical';
   // Tagged with its symbol, so the previous symbol's freshness never shows under a new header.
-  const [reported, setReported] = useState<{ symbol: string; status?: DataStatus }>();
-  const chartStatus = reported?.symbol === symbol ? reported.status : undefined;
+  const [reported, setReported] = useState<{ symbol: string; status?: FullStatuses }>();
+  const chartStatuses = reported?.symbol === symbol ? reported.status : undefined;
   const setChartStatus = useCallback(
-    (status: DataStatus | undefined) => {
+    (status: FullStatuses | undefined) => {
       setReported({ symbol, status });
     },
     [symbol],
   );
 
   const stock = useStock(symbol);
+  // On every tab, so opening a stock starts news collection. It is also the header's news line.
+  const news = useNewsProgress(symbol);
 
   if (stock.isError && isApiError(stock.error) && stock.error.status === 404) {
     return <StockNotFound symbol={symbol} />;
@@ -56,7 +58,12 @@ export default function StockPage() {
         symbol={symbol}
         stock={stock.data}
         loading={stock.isPending}
-        statuses={[stock.data?.data_status, chartStatus]}
+        statuses={[
+          stock.data?.data_status,
+          chartStatuses?.prices,
+          chartStatuses?.events,
+          news.data?.status ?? chartStatuses?.news,
+        ]}
       />
 
       <Box sx={{ mt: 4 }}>
@@ -104,7 +111,7 @@ export default function StockPage() {
           {tab === 'technical' ? (
             <TechnicalTab symbol={symbol} exchange={exchange} />
           ) : (
-            <MacroTab symbol={symbol} exchange={exchange} />
+            <MacroTab symbol={symbol} exchange={exchange} news={news.data} />
           )}
         </Box>
       </Box>

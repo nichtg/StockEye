@@ -1,7 +1,9 @@
 import Box from '@mui/material/Box';
 import type { ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, Outlet, useLocation } from 'react-router';
 import { userMessage } from '../../api/errors';
+import { signedOutNoticeKey } from '../../api/keys';
 import { ErrorState } from '../../components/ErrorState';
 import { PageSkeleton } from '../../components/PageSkeleton';
 import { ThemeToggle } from '../../components/ThemeToggle';
@@ -26,6 +28,7 @@ function Bare({ children }: { children: ReactNode }) {
 export function RequireAuth() {
   const me = useMe();
   const location = useLocation();
+  const client = useQueryClient();
 
   if (me.isPending)
     return (
@@ -45,6 +48,8 @@ export function RequireAuth() {
     );
   }
   if (!me.data) {
+    // Signed out on purpose (account deleted): there is nothing to come back to.
+    if (client.getQueryData(signedOutNoticeKey)) return <Navigate to="/login" replace />;
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?next=${next}`} replace />;
   }

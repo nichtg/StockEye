@@ -17,6 +17,7 @@ export type ProviderStatus = Omit<S['ProviderStatus'], 'daily_limit' | 'resets_a
 export type ProviderLevel = ProviderStatus['level'];
 
 export type DataStatus = S['DataStatus'];
+export type FullStatuses = S['FullStatuses'];
 export type DataState = DataStatus['state'];
 export type StockOut = S['StockOut'];
 export type SymbolMatch = S['SymbolMatch'];
@@ -32,6 +33,8 @@ export type SignalOut = S['SignalOut'];
 export type RecentPattern = S['RecentPattern'];
 export type PatternStatsOut = S['PatternStatsOut'];
 export type MacroResponse = S['MacroResponse'];
+export type Ingestion = S['IngestionOut'];
+export type NewsProgress = S['NewsProgressOut'];
 export type MacroReportOut = S['MacroReportOut'];
 export type FindingOut = S['FindingOut'];
 export type TopEventOut = S['TopEventOut'];

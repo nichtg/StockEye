@@ -1,17 +1,30 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { api } from '../../api/client';
-import { chartKey, macroKey, searchKey, stockKey, technicalKey } from '../../api/keys';
+import {
+  chartKey,
+  chartRootKey,
+  macroKey,
+  newsKey,
+  searchKey,
+  stockKey,
+  technicalKey,
+} from '../../api/keys';
+import { useNotice } from '../../components/useNotice';
 import { ALL_INDICATORS } from '../chart/indicators';
 import type {
   ChartData,
   MacroResponse,
+  NewsProgress,
   RangeKey,
   StockOut,
   SymbolMatch,
   TechnicalReport,
 } from '../../api/types';
 
-export const MACRO_POLL_MS = 5000;
+export const NEWS_POLL_MS = 5000;
+/** Newest months arrive first, so by now there are news dots worth drawing; later months just wait for the finish. */
+export const CHART_REFRESH_MONTHS = 3;
 
 export function useStock(symbol: string) {
   return useQuery({
@@ -42,14 +55,59 @@ export function useTechnical(symbol: string) {
   });
 }
 
-/** Polls every 5 seconds for as long as the backend says news is still being collected. */
 export function useMacro(symbol: string) {
   return useQuery({
     queryKey: macroKey(symbol),
     queryFn: ({ signal }) =>
       api.get<MacroResponse>(`/stocks/${encodeURIComponent(symbol)}/macro`, { signal }),
-    refetchInterval: (query) => (query.state.data?.ingestion.in_progress ? MACRO_POLL_MS : false),
   });
+}
+
+/**
+ * The single news poller. Asking for it starts collection, so mount it once on the stock page, on
+ * every tab. It polls every 5 seconds while collection runs, refreshes the macro results as each
+ * batch of months lands, and refreshes the chart and tells the user when collection finishes.
+ */
+export function useNewsProgress(symbol: string) {
+  const client = useQueryClient();
+  const notice = useNotice();
+  const query = useQuery({
+    queryKey: newsKey(symbol),
+    queryFn: ({ signal }) =>
+      api.get<NewsProgress>(`/stocks/${encodeURIComponent(symbol)}/news`, { signal }),
+    refetchInterval: (q) => (q.state.data?.in_progress ? NEWS_POLL_MS : false),
+  });
+
+  const previous = useRef<{ symbol: string; monthsDone: number; inProgress: boolean } | undefined>(
+    undefined,
+  );
+  const data = query.data;
+  useEffect(() => {
+    if (!data) return;
+    const before = previous.current;
+    previous.current = {
+      symbol,
+      monthsDone: data.months_done,
+      inProgress: data.in_progress,
+    };
+    // The first answer for a stock is a baseline, never a change.
+    if (before?.symbol !== symbol) return;
+    const finished = before.inProgress && !data.in_progress;
+    if (finished || data.months_done > before.monthsDone) {
+      void client.invalidateQueries({ queryKey: macroKey(symbol) });
+    }
+    // The backend rebuilds markers on every month, so refresh the chart once early, not each time.
+    const firstDots =
+      before.monthsDone < CHART_REFRESH_MONTHS && data.months_done >= CHART_REFRESH_MONTHS;
+    if (finished || firstDots) {
+      void client.invalidateQueries({ queryKey: chartRootKey(symbol) });
+    }
+    if (finished) {
+      notice('News collection finished. Results updated.');
+    }
+  }, [data, symbol, client, notice]);
+
+  return query;
 }
 
 export function useSymbolSearch(q: string) {

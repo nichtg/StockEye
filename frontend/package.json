@@ -14,7 +14,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest",
     "format": "prettier --write .",
-    "gen:api": "openapi-typescript ../backend/openapi.json -o src/api/schema.d.ts"
+    "gen:api": "openapi-typescript ../backend/openapi.json -o src/api/schema.d.ts && prettier --write src/api/schema.d.ts"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

@@ -165,3 +165,31 @@ export function formatAsOf(iso: string, exchange: Exchange | null | undefined): 
   }).format(date);
   return `${day}, ${time} ${zoneLabel(exchange, date)}`;
 }
+
+const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ['year', 365 * 24 * 3600],
+  ['month', 30 * 24 * 3600],
+  ['week', 7 * 24 * 3600],
+  ['day', 24 * 3600],
+  ['hour', 3600],
+  ['minute', 60],
+];
+
+/** "3 hours ago", "yesterday". Anything under a minute reads "just now". */
+export function formatRelative(iso: string, now: number = Date.now()): string {
+  const seconds = Math.round((new Date(iso).getTime() - now) / 1000);
+  const abs = Math.abs(seconds);
+  for (const [unit, size] of UNITS) {
+    if (abs >= size) return rtf.format(Math.round(seconds / size), unit);
+  }
+  return 'just now';
+}
+
+/** Market-adjusted 2-day move from a fraction (0.021 means 2.1% better than expected). */
+export function moveText(fraction: number): string {
+  const size = formatPct(Math.abs(fraction) * 100);
+  if (size === formatPct(0)) return 'In line with expectations';
+  return `${size} ${fraction > 0 ? 'better' : 'worse'} than expected`;
+}

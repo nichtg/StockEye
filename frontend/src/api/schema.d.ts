@@ -117,7 +117,8 @@ export interface paths {
     get: operations['me_api_me_get'];
     put?: never;
     post?: never;
-    delete?: never;
+    /** Delete Me */
+    delete: operations['delete_me_api_me_delete'];
     options?: never;
     head?: never;
     patch?: never;
@@ -171,6 +172,10 @@ export interface paths {
     /**
      * Add Symbol
      * @description Add a stock the vendor knows (looked up cache-first, so repeats cost nothing).
+     *
+     *     Adding always succeeds. As a side benefit the symbol is offered for news admission: if the
+     *     user's daily budget allows, the scheduled job will collect its news; if not, it simply will
+     *     not (and an analysis request can still admit it later).
      */
     put: operations['add_symbol_api_watchlist__symbol__put'];
     post?: never;
@@ -318,6 +323,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/stocks/{symbol}/news': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * News
+     * @description Starts news collection when needed (within the daily budget) and reports its progress.
+     */
+    get: operations['news_api_stocks__symbol__news_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -453,6 +478,11 @@ export interface components {
       /** Reason */
       reason?: string | null;
     };
+    /** DeleteAccountIn */
+    DeleteAccountIn: {
+      /** Password */
+      password: string;
+    };
     /** DifferenceOut */
     DifferenceOut: {
       /** Mean Diff */
@@ -470,6 +500,24 @@ export interface components {
       n_pos: number;
       /** N Neg */
       n_neg: number;
+    };
+    /** EventPointOut */
+    EventPointOut: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /** Car 0 1 */
+      car_0_1: number;
+      /** Sentiment */
+      sentiment: number;
+      /** Article Count */
+      article_count: number;
+      /** Near Earnings */
+      near_earnings: boolean;
+      /** Headline */
+      headline: string | null;
     };
     /** ExpectedRange */
     ExpectedRange: {
@@ -531,11 +579,15 @@ export interface components {
       months_total: number;
       /** In Progress */
       in_progress: boolean;
+      /** Updated At */
+      updated_at?: string | null;
     };
     /** MacroReportOut */
     MacroReportOut: {
       /** Top Events */
       top_events: components['schemas']['TopEventOut'][];
+      /** Events */
+      events: components['schemas']['EventPointOut'][];
       /** Headline Findings */
       headline_findings: components['schemas']['FindingOut'][];
       /** Primary Findings */
@@ -598,6 +650,21 @@ export interface components {
       pattern?: string | null;
       /** Car 0 1 */
       car_0_1?: number | null;
+    };
+    /**
+     * NewsProgressOut
+     * @description Answer of the cheap, pollable news endpoint: progress plus an honest status.
+     */
+    NewsProgressOut: {
+      /** Months Done */
+      months_done: number;
+      /** Months Total */
+      months_total: number;
+      /** In Progress */
+      in_progress: boolean;
+      /** Updated At */
+      updated_at?: string | null;
+      status: components['schemas']['DataStatus'];
     };
     /** OutlookOut */
     OutlookOut: {
@@ -772,6 +839,8 @@ export interface components {
     SessionOut: {
       user: components['schemas']['UserOut'];
     };
+    /** @enum {string} */
+    SettableStatus: 'active' | 'disabled';
     /** SignalOut */
     SignalOut: {
       /** Key */
@@ -789,7 +858,7 @@ export interface components {
       detail: string;
     };
     /** @enum {string} */
-    Status: 'active' | 'disabled';
+    Status: 'active' | 'disabled' | 'deleting';
     /** StockOut */
     StockOut: {
       /** Symbol */
@@ -884,7 +953,7 @@ export interface components {
     };
     /** UserPatch */
     UserPatch: {
-      status?: components['schemas']['Status'] | null;
+      status?: components['schemas']['SettableStatus'] | null;
       role?: components['schemas']['Role'] | null;
     };
     /** ValidationError */
@@ -1096,6 +1165,37 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['UserOut'];
+        };
+      };
+    };
+  };
+  delete_me_api_me_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DeleteAccountIn'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
         };
       };
     };
@@ -1469,6 +1569,38 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['MacroResponse'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  news_api_stocks__symbol__news_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI */
+        symbol: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NewsProgressOut'];
         };
       };
       /** @description Validation Error */

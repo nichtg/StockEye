@@ -1,4 +1,5 @@
 import { alpha, createTheme, type Theme } from '@mui/material/styles';
+import { segmentedStyles } from './segmented';
 import { FONT_FAMILY, MOTION_MS, radius, tokens, type ColorMode } from './tokens';
 
 const TRANSITION = `${MOTION_MS}ms ease`;
@@ -10,6 +11,7 @@ const TRANSITION = `${MOTION_MS}ms ease`;
 export function createAppTheme(mode: ColorMode): Theme {
   const t = tokens[mode];
   const shadow = mode === 'light' ? '0 4px 16px rgba(0,0,0,.12)' : 'none';
+  const segmented = segmentedStyles(t);
   const focusRing = { outline: `2px solid ${t.ink}`, outlineOffset: 2 } as const;
 
   return createTheme({
@@ -225,24 +227,13 @@ export function createAppTheme(mode: ColorMode): Theme {
       },
       MuiTabs: {
         styleOverrides: {
-          root: { minHeight: 40, backgroundColor: t.raised, borderRadius: radius.sm, padding: 4 },
+          root: { minHeight: 40, ...segmented.track },
           indicator: { display: 'none' },
         },
       },
       MuiTab: {
         styleOverrides: {
-          root: {
-            minHeight: 32,
-            borderRadius: 6,
-            padding: '4px 16px',
-            color: t.ink3,
-            '&.Mui-selected': {
-              color: t.ink,
-              backgroundColor: t.bg,
-              boxShadow: `inset 0 0 0 1px ${t.line}`,
-            },
-            '&:hover': { color: t.ink },
-          },
+          root: { ...segmented.item, '&.Mui-selected': segmented.selected },
         },
       },
       MuiTable: { defaultProps: { size: 'small' } },

@@ -39,6 +39,7 @@ export const TERM_IDS = [
   'market_adjusted_return',
   'benchmark',
   'news_event',
+  'preliminary',
   'p_value',
   'statistical_reliability',
   'earnings',
@@ -194,13 +195,17 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
     title: 'Market-adjusted move',
     body: 'How much better or worse the stock did than expected, given how the overall market moved that day and how this stock usually tracks the market.',
   },
+  preliminary: {
+    title: 'Preliminary',
+    body: 'News is still being collected, so these results will change.',
+  },
   benchmark: {
     title: 'Benchmark',
     body: 'The market index the stock is compared against, such as the S&P 500 for US stocks or the Straits Times Index for Singapore.',
   },
   news_event: {
     title: 'News event',
-    body: 'A day with a cluster of notable headlines about the stock. We check what the price did around these days to see whether news moved it.',
+    body: 'A day with a cluster of notable headlines. We check what the price did around it to see whether news moved it. On the chart, the dot’s tone shows the direction of the move and its size shows how big it was.',
   },
   p_value: {
     title: 'P-value',

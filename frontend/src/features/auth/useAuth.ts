@@ -47,3 +47,17 @@ export function useLogout() {
     },
   });
 }
+
+export const ACCOUNT_DELETED_NOTICE = 'Your account was deleted.';
+
+/** Deletes the signed-in account after re-checking the password; the route guard then leaves for /login. */
+export function useDeleteAccount() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (password: string) => api.delete('/me', { body: { password } }),
+    onSuccess: () => {
+      // Signing out sends RequireAuth to the login page, which shows the notice once.
+      clearSession(client, ACCOUNT_DELETED_NOTICE);
+    },
+  });
+}

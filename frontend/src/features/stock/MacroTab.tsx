@@ -1,14 +1,17 @@
+import CheckCircleOutline from '@mui/icons-material/CheckCircleOutline';
 import InfoOutlined from '@mui/icons-material/InfoOutlined';
 import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
 import LinearProgress from '@mui/material/LinearProgress';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
-import type { MacroResponse } from '../../api/types';
+import type { Ingestion, MacroResponse, NewsProgress } from '../../api/types';
 import { DetailsAccordion } from '../../components/DetailsAccordion';
 import { QueryRegion } from '../../components/QueryRegion';
 import { SectionTitle } from '../../components/SectionTitle';
 import { Term } from '../../components/Term';
 import type { Exchange } from '../../lib/exchange';
+import { formatRelative } from '../../lib/format';
 import { radius } from '../../theme/tokens';
 import { FindingList } from './FindingList';
 import { NOT_ENOUGH_NEWS, regimeSentence, type Scope } from './macroText';
@@ -29,18 +32,36 @@ function ScopeLabel({ scope }: { scope: Scope | null | undefined }) {
   );
 }
 
-function Results({ data, exchange }: { data: MacroResponse; exchange: Exchange }) {
+function Results({
+  data,
+  exchange,
+  collecting,
+}: {
+  data: MacroResponse;
+  exchange: Exchange;
+  collecting: boolean;
+}) {
   const report = data.report;
   if (!report) return null;
   const empty =
     report.events_total === 0 && report.top_events.length === 0 && report.timeline.length === 0;
-  if (empty && !data.ingestion.in_progress) return <Typography>{NOT_ENOUGH_NEWS}</Typography>;
+  if (empty && !collecting) return <Typography>{NOT_ENOUGH_NEWS}</Typography>;
   const showScopes = report.secondary_findings.length > 0;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <section aria-label="Findings">
-        <SectionTitle>What the news has done to the price</SectionTitle>
+        <Box sx={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 1.5 }}>
+          <SectionTitle>What the news has done to the price</SectionTitle>
+          {collecting && (
+            <Chip
+              variant="outlined"
+              size="small"
+              label={<Term id="preliminary">Preliminary</Term>}
+              sx={{ alignSelf: 'center', mb: 1.5 }}
+            />
+          )}
+        </Box>
         {report.primary_findings.length > 0 ? (
           <>
             <Typography variant="caption" component="p" sx={{ color: 'ink3', mb: 1.5 }}>
@@ -97,30 +118,57 @@ function Results({ data, exchange }: { data: MacroResponse; exchange: Exchange }
   );
 }
 
-function CollectionProgress({ done, total }: { done: number; total: number }) {
+function CollectionProgress({ progress }: { progress: Ingestion }) {
   return (
     <Box sx={{ mb: 4, maxWidth: 480 }} role="status">
       <Typography variant="body2" sx={{ mb: 1 }}>
-        Collecting news: {done} of {total} months
+        Collecting news: {progress.months_done} of {progress.months_total} months
       </Typography>
       <LinearProgress
         variant="determinate"
-        value={total ? (done / total) * 100 : 0}
+        value={progress.months_total ? (progress.months_done / progress.months_total) * 100 : 0}
         aria-label="News collection progress"
       />
     </Box>
   );
 }
 
-function Content({ data, exchange }: { data: MacroResponse; exchange: Exchange }) {
-  const { ingestion } = data;
-  const news = data.data_status.news;
+/** Replaces the progress bar once every month is in: a quiet, permanent "all done". */
+function CollectionComplete({ progress }: { progress: Ingestion }) {
+  const updated = progress.updated_at ? ` · updated ${formatRelative(progress.updated_at)}` : '';
+  return (
+    <Typography
+      variant="body2"
+      sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: 'ink3', mb: 3 }}
+    >
+      <CheckCircleOutline sx={{ fontSize: 16 }} aria-hidden="true" />
+      <span>
+        News complete: {progress.months_total} months{updated}
+      </span>
+    </Typography>
+  );
+}
+
+function Content({
+  data,
+  exchange,
+  news,
+}: {
+  data: MacroResponse;
+  exchange: Exchange;
+  news: NewsProgress | undefined;
+}) {
+  // The page's poller is the live source; the macro answer's own copy covers the first moment.
+  const progress = news ?? data.ingestion;
+  const collecting = progress.in_progress;
+  const complete =
+    !collecting && progress.months_total > 0 && progress.months_done >= progress.months_total;
+  const newsStatus = news?.status ?? data.data_status.news;
   return (
     <Box>
-      {ingestion.in_progress && (
-        <CollectionProgress done={ingestion.months_done} total={ingestion.months_total} />
-      )}
-      {news.state === 'unavailable' && (
+      {collecting && <CollectionProgress progress={progress} />}
+      {complete && <CollectionComplete progress={progress} />}
+      {newsStatus.state === 'unavailable' && (
         <Typography
           role="status"
           sx={{
@@ -133,13 +181,13 @@ function Content({ data, exchange }: { data: MacroResponse; exchange: Exchange }
           }}
         >
           <InfoOutlined sx={{ fontSize: 18, mt: '3px', flexShrink: 0 }} aria-hidden="true" />
-          <span>{news.reason ?? 'News sentiment is unavailable right now.'}</span>
+          <span>{newsStatus.reason ?? 'News sentiment is unavailable right now.'}</span>
         </Typography>
       )}
       {data.report ? (
-        <Results data={data} exchange={exchange} />
+        <Results data={data} exchange={exchange} collecting={collecting} />
       ) : (
-        !ingestion.in_progress && <Typography>{NOT_ENOUGH_NEWS}</Typography>
+        !collecting && <Typography>{NOT_ENOUGH_NEWS}</Typography>
       )}
     </Box>
   );
@@ -152,11 +200,18 @@ const skeleton = (
   </Box>
 );
 
-export function MacroTab({ symbol, exchange }: { symbol: string; exchange: Exchange }) {
+interface Props {
+  symbol: string;
+  exchange: Exchange;
+  /** Live collection progress from the stock page's poller. */
+  news?: NewsProgress;
+}
+
+export function MacroTab({ symbol, exchange, news }: Props) {
   const query = useMacro(symbol);
   return (
     <QueryRegion query={query} skeleton={skeleton} errorTitle="We couldn’t load the news analysis">
-      {(data) => <Content data={data} exchange={exchange} />}
+      {(data) => <Content data={data} exchange={exchange} news={news} />}
     </QueryRegion>
   );
 }

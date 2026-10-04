@@ -268,3 +268,25 @@ All done:
    - [#3](https://github.com/nichtg/StockEye/pull/3): `feat/frontend` → `feat/backend-analysis`
 4. CI is green on all three PRs.
 5. Final report delivered.
+
+## Phase 2 (2026-10-04): news experience, event-study fix, account deletion
+
+The user reviewed the merged app and chose, from a report of causes, flaws and options: 1B, 2B, 3A+3B, 4A, 5A+5B+5F and 6A.
+5C was dropped because 5A already covers it, and 7 was dropped.
+
+| Item | What changed |
+|---|---|
+| 4A (bug) | The event study masked every news event's window out of every estimation window, so on heavily covered stocks almost all events after the first months were discarded (16 of 87 evaluated in the regression fixture, 87 of 87 now). The market model now uses [t-250, t-20] and masks only earnings. AAPL: 45 events instead of about 10. |
+| 5A / 5B / 5F | `GET /stocks/{symbol}/news` starts collection when a stock page opens (validated and admission-checked), backfills newest month first, and reports an honest status. |
+| 1B | Preliminary chip while collecting; "News complete: 24 months, updated ..." line and a notice when done. |
+| 2B | Biggest news days: Newest / Biggest move switch. |
+| 3A / 3B | Every evaluated news event is a chart marker sized by its move, refreshed once the newest months arrive; marker chips show counts and explain when empty. |
+| 6A | `DELETE /me` with password re-check, CSRF, per-IP and per-account limits, lockout, and a safe last-admin guard; a "Delete account" dialog in the account menu. |
+
+Reviews:
+- Opus methodology audit of 4A: APPROVED.
+- Backend thermo-nuclear review: approved in round 2.
+- Security review: 2 Medium and 3 Low, then 3 more Low on re-check; all fixed.
+- Frontend review: approved in round 3.
+
+Tests: backend 767, frontend 134.

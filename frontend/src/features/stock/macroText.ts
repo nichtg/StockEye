@@ -1,5 +1,4 @@
 import type { MacroReportOut, Reliability } from '../../api/types';
-import { formatPct } from '../../lib/format';
 
 export const NOT_ENOUGH_NEWS = 'Not enough news yet to analyse this stock.';
 
@@ -28,13 +27,6 @@ export function regimeSentence(label: NonNullable<MacroReportOut['regime']>['lab
     case 'typical':
       return 'News over the last 30 days is about as positive as usual.';
   }
-}
-
-/** Market-adjusted 2-day move from a fraction (0.021 means 2.1% better than expected). */
-export function moveText(fraction: number): string {
-  const size = formatPct(Math.abs(fraction) * 100);
-  if (size === formatPct(0)) return 'In line with expected';
-  return `${size} ${fraction > 0 ? 'better' : 'worse'} than expected`;
 }
 
 export function pValueText(p: number | null): string {
