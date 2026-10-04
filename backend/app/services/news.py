@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.clock import utc_now
 from app.db import Database
-from app.domain.macro import ScoredArticle
+from app.domain.macro import ScoredArticle, exclude_price_recaps
 from app.logging_setup import get_logger
 from app.providers.base import NewsProvider
 from app.providers.errors import ProviderError, QuotaExhaustedError
@@ -348,7 +348,9 @@ class NewsService:
     async def scored_articles(
         self, symbol: str, start: datetime, end: datetime
     ) -> tuple[list[ScoredArticle], DataStatus]:
-        articles = await self._repo.scored(symbol, start, end)
+        # Recaps report a move that already happened (reverse causality); drop them at read time
+        # so already-stored news is cleaned too.
+        articles = exclude_price_recaps(await self._repo.scored(symbol, start, end))
         state = await self._repo.get_state(symbol)
         status = self._status_of(symbol, state)
         if status.state == "ok" and not articles:

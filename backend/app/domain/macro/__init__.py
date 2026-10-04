@@ -7,6 +7,7 @@ from app.domain.macro.alignment import (
     effective_session,
 )
 from app.domain.macro.event_study import EventResult, run_event_study, select_events
+from app.domain.macro.recaps import exclude_price_recaps, is_price_recap
 from app.domain.macro.sentiment_stats import (
     BucketStats,
     Correlation,
@@ -49,6 +50,8 @@ __all__ = [
     "compute_stats",
     "daily_sentiment",
     "effective_session",
+    "exclude_price_recaps",
+    "is_price_recap",
     "reliability_label",
     "run_event_study",
     "select_events",

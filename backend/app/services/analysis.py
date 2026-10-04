@@ -51,7 +51,7 @@ NEW_SYMBOL_LIMIT_REASON = "Daily limit for analysing new stocks reached; try aga
 CACHE_SCHEMA = 2
 # Macro reports have their own version: 3 = estimation window [t-250, t-20] with only earnings
 # masked, plus the ``events`` list. Reports cached under the old method must never be served.
-MACRO_CACHE_SCHEMA = 3
+MACRO_CACHE_SCHEMA = 4
 
 
 type _NewsInputs = tuple[IngestProgress, list[ScoredArticle], DataStatus]
