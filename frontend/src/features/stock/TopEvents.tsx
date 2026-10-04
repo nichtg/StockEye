@@ -5,6 +5,8 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import { useState } from 'react';
+import type { Theme } from '@mui/material/styles';
+import { radius } from '../../theme/tokens';
 import type { TopEventOut } from '../../api/types';
 import { Direction } from '../../components/Direction';
 import { SectionTitle } from '../../components/SectionTitle';
@@ -15,6 +17,30 @@ import { formatDate, moveText } from '../../lib/format';
 const TOP_SHOWN = 5;
 
 type Order = 'newest' | 'biggest';
+
+/** Same look as the Technical/Macro tabs: a grey track, with the chosen option raised in white. */
+const SEGMENTED_SX = {
+  bgcolor: 'raised',
+  borderRadius: radius.sm,
+  p: 0.5,
+  gap: 0.5,
+  '& .MuiToggleButton-root': {
+    border: 0,
+    borderRadius: '6px !important',
+    px: 2,
+    py: 0.5,
+    color: 'ink2',
+    fontWeight: 500,
+    textTransform: 'none',
+    '&:not(:first-of-type)': { ml: 0, borderLeft: 0 },
+    '&:hover': { color: 'ink', bgcolor: 'transparent' },
+    '&.Mui-selected, &.Mui-selected:hover': {
+      color: 'ink',
+      bgcolor: 'bg',
+      boxShadow: (theme: Theme) => `inset 0 0 0 1px ${theme.palette.line}`,
+    },
+  },
+} as const;
 
 /** The same events, re-ordered; which events appear is decided by the backend, by impact. */
 function ordered(events: TopEventOut[], order: Order): TopEventOut[] {
@@ -88,6 +114,7 @@ export function TopEvents({ events, exchange }: { events: TopEventOut[]; exchang
           size="small"
           value={order}
           aria-label="Order of the biggest news days"
+          sx={SEGMENTED_SX}
           onChange={(_e, value: Order | null) => {
             if (value) setOrder(value);
           }}
