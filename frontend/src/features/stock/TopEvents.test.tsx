@@ -59,4 +59,27 @@ describe('TopEvents', () => {
       'true',
     );
   });
+
+  it('tags only the days near an earnings release, and explains the tag', async () => {
+    const user = userEvent.setup();
+    renderApp(
+      <TopEvents
+        events={[
+          { ...event('2026-05-01', 0.02, 'Near results'), near_earnings: true },
+          event('2026-03-01', 0.05, 'Ordinary day'),
+        ]}
+        exchange="US"
+      />,
+    );
+    const tags = screen.getAllByText('Earnings');
+    expect(tags).toHaveLength(1);
+    expect(tags[0]?.closest('li')).toHaveTextContent('Near results');
+    expect(tags[0]?.closest('[tabindex]')).toHaveAttribute('tabindex', '0');
+    if (tags[0]) await user.hover(tags[0]);
+    expect(
+      await screen.findByText(
+        'Within a day of an earnings release, so the move may reflect the results rather than the news.',
+      ),
+    ).toBeInTheDocument();
+  });
 });

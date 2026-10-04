@@ -12,7 +12,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import { Link as RouterLink, useSearchParams } from 'react-router';
 import { isApiError, userMessage } from '../../api/errors';
-import { signedOutNoticeKey } from '../../api/keys';
+import { signedOutOnPurposeKey } from '../../api/keys';
 import { Wordmark } from '../../components/Wordmark';
 import { useDocumentTitle } from '../../hooks';
 import { useAuthMutation } from './useAuth';
@@ -59,10 +59,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
   const [params] = useSearchParams();
   const client = useQueryClient();
-  // Shown once: read on arrival, then dropped from the cache.
-  const [notice] = useState(() => client.getQueryData<string>(signedOutNoticeKey));
+  // The "signed out on purpose" mark has done its job once the login page shows.
   useEffect(() => {
-    client.removeQueries({ queryKey: signedOutNoticeKey });
+    client.removeQueries({ queryKey: signedOutOnPurposeKey });
   }, [client]);
   const next = params.get('next');
   const switchTo = next ? `${copy.switchTo}?next=${encodeURIComponent(next)}` : copy.switchTo;
@@ -147,11 +146,6 @@ export function AuthForm({ mode }: { mode: Mode }) {
           {copy.title}
         </Typography>
 
-        {notice && (
-          <Alert severity="info" icon={false} sx={{ mb: 3 }} role="status">
-            {notice}
-          </Alert>
-        )}
         {formError && (
           <Alert severity="error" sx={{ mb: 3 }} role="alert">
             {formError}

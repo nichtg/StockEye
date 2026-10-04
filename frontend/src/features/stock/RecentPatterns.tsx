@@ -6,7 +6,7 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
-import type { PatternStatsOut, RecentPattern } from '../../api/types';
+import type { LatestPattern, PatternStatsOut, RecentPattern } from '../../api/types';
 import { DetailsAccordion } from '../../components/DetailsAccordion';
 import { Term } from '../../components/Term';
 import type { Exchange } from '../../lib/exchange';
@@ -40,16 +40,45 @@ function StatsRow({ label, stats }: { label: string; stats: PatternStatsOut }) {
   );
 }
 
+const indefinite = (label: string) => (/^[aeiou]/i.test(label) ? 'an' : 'a');
+
+function LatestPatternSentence({
+  latest,
+  exchange,
+}: {
+  latest: LatestPattern;
+  exchange: Exchange;
+}) {
+  const ago = latest.sessions_ago;
+  return (
+    <>
+      {' '}
+      The most recent was {indefinite(latest.label)}{' '}
+      {isTermId(latest.pattern) ? <Term id={latest.pattern}>{latest.label}</Term> : latest.label} on{' '}
+      {formatDate(latest.date, exchange)} ({ago} trading {ago === 1 ? 'day' : 'days'} ago), too old
+      to count in this week’s outlook.
+    </>
+  );
+}
+
 /** Candlestick patterns from the last few sessions in plain words, with the numbers in Details. */
 export function RecentPatterns({
   patterns,
+  latest,
   exchange,
 }: {
   patterns: RecentPattern[];
+  /** The newest older pattern; only sent when `patterns` is empty. */
+  latest?: LatestPattern | null;
   exchange: Exchange;
 }) {
   if (patterns.length === 0) {
-    return <Typography>No candlestick patterns in the last 3 sessions.</Typography>;
+    return (
+      <Typography>
+        No patterns in the last 3 trading days.
+        {latest && <LatestPatternSentence latest={latest} exchange={exchange} />}
+      </Typography>
+    );
   }
   const counted = patterns.filter(hasStats);
   return (

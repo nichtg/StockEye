@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { api } from './api/client';
 import { isApiError } from './api/errors';
-import { meKey, signedOutNoticeKey } from './api/keys';
+import { meKey, signedOutOnPurposeKey } from './api/keys';
 
 /**
  * Retrying a 4xx (including 429) never helps and a 429 would only make it worse; a dropped
@@ -25,13 +25,13 @@ export function createQueryClient(): QueryClient {
 }
 
 /**
- * Forget everything cached for the signed-in user and mark them signed out. A `notice` is kept for
- * the login page to show once. The signed-out mark goes last, so observers never see it without
- * the notice.
+ * Forget everything cached for the signed-in user and mark them signed out. `onPurpose` (the user
+ * deleted their account) is remembered so the route guard does not offer to come back to this page.
+ * The signed-out mark goes last, so observers never see it without the flag.
  */
-export function clearSession(client: QueryClient, notice?: string): void {
+export function clearSession(client: QueryClient, { onPurpose = false } = {}): void {
   client.removeQueries({ predicate: (q) => q.queryKey[0] !== meKey[0] });
-  if (notice) client.setQueryData(signedOutNoticeKey, notice);
+  if (onPurpose) client.setQueryData(signedOutOnPurposeKey, true);
   client.setQueryData(meKey, null);
 }
 

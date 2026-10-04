@@ -6,9 +6,10 @@ import { Term } from '../../components/Term';
 import { RELIABILITY_LABEL, newsEventsPhrase, stripReliabilityLead } from './macroText';
 
 const CHIP_STYLE = {
-  likely_real: { bgcolor: 'ink', color: 'bg', borderColor: 'ink' },
-  weak_evidence: { bgcolor: 'transparent', color: 'ink2', borderColor: 'ink3' },
-  could_be_chance: { bgcolor: 'transparent', color: 'ink2', borderColor: 'ink3' },
+  // Strength shows as fill and weight on the monochrome scale, never as a good or bad colour.
+  clear_effect: { bgcolor: 'ink', color: 'bg', borderColor: 'ink', fontWeight: 600 },
+  possible_effect: { bgcolor: 'transparent', color: 'ink', borderColor: 'ink', fontWeight: 500 },
+  no_clear_effect: { bgcolor: 'transparent', color: 'ink2', borderColor: 'ink3', fontWeight: 400 },
 } as const;
 
 function ReliabilityChip({ value }: { value: Reliability }) {
@@ -20,10 +21,10 @@ function ReliabilityChip({ value }: { value: Reliability }) {
       <Chip
         size="small"
         label={RELIABILITY_LABEL[value]}
-        variant={value === 'likely_real' ? 'filled' : 'outlined'}
+        variant={value === 'clear_effect' ? 'filled' : 'outlined'}
         sx={{ height: 22, ...CHIP_STYLE[value] }}
       />
-      <Term id="statistical_reliability" />
+      <Term id="news_effect" />
     </Box>
   );
 }

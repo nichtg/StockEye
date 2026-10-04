@@ -187,9 +187,9 @@ export function formatRelative(iso: string, now: number = Date.now()): string {
   return 'just now';
 }
 
-/** Market-adjusted 2-day move from a fraction (0.021 means 2.1% better than expected). */
+/** Market-adjusted 2-day move from a fraction (0.021 means 2.1% above its usual market-linked move). */
 export function moveText(fraction: number): string {
   const size = formatPct(Math.abs(fraction) * 100);
-  if (size === formatPct(0)) return 'In line with expectations';
-  return `${size} ${fraction > 0 ? 'better' : 'worse'} than expected`;
+  if (size === formatPct(0)) return 'In line with its usual market-linked move';
+  return `${size} ${fraction > 0 ? 'above' : 'below'} its usual market-linked move`;
 }

@@ -52,6 +52,53 @@ describe('Technical tab', () => {
   });
 });
 
+describe('Technical tab: latest pattern', () => {
+  function renderWith(latestAgo: number | null, recent: boolean) {
+    stubFetch((req) =>
+      req.path === '/stocks/AAPL/technical'
+        ? {
+            body: {
+              ...technicalFixture,
+              recent_patterns: recent ? technicalFixture.recent_patterns : [],
+              latest_pattern:
+                latestAgo === null
+                  ? null
+                  : {
+                      date: '2026-09-23',
+                      pattern: 'bearish_engulfing',
+                      label: 'Bearish engulfing',
+                      bias: 'bearish',
+                      sessions_ago: latestAgo,
+                    },
+            },
+          }
+        : undefined,
+    );
+    renderApp(<TechnicalTab symbol="AAPL" exchange="US" />);
+  }
+
+  it('says when the most recent pattern was, with a plural count', async () => {
+    renderWith(6, false);
+    const line = await screen.findByText(/No patterns in the last 3 trading days\./);
+    expect(line).toHaveTextContent(
+      'The most recent was a Bearish engulfing on Sep 23, 2026 (6 trading days ago), too old to count in this week’s outlook.',
+    );
+    expect(screen.getByRole('button', { name: 'What is Bearish engulfing?' })).toBeInTheDocument();
+  });
+
+  it('uses the singular for one day', async () => {
+    renderWith(1, false);
+    expect(await screen.findByText(/\(1 trading day ago\)/)).toBeInTheDocument();
+  });
+
+  it('says nothing about an older pattern when there are recent ones', async () => {
+    renderWith(6, true);
+    await screen.findByText('Bullish', { selector: 'strong' });
+    expect(screen.queryByText(/The most recent was/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No patterns in the last/)).not.toBeInTheDocument();
+  });
+});
+
 describe('Macro tab', () => {
   it('shows the Preliminary chip and the progress bar while news is being collected', async () => {
     stubFetch((req) =>
@@ -91,6 +138,60 @@ describe('Macro tab', () => {
     expect(screen.queryByText(/Collecting news/)).not.toBeInTheDocument();
   });
 
+  it('labels each reliability value plainly, with no good-or-bad wording', async () => {
+    const base = macroFixture();
+    const report = base.report;
+    if (!report) throw new Error('fixture has no report');
+    const finding = (reliability: 'clear_effect' | 'possible_effect' | 'no_clear_effect') => ({
+      text: `Finding for ${reliability}.`,
+      based_on_events: 30,
+      reliability,
+      p_value: 0.2,
+    });
+    stubFetch((req) =>
+      req.path === '/stocks/AAPL/macro'
+        ? {
+            body: {
+              ...base,
+              report: {
+                ...report,
+                primary_findings: [
+                  finding('clear_effect'),
+                  finding('possible_effect'),
+                  finding('no_clear_effect'),
+                ],
+              },
+            },
+          }
+        : undefined,
+    );
+    renderApp(<MacroTab symbol="AAPL" exchange="US" />);
+    expect(await screen.findByText('Clear news effect')).toBeInTheDocument();
+    expect(screen.getByText('Possible news effect')).toBeInTheDocument();
+    expect(screen.getByText('No clear news effect')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'What is News effect?' })).toHaveLength(3);
+  });
+
+  it('shows the earnings note under the findings only when there is one', async () => {
+    const note = 'This effect comes mostly from news around earnings releases.';
+    const base = macroFixture();
+    const report = base.report;
+    if (!report) throw new Error('fixture has no report');
+    stubFetch((req) =>
+      req.path === '/stocks/AAPL/macro'
+        ? { body: { ...base, report: { ...report, earnings_note: note } } }
+        : undefined,
+    );
+    const first = renderApp(<MacroTab symbol="AAPL" exchange="US" />);
+    expect(await screen.findByText(note)).toBeInTheDocument();
+    first.unmount();
+
+    stubFetch((req) => (req.path === '/stocks/AAPL/macro' ? { body: macroFixture() } : undefined));
+    renderApp(<MacroTab symbol="AAPL" exchange="US" />);
+    await screen.findByText('Possible news effect');
+    expect(screen.queryByText(note)).not.toBeInTheDocument();
+  });
+
   it('shows findings with a reliability chip, and the p-value only inside Details', async () => {
     stubFetch((req) => (req.path === '/stocks/AAPL/macro' ? { body: macroFixture() } : undefined));
     const user = userEvent.setup();
@@ -99,9 +200,9 @@ describe('Macro tab', () => {
     expect(
       await screen.findByText('News over the last 30 days is more positive than usual.'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Weak evidence')).toBeInTheDocument();
+    expect(screen.getByText('Possible news effect')).toBeInTheDocument();
     expect(screen.getByText(/A pattern this strong would appear by chance/)).toBeInTheDocument();
-    expect(screen.getByText('3.3% better than expected')).toBeInTheDocument();
+    expect(screen.getByText('3.3% above its usual market-linked move')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Apple to Bring TV+ to Android' })).toHaveAttribute(
       'target',
       '_blank',

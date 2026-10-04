@@ -42,7 +42,8 @@ export function Term({ id, children }: TermProps) {
     <Box
       ref={wrapperRef}
       component="span"
-      sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, verticalAlign: 'baseline' }}
+      // Baseline, so the text stays on the surrounding line; only the taller "?" is centred.
+      sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 0.25, verticalAlign: 'baseline' }}
     >
       {children}
       <Tooltip
@@ -81,6 +82,7 @@ export function Term({ id, children }: TermProps) {
             setOpen((wasOpen) => (touching.current ? !wasOpen : true));
           }}
           sx={{
+            alignSelf: 'center',
             width: 24,
             height: 24,
             ml: 0.25,

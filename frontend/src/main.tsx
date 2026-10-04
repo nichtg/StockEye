@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 import { api } from './api/client';
 import { App } from './App';
+import { NoticeProvider } from './components/NoticeProvider';
 import { installSessionExpiry, queryClient } from './queryClient';
 import { ColorModeProvider } from './theme/ColorModeProvider';
 
@@ -22,7 +23,9 @@ createRoot(root).render(
     <ColorModeProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <App />
+          <NoticeProvider>
+            <App />
+          </NoticeProvider>
         </BrowserRouter>
       </QueryClientProvider>
     </ColorModeProvider>

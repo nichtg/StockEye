@@ -1,8 +1,10 @@
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import Link from '@mui/material/Link';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import type { Theme } from '@mui/material/styles';
 import { useState } from 'react';
@@ -15,6 +17,8 @@ import { formatDate, moveText } from '../../lib/format';
 import { segmentedStyles } from '../../theme/segmented';
 
 const TOP_SHOWN = 5;
+const EARNINGS_TAG_HELP =
+  'Within a day of an earnings release, so the move may reflect the results rather than the news.';
 
 type Order = 'newest' | 'biggest';
 
@@ -57,9 +61,22 @@ function EventRow({ event: e, exchange }: { event: TopEventOut; exchange: Exchan
         borderColor: 'line',
       }}
     >
-      <Typography variant="body2" sx={{ color: 'ink3' }}>
-        {formatDate(e.date, exchange)}
-      </Typography>
+      <Box>
+        <Typography variant="body2" sx={{ color: 'ink3' }}>
+          {formatDate(e.date, exchange)}
+        </Typography>
+        {e.near_earnings && (
+          <Tooltip title={EARNINGS_TAG_HELP} describeChild>
+            <Chip
+              label="Earnings"
+              size="small"
+              variant="outlined"
+              tabIndex={0}
+              sx={{ mt: 0.5, height: 20, color: 'ink2', borderColor: 'ink3' }}
+            />
+          </Tooltip>
+        )}
+      </Box>
       <Box sx={{ minWidth: 0 }}>
         {e.headlines.length === 0 && (
           <Typography variant="body2" sx={{ color: 'ink3' }}>

@@ -1,4 +1,4 @@
-import { formatPct, formatPoints, formatPrice, formatSigned } from './format';
+import { moveText, formatPct, formatPoints, formatPrice, formatSigned } from './format';
 
 describe('formatPrice', () => {
   it('shows USD as $ and SGD as S$', () => {
@@ -48,5 +48,14 @@ describe('dateFormat and hour12For', () => {
     const { hour12For } = await import('./exchange');
     expect(hour12For('US')).toBe(true);
     expect(hour12For('SGX')).toBe(false);
+  });
+});
+
+describe('moveText', () => {
+  it('says above, below or in line with the stock’s usual market-linked move', () => {
+    expect(moveText(0.021)).toBe('2.1% above its usual market-linked move');
+    expect(moveText(-0.014)).toBe('1.4% below its usual market-linked move');
+    expect(moveText(0)).toBe('In line with its usual market-linked move');
+    expect(moveText(0.00001)).toBe('In line with its usual market-linked move');
   });
 });

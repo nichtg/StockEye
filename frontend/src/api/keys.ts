@@ -1,6 +1,6 @@
 export const meKey = ['me'] as const;
 /** A sentence for the login page after the session ended on purpose; cleared by the next sign-out. */
-export const signedOutNoticeKey = ['notice', 'signed-out'] as const;
+export const signedOutOnPurposeKey = ['session', 'signed-out-on-purpose'] as const;
 export const adminUsersKey = ['admin', 'users'] as const;
 export const adminUsersPageKey = (query: string, page: number) =>
   [...adminUsersKey, { query, page }] as const;

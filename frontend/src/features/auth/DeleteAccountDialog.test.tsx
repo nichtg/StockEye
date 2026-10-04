@@ -1,8 +1,8 @@
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Route, Routes } from 'react-router';
+import { Route, Routes, useLocation } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
-import { signedOutNoticeKey } from '../../api/keys';
+import { signedOutOnPurposeKey } from '../../api/keys';
 import type { User } from '../../api/types';
 import { AccountMenu } from '../../components/AccountMenu';
 import { stubFetch, type MockHandler } from '../../test/mockApi';
@@ -107,8 +107,18 @@ describe('delete account', () => {
   });
 });
 
+function LocationProbe() {
+  const { pathname, search } = useLocation();
+  return <p data-testid="location">{pathname + search}</p>;
+}
+
 describe('delete account through the real route guards', () => {
-  it('lands on /login with the notice, without a ?next= redirect, and shows it once', async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('lands on /login with a toast that hides itself, and without a ?next= redirect', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     let deleted = false;
     stubFetch((req) => {
       if (req.method === 'DELETE' && req.path === '/me') {
@@ -119,10 +129,16 @@ describe('delete account through the real route guards', () => {
       if (req.path === '/watchlist') return { body: { items: [] } };
       return undefined;
     });
-    const user = userEvent.setup();
-    const { client } = renderApp(<App />);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    const { client } = renderApp(
+      <>
+        <App />
+        <LocationProbe />
+      </>,
+    );
+
     // The test client drops unobserved data at once; the app keeps it for minutes.
-    client.setQueryDefaults(signedOutNoticeKey, { gcTime: 60_000 });
+    client.setQueryDefaults(signedOutOnPurposeKey, { gcTime: 60_000 });
 
     await user.click(await screen.findByRole('button', { name: 'Account menu' }));
     await user.click(await screen.findByRole('menuitem', { name: /Delete account/ }));
@@ -130,14 +146,14 @@ describe('delete account through the real route guards', () => {
     await user.click(screen.getByRole('button', { name: 'Delete account' }));
 
     expect(await screen.findByRole('heading', { name: 'Log in' })).toBeInTheDocument();
-    expect(screen.getByText('Your account was deleted.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Create an account' })).toHaveAttribute(
-      'href',
-      '/register',
-    );
-    // Shown once: the login page took the notice out of the cache.
+    expect(await screen.findByText('Your account was deleted.')).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/login$/);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7000);
+    });
     await waitFor(() => {
-      expect(client.getQueryData(signedOutNoticeKey)).toBeUndefined();
+      expect(screen.queryByText('Your account was deleted.')).not.toBeInTheDocument();
     });
   });
 });
