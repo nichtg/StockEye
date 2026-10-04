@@ -109,6 +109,9 @@ NEWS = [
     # A4: "up for grabs" is an idiom.
     "Why Apple Stock Is Up For Grabs",
     "Walmart aims higher with drone delivery",
+    "Gold prices climb higher as Apple slips",
+    "Bond yields move higher; Apple steady",
+    "Expectations rise higher ahead of Apple event",
     "Apple sets a higher bar for privacy",
     "Costco pays lower prices to suppliers under new contract",
     # Rule 7 is anchored to the Zacks phrasing; "market" in an industry sense is news.

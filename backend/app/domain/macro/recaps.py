@@ -136,6 +136,10 @@ _VERB_DIRECTION = re.compile(
 # Like _CLAUSE_BREAK but a ticker colon ("NASDAQ:SNDK") does not end the clause.
 _TEXT_BREAK = re.compile(r"[,;|\u2013\u2014]|:\s")
 # A modal earlier in the clause makes it a forecast ("Can Reclaim Its Highs And Move Higher").
+# Market and macro subjects ("Gold prices climb higher") are not the stock; rule 8 only.
+_MACRO_SUBJECT = re.compile(
+    r"\b(?:yields?|prices|expectations|estimates|oil|gold|bonds?|treasur\w*)\b", _FLAGS
+)
 _MODAL = re.compile(r"\b(?:could|can|may|might|will|would|should)\b", _FLAGS)
 
 
@@ -144,7 +148,9 @@ def _is_verb_direction(title: str) -> bool:
     for m in _VERB_DIRECTION.finditer(title):
         starts = [b.end() for b in _TEXT_BREAK.finditer(title, 0, m.start())]
         prefix = title[max(starts, default=0) : m.start()]
-        if not (_MODAL.search(prefix) or _FUNDAMENTALS.search(prefix)):
+        if not (
+            _MODAL.search(prefix) or _FUNDAMENTALS.search(prefix) or _MACRO_SUBJECT.search(prefix)
+        ):
             return True
     return False
 
