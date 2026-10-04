@@ -1032,6 +1032,10 @@
             ],
             "title": "Mean Car Pre 5"
           },
+          "n_car_pre_5": {
+            "type": "integer",
+            "title": "N Car Pre 5"
+          },
           "t": {
             "anyOf": [
               {
@@ -1081,6 +1085,7 @@
           "mean_car_0_5",
           "median_car_0_5",
           "mean_car_pre_5",
+          "n_car_pre_5",
           "t",
           "p_value",
           "label"
