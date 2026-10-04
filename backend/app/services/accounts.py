@@ -37,6 +37,7 @@ _INVALID_LOGIN = "Incorrect email or password."
 _SESSION_EXPIRED = "Your session has expired."
 _SIGN_IN_REQUIRED = "Please sign in to continue."
 _LAST_ADMIN = "The last active admin cannot be removed or demoted."
+_ONLY_ADMIN = "You are the only admin. Make another user an admin before deleting your account."
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,12 +217,31 @@ class AccountService:
             await self._guard_admin_removal(actor_id, target)
         elif actor_id == target_id:
             raise AppError(409, "conflict", "You cannot delete your own account.")
-        await self._users.delete(target_id)
+        await self._purge(target, _LAST_ADMIN)
+
+    async def delete_self(self, principal: Principal, password: str) -> None:
+        """Delete the caller's own account after re-checking their password.
+
+        Raises ``AppError`` 403 (``invalid_password``) for a wrong password, which neither locks
+        the account nor reveals more; the router's per-IP limit is what stops guessing. The
+        only active admin gets 409. Removes the user, their refresh tokens and their watchlist.
+        """
+        target = await self._users.get_by_id(principal.id)
+        if target is None:  # deleted since the request was authenticated
+            raise AppError(401, "unauthenticated", _SIGN_IN_REQUIRED)
+        if not await passwords.verify_password(password, target.password_hash):
+            raise AppError(403, "invalid_password", "That password is not correct.")
+        await self._ensure_not_last_admin(target, _ONLY_ADMIN)
+        await self._purge(target, _ONLY_ADMIN)
+
+    async def _purge(self, target: UserRecord, last_admin_message: str) -> None:
+        """Remove a user with their refresh tokens and watchlist; undo if it left no admin."""
+        await self._users.delete(target.id)
         if _is_active_admin(target) and await self._users.count_active_admins() == 0:
             await self._users.restore(target)  # lost a race with another admin removal
-            raise AppError(409, "conflict", _LAST_ADMIN)
-        await self._tokens.delete_for_user(target_id)
-        await self._watchlists.delete_for_owner(target_id)
+            raise AppError(409, "conflict", last_admin_message)
+        await self._tokens.delete_for_user(target.id)
+        await self._watchlists.delete_for_owner(target.id)
 
     async def _require(self, user_id: ObjectId) -> UserRecord:
         user = await self._users.get_by_id(user_id)
@@ -234,8 +254,11 @@ class AccountService:
             raise AppError(
                 409, "conflict", "You cannot disable, demote or delete your own admin account."
             )
+        await self._ensure_not_last_admin(target, _LAST_ADMIN)
+
+    async def _ensure_not_last_admin(self, target: UserRecord, message: str) -> None:
         if _is_active_admin(target) and await self._users.count_active_admins() <= 1:
-            raise AppError(409, "conflict", _LAST_ADMIN)
+            raise AppError(409, "conflict", message)
 
 
 def _is_active_admin(user: UserRecord) -> bool:
