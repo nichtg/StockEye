@@ -1,4 +1,12 @@
-import { moveText, formatPct, formatPoints, formatPrice, formatSigned } from './format';
+import {
+  formatMonthRange,
+  formatMonthYear,
+  moveText,
+  formatPct,
+  formatPoints,
+  formatPrice,
+  formatSigned,
+} from './format';
 
 describe('formatPrice', () => {
   it('shows USD as $ and SGD as S$', () => {
@@ -57,5 +65,20 @@ describe('moveText', () => {
     expect(moveText(-0.014)).toBe('1.4% below its usual market‑linked move');
     expect(moveText(0)).toBe('In line with its usual market‑linked move');
     expect(moveText(0.00001)).toBe('In line with its usual market‑linked move');
+  });
+});
+
+describe('month and period formatting', () => {
+  it('reads the month from the date as written, with no time zone shift', () => {
+    expect(formatMonthYear('2024-10-01')).toBe('Oct 2024');
+    expect(formatMonthYear('2026-01-31')).toBe('Jan 2026');
+    expect(formatMonthYear('nonsense')).toBeNull();
+  });
+
+  it('gives a range, a single month, or nothing', () => {
+    expect(formatMonthRange('2024-10-03', '2026-10-01')).toBe('Oct 2024 to Oct 2026');
+    expect(formatMonthRange('2026-10-02', '2026-10-28')).toBe('Oct 2026');
+    expect(formatMonthRange(null, '2026-10-28')).toBeNull();
+    expect(formatMonthRange('2026-10-02', null)).toBeNull();
   });
 });

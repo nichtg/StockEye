@@ -206,3 +206,24 @@ export function moveText(fraction: number): string {
   const { figure, rest } = moveParts(fraction);
   return figure ? `${figure} ${rest}` : rest;
 }
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "Oct 2024" from an ISO date ("2024-10-01"), read as written so no time zone can shift the month. */
+export function formatMonthYear(iso: string): string | null {
+  const m = /^(\d{4})-(\d{2})-\d{2}/.exec(iso);
+  const month = m ? MONTHS[Number(m[2]) - 1] : undefined;
+  return m && month ? `${month} ${m[1]}` : null;
+}
+
+/** "Oct 2024 to Oct 2026", or just "Oct 2026" when both fall in one month; null when either end is missing. */
+export function formatMonthRange(
+  first: string | null | undefined,
+  last: string | null | undefined,
+): string | null {
+  if (!first || !last) return null;
+  const a = formatMonthYear(first);
+  const b = formatMonthYear(last);
+  if (!a || !b) return null;
+  return a === b ? a : `${a} to ${b}`;
+}

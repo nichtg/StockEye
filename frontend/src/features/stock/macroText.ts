@@ -34,8 +34,10 @@ export function pValueText(p: number | null): string {
   return p < 0.001 ? 'under 0.001' : p.toFixed(3);
 }
 
-export function newsEventsPhrase(count: number): string {
-  return `Based on ${String(count)} news ${count === 1 ? 'event' : 'events'}`;
-}
-
 export type Scope = NonNullable<MacroReportOut['primary_scope']>;
+
+/** Plain-text name of a scope, for captions and accessible names. */
+export const SCOPE_NAME: Record<Scope, string> = {
+  excluding_earnings: 'Excluding days near earnings releases',
+  all_events: 'All news days',
+};

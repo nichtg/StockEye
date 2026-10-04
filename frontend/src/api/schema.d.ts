@@ -391,6 +391,8 @@ export interface components {
       median_car_0_5: number | null;
       /** Mean Car Pre 5 */
       mean_car_pre_5: number | null;
+      /** N Car Pre 5 */
+      n_car_pre_5: number;
       /** T */
       t: number | null;
       /** P Value */
@@ -650,6 +652,10 @@ export interface components {
       min_n: number;
       /** N Used */
       n_used: number;
+      /** First Event */
+      first_event: string | null;
+      /** Last Event */
+      last_event: string | null;
       correlation: components['schemas']['CorrelationOut'] | null;
       /** Buckets */
       buckets: {

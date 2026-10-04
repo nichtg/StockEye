@@ -37,8 +37,10 @@ export const TERM_IDS = [
   'finbert',
   'sentiment_regime',
   'market_adjusted_return',
+  'news_day_tones',
   'benchmark',
   'news_event',
+  'news_days_studied',
   'preliminary',
   'p_value',
   'statistical_reliability',
@@ -197,6 +199,10 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
     title: 'Market-adjusted move',
     body: 'The stock’s actual move minus the move its usual link to the market would predict, added up over the news day and the next trading day. The usual link is measured over about a year of trading before the news.',
   },
+  news_day_tones: {
+    title: 'Positive, neutral and negative news days',
+    body: 'A day’s headlines are scored from −1 to +1 and averaged. Above +0.3 is a positive news day, below −0.3 is a negative one, and anything in between is neutral.',
+  },
   preliminary: {
     title: 'Preliminary',
     body: 'News is still being collected, so these results will change.',
@@ -206,8 +212,12 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
     body: 'The market index the stock is compared against, such as the S&P 500 for US stocks or the Straits Times Index for Singapore.',
   },
   news_event: {
-    title: 'News event',
+    title: 'News day',
     body: 'A day with a cluster of notable headlines. We check what the price did around it to see whether news moved it. On the chart, the dot’s tone shows the direction of the move and its size shows how big it was.',
+  },
+  news_days_studied: {
+    title: 'News days studied',
+    body: 'At most one news day in any six trading days is studied (the most notable), so moves don’t overlap. Days too early in the price history we hold to compare with, too recent to measure yet, or near earnings where noted, are left out.',
   },
   p_value: {
     title: 'P-value',
@@ -215,7 +225,7 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   },
   statistical_reliability: {
     title: 'Statistical reliability',
-    body: 'How much to trust a finding, based on how many events it rests on and how clear the result is. Few events or a noisy result means low reliability.',
+    body: 'How much to trust a finding, based on how many news days it rests on and how clear the result is. Few news days or a noisy result means low reliability.',
   },
   news_effect: {
     title: 'News effect',
