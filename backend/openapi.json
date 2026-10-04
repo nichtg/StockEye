@@ -239,6 +239,38 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Delete Me",
+        "operationId": "delete_me_api_me_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/watchlist": {
@@ -810,6 +842,52 @@
           }
         }
       }
+    },
+    "/api/stocks/{symbol}/news": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "News",
+        "description": "Starts news collection when needed (within the daily budget) and reports its progress.",
+        "operationId": "news_api_stocks__symbol__news_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9^][A-Z0-9.\\-^]{0,14}$",
+              "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI",
+              "title": "Symbol"
+            },
+            "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsProgressOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1228,6 +1306,20 @@
         ],
         "title": "DataStatus"
       },
+      "DeleteAccountIn": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "DeleteAccountIn"
+      },
       "DifferenceOut": {
         "properties": {
           "mean_diff": {
@@ -1270,6 +1362,52 @@
           "n_neg"
         ],
         "title": "DifferenceOut"
+      },
+      "EventPointOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "car_0_1": {
+            "type": "number",
+            "title": "Car 0 1"
+          },
+          "sentiment": {
+            "type": "number",
+            "title": "Sentiment"
+          },
+          "article_count": {
+            "type": "integer",
+            "title": "Article Count"
+          },
+          "near_earnings": {
+            "type": "boolean",
+            "title": "Near Earnings"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "car_0_1",
+          "sentiment",
+          "article_count",
+          "near_earnings",
+          "headline"
+        ],
+        "title": "EventPointOut"
       },
       "ExpectedRange": {
         "properties": {
@@ -1432,6 +1570,18 @@
           "in_progress": {
             "type": "boolean",
             "title": "In Progress"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           }
         },
         "type": "object",
@@ -1450,6 +1600,13 @@
             },
             "type": "array",
             "title": "Top Events"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EventPointOut"
+            },
+            "type": "array",
+            "title": "Events"
           },
           "headline_findings": {
             "items": {
@@ -1530,6 +1687,7 @@
         "type": "object",
         "required": [
           "top_events",
+          "events",
           "headline_findings",
           "primary_findings",
           "secondary_findings",
@@ -1724,6 +1882,46 @@
           "label"
         ],
         "title": "Marker"
+      },
+      "NewsProgressOut": {
+        "properties": {
+          "months_done": {
+            "type": "integer",
+            "title": "Months Done"
+          },
+          "months_total": {
+            "type": "integer",
+            "title": "Months Total"
+          },
+          "in_progress": {
+            "type": "boolean",
+            "title": "In Progress"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "months_done",
+          "months_total",
+          "in_progress",
+          "status"
+        ],
+        "title": "NewsProgressOut",
+        "description": "Answer of the cheap, pollable news endpoint: progress plus an honest status."
       },
       "OutlookOut": {
         "properties": {
