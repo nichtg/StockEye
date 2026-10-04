@@ -375,8 +375,8 @@ One Sonnet task (F1), after the types are regenerated.
 - Push, open two PRs (backend → main, frontend → backend branch), get CI green, and merge only when the user asks.
 
 ### Phase 4 status
-- [ ] B1 period dates and averaged wording
-- [ ] Backend methodology audit and thermo review approved
+- [x] B1 period dates and averaged wording (counts say "news days studied"; sign-aware pre-move caveat)
+- [x] Backend methodology audit and thermo review approved (896 tests)
 - [ ] F1 icon alignment, period line and breakdown line
 - [ ] Frontend Opus review approved
 - [ ] Live verification and screenshots
