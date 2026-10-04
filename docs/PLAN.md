@@ -331,9 +331,9 @@ One Sonnet task, after the types are regenerated.
 - Push, open two PRs (backend → main, frontend → backend branch), get CI green, and merge only when the user asks.
 
 ### Phase 3 status
-- [ ] C1 recap filter, plus the Opus audit
-- [ ] C2 wording and data
-- [ ] Backend thermo review approved
-- [ ] F1 frontend, plus the Opus review approved
+- [x] C1 recap filter, plus the Opus audit (approved; AAPL 53/1991, RKLB 112/686, SNDK 247/792 flagged)
+- [x] C2 wording and data
+- [x] Backend thermo review approved (889 tests)
+- [x] F1 frontend, plus the Opus review approved
 - [ ] Live verification and screenshots
 - [ ] PRs open and CI green
