@@ -90,11 +90,17 @@ class Difference:
 
 @dataclass(frozen=True)
 class MacroStats:
-    """All statistics for one scope (all events, or excluding near-earnings events)."""
+    """All statistics for one scope (all events, or excluding near-earnings events).
+
+    ``first_event``/``last_event`` are the earliest and latest event dates among the ``n_used``
+    events the scope used; both are None exactly when ``n_used == 0``.
+    """
 
     exclude_near_earnings: bool
     min_n: int
     n_used: int
+    first_event: date | None
+    last_event: date | None
     correlation: Correlation | None
     buckets: dict[Bucket, BucketStats]
     difference: Difference | None
@@ -192,6 +198,8 @@ def compute_stats(
         exclude_near_earnings=exclude_near_earnings,
         min_n=min_n,
         n_used=len(used),
+        first_event=min((e.date for e in used), default=None),
+        last_event=max((e.date for e in used), default=None),
         correlation=_correlation(
             [e.sentiment for e in used], [e.car_0_1 for e in used if e.car_0_1 is not None], min_n
         ),

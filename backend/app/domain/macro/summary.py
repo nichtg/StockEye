@@ -2,7 +2,9 @@
 
 Finding text is written for non-statisticians: it never contains the bare letters used as
 statistical symbols for sample size or probability. The raw p-value travels in
-``Finding.p_value`` so the UI can show it in a "Details" row.
+``Finding.p_value`` so the UI can show it in a "Details" row. Every finding is an average
+over past news days, never a statement about today's price, so the sentences say "On
+average" or "Across the N news days" and carry the day count.
 """
 
 from __future__ import annotations
@@ -137,13 +139,24 @@ def _reaction_phrase(m: float) -> str:
     return f"did {_pct_abs(m)} {side} than its usual relationship with the market would predict"
 
 
+def _days(n: int) -> str:
+    """ "1 day" / "17 days"; tested buckets have at least ``min_n`` events but stay correct."""
+    return f"{n} day" if n == 1 else f"{n} days"
+
+
 def _gap_sentence(mean_diff: float) -> str:
     """Positive-versus-negative comparison; a gap that rounds to zero has no direction."""
     rounded = round(mean_diff * 100, 1)
     if rounded == 0:
-        return "Positive-news days did about the same as negative-news days."
+        return (
+            "On average, positive-news days did about the same as negative-news days "
+            "(that day and the next)."
+        )
     side = "better" if rounded > 0 else "worse"
-    return f"Positive-news days did {_pct_abs(mean_diff)} {side} than negative-news days."
+    return (
+        f"On average, positive-news days did {_pct_abs(mean_diff)} {side} than "
+        "negative-news days (that day and the next)."
+    )
 
 
 def _bucket_findings(label: str, bucket: BucketStats) -> list[Finding]:
@@ -153,8 +166,8 @@ def _bucket_findings(label: str, bucket: BucketStats) -> list[Finding]:
     out = [
         Finding(
             text=(
-                f"Around days with {label} news (that day and the next), the stock "
-                f"{_reaction_phrase(bucket.mean_car_0_1)}."
+                f"On average, on the {_days(bucket.n)} with {label} news, the stock "
+                f"{_reaction_phrase(bucket.mean_car_0_1)} (that day and the next)."
             ),
             based_on_events=bucket.n,
         ),
@@ -166,7 +179,7 @@ def _bucket_findings(label: str, bucket: BucketStats) -> list[Finding]:
         out.append(
             Finding(
                 text=(
-                    "Part of this move started before the news: in the 5 days before, "
+                    "Part of this move started before the news: on average, in the 5 days before, "
                     f"the stock had already moved {_pct_abs(pre)} ({side} than expected)."
                 ),
                 based_on_events=bucket.n,
@@ -220,11 +233,14 @@ def _scope_findings(stats: MacroStats) -> list[Finding]:
     corr = stats.correlation
     if corr is not None:
         if corr.label == "no_clear_effect" or abs(corr.rho) < MIN_LINK:
-            text = "No clear link between how positive the news was and how the stock moved."
+            claim = (
+                "there was no clear link between how positive the news was and how the stock moved."
+            )
         elif corr.rho > 0:
-            text = "More positive news tended to go with better-than-expected moves."
+            claim = "more positive news tended to go with better-than-expected moves."
         else:
-            text = "More positive news tended to go with worse-than-expected moves."
+            claim = "more positive news tended to go with worse-than-expected moves."
+        text = f"Across the {corr.n} news days, {claim}"
         out.append(Finding(text=text, based_on_events=corr.n))
         out.append(_reliability_finding(corr.p_value, "a pattern this strong", corr.n))
     return out

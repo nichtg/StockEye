@@ -53,7 +53,7 @@ CACHE_SCHEMA = 3
 # Macro reports have their own version. 5 = estimation window [t-250, t-20] with only earnings
 # masked, the ``events`` list, price-recap headlines excluded, renamed reliability labels and
 # ``earnings_note``. Reports cached under an older method must never be served.
-MACRO_CACHE_SCHEMA = 5
+MACRO_CACHE_SCHEMA = 6
 RECAP_ONLY_REASON = (
     "Only price-move recap headlines were found; they are left out of the news study."
 )

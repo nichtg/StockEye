@@ -163,6 +163,8 @@ class MacroStatsOut(BaseModel):
     exclude_near_earnings: bool
     min_n: int
     n_used: int
+    first_event: date | None  # earliest/latest date among the n_used events; None when n_used == 0
+    last_event: date | None
     correlation: CorrelationOut | None
     buckets: dict[Bucket, BucketStatsOut]
     difference: DifferenceOut | None
