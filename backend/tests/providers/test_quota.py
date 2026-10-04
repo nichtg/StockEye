@@ -27,7 +27,9 @@ def _events(logs: list[MutableMapping[str, Any]], event: str) -> list[MutableMap
 async def test_try_consume_concurrent_calls_never_exceed_the_limit(ledger: QuotaLedger) -> None:
     limits = ProviderLimits(per_minute=1000, per_day=20)
 
-    decisions = await asyncio.gather(*(ledger.try_consume("p", limits, NOW) for _ in range(50)))
+    decisions = await asyncio.gather(
+        *(ledger.try_consume("p", limits, NOW, "scheduled") for _ in range(50))
+    )
 
     assert sum(d.allowed for d in decisions) == 20
     assert (await ledger.snapshot("p", limits, NOW)).used_today == 20
@@ -38,8 +40,8 @@ async def test_try_consume_minute_limit_blocks_then_resets_next_minute(
 ) -> None:
     limits = ProviderLimits(per_minute=2, per_day=100)
 
-    first = [await ledger.try_consume("p", limits, NOW) for _ in range(3)]
-    later = await ledger.try_consume("p", limits, NOW + timedelta(minutes=1))
+    first = [await ledger.try_consume("p", limits, NOW, "scheduled") for _ in range(3)]
+    later = await ledger.try_consume("p", limits, NOW + timedelta(minutes=1), "scheduled")
 
     assert [d.allowed for d in first] == [True, True, False]
     assert first[2].window_blocked == "minute"
@@ -52,9 +54,9 @@ async def test_try_consume_day_block_rolls_back_the_minute_increment(
 ) -> None:
     limits = ProviderLimits(per_minute=10, per_day=2)
     for _ in range(2):
-        await ledger.try_consume("p", limits, NOW)
+        await ledger.try_consume("p", limits, NOW, "scheduled")
 
-    blocked = await ledger.try_consume("p", limits, NOW)
+    blocked = await ledger.try_consume("p", limits, NOW, "scheduled")
 
     minute_doc = await db["provider_quota"].find_one({"provider": "p", "window": "minute"})
     assert blocked.window_blocked == "day"
@@ -70,7 +72,7 @@ async def test_try_consume_logs_warning_exactly_once_at_eighty_percent(
 
     with capture_logs() as logs:
         for _ in range(10):
-            await ledger.try_consume("alphavantage", limits, NOW)
+            await ledger.try_consume("alphavantage", limits, NOW, "scheduled")
 
     warnings = _events(logs, "provider_quota_warning")
     assert len(warnings) == 1
@@ -88,7 +90,7 @@ async def test_try_consume_logs_error_exactly_once_when_day_limit_blocks(
 
     with capture_logs() as logs:
         for _ in range(6):
-            await ledger.try_consume("p", limits, NOW)
+            await ledger.try_consume("p", limits, NOW, "scheduled")
 
     errors = _events(logs, "provider_quota_exhausted")
     assert len(errors) == 1
@@ -102,9 +104,9 @@ async def test_try_consume_logs_one_throttle_warning_per_minute_window(
 
     with capture_logs() as logs:
         for _ in range(4):
-            await ledger.try_consume("p", limits, NOW)
-        await ledger.try_consume("p", limits, NOW + timedelta(minutes=1))
-        await ledger.try_consume("p", limits, NOW + timedelta(minutes=1))
+            await ledger.try_consume("p", limits, NOW, "scheduled")
+        await ledger.try_consume("p", limits, NOW + timedelta(minutes=1), "scheduled")
+        await ledger.try_consume("p", limits, NOW + timedelta(minutes=1), "scheduled")
 
     assert len(_events(logs, "provider_rate_throttled")) == 2
 
@@ -114,11 +116,11 @@ async def test_try_consume_logs_reset_when_new_day_follows_a_warned_day(
 ) -> None:
     limits = ProviderLimits(per_minute=100, per_day=5)
     for _ in range(4):
-        await ledger.try_consume("p", limits, NOW)
+        await ledger.try_consume("p", limits, NOW, "scheduled")
 
     with capture_logs() as logs:
-        await ledger.try_consume("p", limits, NOW + timedelta(days=1))
-        await ledger.try_consume("p", limits, NOW + timedelta(days=1))
+        await ledger.try_consume("p", limits, NOW + timedelta(days=1), "scheduled")
+        await ledger.try_consume("p", limits, NOW + timedelta(days=1), "scheduled")
 
     assert len(_events(logs, "provider_quota_reset")) == 1
 
@@ -127,17 +129,17 @@ async def test_try_consume_no_reset_log_when_previous_day_was_quiet(
     ledger: QuotaLedger,
 ) -> None:
     limits = ProviderLimits(per_minute=100, per_day=50)
-    await ledger.try_consume("p", limits, NOW)
+    await ledger.try_consume("p", limits, NOW, "scheduled")
 
     with capture_logs() as logs:
-        await ledger.try_consume("p", limits, NOW + timedelta(days=1))
+        await ledger.try_consume("p", limits, NOW + timedelta(days=1), "scheduled")
 
     assert _events(logs, "provider_quota_reset") == []
 
 
 async def test_snapshot_reports_usage_and_next_utc_midnight(ledger: QuotaLedger) -> None:
     limits = ProviderLimits(per_minute=100, per_day=50)
-    await ledger.try_consume("p", limits, NOW)
+    await ledger.try_consume("p", limits, NOW, "scheduled")
 
     snap = await ledger.snapshot("p", limits, NOW)
 
@@ -152,3 +154,43 @@ async def test_record_error_round_trips_latest_error(ledger: QuotaLedger) -> Non
     await ledger.record_error("p", "second", NOW + timedelta(seconds=5))
 
     assert await ledger.last_error("p") == ("second", NOW + timedelta(seconds=5))
+
+
+async def test_try_consume_interactive_stops_at_eighty_percent_scheduled_uses_the_rest(
+    ledger: QuotaLedger,
+) -> None:
+    limits = ProviderLimits(per_minute=1000, per_day=10)
+
+    interactive = [await ledger.try_consume("p", limits, NOW, "interactive") for _ in range(10)]
+    scheduled = [await ledger.try_consume("p", limits, NOW, "scheduled") for _ in range(3)]
+
+    assert sum(d.allowed for d in interactive) == 8
+    assert [d.allowed for d in scheduled] == [True, True, False]
+    assert (await ledger.snapshot("p", limits, NOW)).used_today == 10
+
+
+async def test_try_consume_interactive_block_logs_reserved_warning_once(
+    ledger: QuotaLedger,
+) -> None:
+    limits = ProviderLimits(per_minute=1000, per_day=10)
+
+    with capture_logs() as logs:
+        for _ in range(12):
+            await ledger.try_consume("p", limits, NOW, "interactive")
+
+    reserved = _events(logs, "provider_quota_reserved")
+    assert len(reserved) == 1
+    assert reserved[0]["log_level"] == "warning"
+    assert _events(logs, "provider_quota_exhausted") == []  # the day is not actually used up
+
+
+async def test_try_consume_interactive_calls_still_trigger_the_eighty_percent_warning(
+    ledger: QuotaLedger,
+) -> None:
+    limits = ProviderLimits(per_minute=1000, per_day=25)
+
+    with capture_logs() as logs:
+        for _ in range(25):
+            await ledger.try_consume("alphavantage", limits, NOW, "interactive")
+
+    assert len(_events(logs, "provider_quota_warning")) == 1

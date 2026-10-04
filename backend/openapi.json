@@ -1,0 +1,2611 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "StockEye API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/csrf": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Csrf",
+        "operationId": "csrf_api_auth_csrf_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CsrfOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Register",
+        "operationId": "register_api_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login",
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Refresh",
+        "operationId": "refresh_api_auth_refresh_post",
+        "parameters": [
+          {
+            "name": "se_refresh",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Se Refresh"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout",
+        "operationId": "logout_api_auth_logout_post",
+        "parameters": [
+          {
+            "name": "se_refresh",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Se Refresh"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Me",
+        "operationId": "me_api_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/watchlist": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Get Watchlist",
+        "operationId": "get_watchlist_api_watchlist_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/watchlist/overview": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Overview",
+        "description": "One summary row per watchlisted symbol; a failing symbol gets an \"unavailable\" row.",
+        "operationId": "overview_api_watchlist_overview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OverviewRow"
+                  },
+                  "type": "array",
+                  "title": "Response Overview Api Watchlist Overview Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/watchlist/{symbol}": {
+      "put": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Add Symbol",
+        "description": "Add a stock the vendor knows (looked up cache-first, so repeats cost nothing).\n\nAdding always succeeds. As a side benefit the symbol is offered for news admission: if the\nuser's daily budget allows, the scheduled job will collect its news; if not, it simply will\nnot (and an analysis request can still admit it later).",
+        "operationId": "add_symbol_api_watchlist__symbol__put",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "watchlist"
+        ],
+        "summary": "Remove Symbol",
+        "operationId": "remove_symbol_api_watchlist__symbol__delete",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Users",
+        "operationId": "list_users_api_admin_users_get",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Query"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{user_id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Patch User",
+        "operationId": "patch_user_api_admin_users__user_id__patch",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete User",
+        "operationId": "delete_user_api_admin_users__user_id__delete",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/providers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Provider Statuses",
+        "operationId": "provider_statuses_api_admin_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderStatus"
+                  },
+                  "type": "array",
+                  "title": "Response Provider Statuses Api Admin Providers Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stocks/search": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Search",
+        "operationId": "search_api_stocks_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 60,
+              "default": "",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SymbolMatch"
+                  },
+                  "title": "Response Search Api Stocks Search Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stocks/{symbol}": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Stock",
+        "operationId": "stock_api_stocks__symbol__get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9^][A-Z0-9.\\-^]{0,14}$",
+              "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI",
+              "title": "Symbol"
+            },
+            "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stocks/{symbol}/chart": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Chart",
+        "operationId": "chart_api_stocks__symbol__chart_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9^][A-Z0-9.\\-^]{0,14}$",
+              "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI",
+              "title": "Symbol"
+            },
+            "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI"
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1W",
+                "1M",
+                "6M",
+                "1Y",
+                "2Y"
+              ],
+              "type": "string",
+              "default": "6M",
+              "title": "Range"
+            }
+          },
+          {
+            "name": "indicators",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated: sma20,sma50,ema9,ema21,vwap,bollinger,rsi,macd",
+              "default": "",
+              "title": "Indicators"
+            },
+            "description": "Comma-separated: sma20,sma50,ema9,ema21,vwap,bollinger,rsi,macd"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartData"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stocks/{symbol}/technical": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Technical",
+        "operationId": "technical_api_stocks__symbol__technical_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9^][A-Z0-9.\\-^]{0,14}$",
+              "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI",
+              "title": "Symbol"
+            },
+            "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TechnicalReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stocks/{symbol}/macro": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Macro",
+        "operationId": "macro_api_stocks__symbol__macro_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9^][A-Z0-9.\\-^]{0,14}$",
+              "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI",
+              "title": "Symbol"
+            },
+            "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacroResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdminUserOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "role",
+          "status",
+          "created_at",
+          "last_login_at"
+        ],
+        "title": "AdminUserOut"
+      },
+      "AdminUserPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "AdminUserPage"
+      },
+      "BucketStatsOut": {
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative",
+              "neutral"
+            ],
+            "title": "Bucket"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "mean_car_0_1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Car 0 1"
+          },
+          "median_car_0_1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Car 0 1"
+          },
+          "n_car_0_5": {
+            "type": "integer",
+            "title": "N Car 0 5"
+          },
+          "mean_car_0_5": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Car 0 5"
+          },
+          "median_car_0_5": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Car 0 5"
+          },
+          "mean_car_pre_5": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Car Pre 5"
+          },
+          "t": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "T"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Value"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "likely_real",
+                  "weak_evidence",
+                  "could_be_chance"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bucket",
+          "n",
+          "mean_car_0_1",
+          "median_car_0_1",
+          "n_car_0_5",
+          "mean_car_0_5",
+          "median_car_0_5",
+          "mean_car_pre_5",
+          "t",
+          "p_value",
+          "label"
+        ],
+        "title": "BucketStatsOut"
+      },
+      "Candle": {
+        "properties": {
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Time"
+          },
+          "open": {
+            "type": "number",
+            "title": "Open"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "close": {
+            "type": "number",
+            "title": "Close"
+          },
+          "volume": {
+            "type": "number",
+            "title": "Volume"
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "title": "Candle"
+      },
+      "ChartData": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "range": {
+            "type": "string",
+            "enum": [
+              "1W",
+              "1M",
+              "6M",
+              "1Y",
+              "2Y"
+            ],
+            "title": "Range"
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "1d",
+              "1h"
+            ],
+            "title": "Interval"
+          },
+          "candles": {
+            "items": {
+              "$ref": "#/components/schemas/Candle"
+            },
+            "type": "array",
+            "title": "Candles"
+          },
+          "indicators": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/SeriesPoint"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Indicators"
+          },
+          "markers": {
+            "items": {
+              "$ref": "#/components/schemas/Marker"
+            },
+            "type": "array",
+            "title": "Markers"
+          },
+          "data_status": {
+            "$ref": "#/components/schemas/FullStatuses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "range",
+          "interval",
+          "candles",
+          "indicators",
+          "markers",
+          "data_status"
+        ],
+        "title": "ChartData"
+      },
+      "CorrelationOut": {
+        "properties": {
+          "rho": {
+            "type": "number",
+            "title": "Rho"
+          },
+          "p_value": {
+            "type": "number",
+            "title": "P Value"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "likely_real",
+              "weak_evidence",
+              "could_be_chance"
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rho",
+          "p_value",
+          "n",
+          "label"
+        ],
+        "title": "CorrelationOut"
+      },
+      "Credentials": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "Credentials"
+      },
+      "CsrfOut": {
+        "properties": {
+          "csrf_token": {
+            "type": "string",
+            "title": "Csrf Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "csrf_token"
+        ],
+        "title": "CsrfOut"
+      },
+      "DataStatus": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "stale",
+              "partial",
+              "unavailable"
+            ],
+            "title": "State"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "DataStatus"
+      },
+      "DifferenceOut": {
+        "properties": {
+          "mean_diff": {
+            "type": "number",
+            "title": "Mean Diff"
+          },
+          "t": {
+            "type": "number",
+            "title": "T"
+          },
+          "p_value": {
+            "type": "number",
+            "title": "P Value"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "likely_real",
+              "weak_evidence",
+              "could_be_chance"
+            ],
+            "title": "Label"
+          },
+          "n_pos": {
+            "type": "integer",
+            "title": "N Pos"
+          },
+          "n_neg": {
+            "type": "integer",
+            "title": "N Neg"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mean_diff",
+          "t",
+          "p_value",
+          "label",
+          "n_pos",
+          "n_neg"
+        ],
+        "title": "DifferenceOut"
+      },
+      "ExpectedRange": {
+        "properties": {
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          }
+        },
+        "type": "object",
+        "required": [
+          "low",
+          "high"
+        ],
+        "title": "ExpectedRange"
+      },
+      "FindingOut": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "based_on_events": {
+            "type": "integer",
+            "title": "Based On Events"
+          },
+          "reliability": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "likely_real",
+                  "weak_evidence",
+                  "could_be_chance"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reliability"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "based_on_events",
+          "reliability",
+          "p_value"
+        ],
+        "title": "FindingOut"
+      },
+      "FullStatuses": {
+        "properties": {
+          "prices": {
+            "$ref": "#/components/schemas/DataStatus"
+          },
+          "events": {
+            "$ref": "#/components/schemas/DataStatus"
+          },
+          "news": {
+            "$ref": "#/components/schemas/DataStatus"
+          },
+          "overall": {
+            "$ref": "#/components/schemas/DataStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prices",
+          "events",
+          "news",
+          "overall"
+        ],
+        "title": "FullStatuses"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HeadlineOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "url",
+          "source"
+        ],
+        "title": "HeadlineOut"
+      },
+      "HealthOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "title": "Status"
+          },
+          "database": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unavailable"
+            ],
+            "title": "Database"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "database"
+        ],
+        "title": "HealthOut"
+      },
+      "IngestionOut": {
+        "properties": {
+          "months_done": {
+            "type": "integer",
+            "title": "Months Done"
+          },
+          "months_total": {
+            "type": "integer",
+            "title": "Months Total"
+          },
+          "in_progress": {
+            "type": "boolean",
+            "title": "In Progress"
+          }
+        },
+        "type": "object",
+        "required": [
+          "months_done",
+          "months_total",
+          "in_progress"
+        ],
+        "title": "IngestionOut"
+      },
+      "MacroReportOut": {
+        "properties": {
+          "top_events": {
+            "items": {
+              "$ref": "#/components/schemas/TopEventOut"
+            },
+            "type": "array",
+            "title": "Top Events"
+          },
+          "headline_findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingOut"
+            },
+            "type": "array",
+            "title": "Headline Findings"
+          },
+          "primary_findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingOut"
+            },
+            "type": "array",
+            "title": "Primary Findings"
+          },
+          "secondary_findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingOut"
+            },
+            "type": "array",
+            "title": "Secondary Findings"
+          },
+          "primary_scope": {
+            "type": "string",
+            "enum": [
+              "all_events",
+              "excluding_earnings"
+            ],
+            "title": "Primary Scope"
+          },
+          "secondary_scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "all_events",
+                  "excluding_earnings"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondary Scope"
+          },
+          "stats_all": {
+            "$ref": "#/components/schemas/MacroStatsOut"
+          },
+          "stats_ex_earnings": {
+            "$ref": "#/components/schemas/MacroStatsOut"
+          },
+          "regime": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RegimeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/TimelinePointOut"
+            },
+            "type": "array",
+            "title": "Timeline"
+          },
+          "events_total": {
+            "type": "integer",
+            "title": "Events Total"
+          },
+          "events_insufficient": {
+            "type": "integer",
+            "title": "Events Insufficient"
+          }
+        },
+        "type": "object",
+        "required": [
+          "top_events",
+          "headline_findings",
+          "primary_findings",
+          "secondary_findings",
+          "primary_scope",
+          "secondary_scope",
+          "stats_all",
+          "stats_ex_earnings",
+          "regime",
+          "timeline",
+          "events_total",
+          "events_insufficient"
+        ],
+        "title": "MacroReportOut"
+      },
+      "MacroResponse": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MacroReportOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ingestion": {
+            "$ref": "#/components/schemas/IngestionOut"
+          },
+          "data_status": {
+            "$ref": "#/components/schemas/FullStatuses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "name",
+          "report",
+          "ingestion",
+          "data_status"
+        ],
+        "title": "MacroResponse"
+      },
+      "MacroStatsOut": {
+        "properties": {
+          "exclude_near_earnings": {
+            "type": "boolean",
+            "title": "Exclude Near Earnings"
+          },
+          "min_n": {
+            "type": "integer",
+            "title": "Min N"
+          },
+          "n_used": {
+            "type": "integer",
+            "title": "N Used"
+          },
+          "correlation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CorrelationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "buckets": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BucketStatsOut"
+            },
+            "propertyNames": {
+              "enum": [
+                "positive",
+                "negative",
+                "neutral"
+              ]
+            },
+            "type": "object",
+            "title": "Buckets"
+          },
+          "difference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DifferenceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "exclude_near_earnings",
+          "min_n",
+          "n_used",
+          "correlation",
+          "buckets",
+          "difference"
+        ],
+        "title": "MacroStatsOut"
+      },
+      "Marker": {
+        "properties": {
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Time"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "earnings",
+                  "dividend",
+                  "split"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "pattern",
+                  "news"
+                ]
+              }
+            ],
+            "title": "Kind"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "bias": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bullish",
+                  "bearish",
+                  "neutral"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bias"
+          },
+          "pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pattern"
+          },
+          "car_0_1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Car 0 1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "kind",
+          "label"
+        ],
+        "title": "Marker"
+      },
+      "OutlookOut": {
+        "properties": {
+          "lean": {
+            "type": "string",
+            "enum": [
+              "bullish",
+              "bearish",
+              "neutral"
+            ],
+            "title": "Lean"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/SignalOut"
+            },
+            "type": "array",
+            "title": "Signals"
+          },
+          "expected_range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExpectedRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_range_coverage": {
+            "type": "number",
+            "title": "Expected Range Coverage"
+          },
+          "last_close": {
+            "type": "number",
+            "title": "Last Close"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lean",
+          "score",
+          "signals",
+          "expected_range",
+          "expected_range_coverage",
+          "last_close",
+          "as_of"
+        ],
+        "title": "OutlookOut"
+      },
+      "OverviewRow": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "US",
+                  "SGX"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "last_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Price"
+          },
+          "change_1w_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 1W Pct"
+          },
+          "sparkline": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Sparkline"
+          },
+          "lean": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bullish",
+                  "bearish",
+                  "neutral"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "stale",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "name",
+          "exchange",
+          "currency",
+          "last_price",
+          "change_1w_pct",
+          "sparkline",
+          "lean",
+          "status",
+          "status_reason"
+        ],
+        "title": "OverviewRow"
+      },
+      "PatternStatsOut": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "up_count": {
+            "type": "integer",
+            "title": "Up Count"
+          },
+          "hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate"
+          },
+          "base_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Rate"
+          },
+          "edge": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edge"
+          },
+          "base_down_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Down Rate"
+          },
+          "base_n": {
+            "type": "integer",
+            "title": "Base N"
+          },
+          "sufficient": {
+            "type": "boolean",
+            "title": "Sufficient"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "bias": {
+            "type": "string",
+            "enum": [
+              "bullish",
+              "bearish",
+              "neutral"
+            ],
+            "title": "Bias"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "up_count",
+          "hit_rate",
+          "base_rate",
+          "edge",
+          "base_down_rate",
+          "base_n",
+          "sufficient",
+          "label",
+          "bias"
+        ],
+        "title": "PatternStatsOut"
+      },
+      "PriceStatuses": {
+        "properties": {
+          "prices": {
+            "$ref": "#/components/schemas/DataStatus"
+          },
+          "overall": {
+            "$ref": "#/components/schemas/DataStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prices",
+          "overall"
+        ],
+        "title": "PriceStatuses"
+      },
+      "ProviderStatus": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "used_today": {
+            "type": "integer",
+            "title": "Used Today"
+          },
+          "daily_limit": {
+            "type": "integer",
+            "title": "Daily Limit"
+          },
+          "used_ratio": {
+            "type": "number",
+            "title": "Used Ratio"
+          },
+          "resets_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Resets At"
+          },
+          "breaker_state": {
+            "type": "string",
+            "enum": [
+              "closed",
+              "open",
+              "half_open"
+            ],
+            "title": "Breaker State"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_error_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warning",
+              "blocked"
+            ],
+            "title": "Level"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "configured",
+          "used_today",
+          "daily_limit",
+          "used_ratio",
+          "resets_at",
+          "breaker_state",
+          "last_error",
+          "last_error_at",
+          "level",
+          "message"
+        ],
+        "title": "ProviderStatus",
+        "description": "What the admin page shows for one provider."
+      },
+      "RecentPattern": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "bias": {
+            "type": "string",
+            "enum": [
+              "bullish",
+              "bearish",
+              "neutral"
+            ],
+            "title": "Bias"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "stats": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PatternStatsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "bias",
+          "date",
+          "stats"
+        ],
+        "title": "RecentPattern"
+      },
+      "RegimeOut": {
+        "properties": {
+          "recent_mean": {
+            "type": "number",
+            "title": "Recent Mean"
+          },
+          "baseline_mean": {
+            "type": "number",
+            "title": "Baseline Mean"
+          },
+          "z": {
+            "type": "number",
+            "title": "Z"
+          },
+          "recent_articles": {
+            "type": "integer",
+            "title": "Recent Articles"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "more_positive_than_usual",
+              "more_negative_than_usual",
+              "typical"
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recent_mean",
+          "baseline_mean",
+          "z",
+          "recent_articles",
+          "label"
+        ],
+        "title": "RegimeOut"
+      },
+      "RegisterIn": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "RegisterIn"
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "user",
+          "admin"
+        ]
+      },
+      "SeriesPoint": {
+        "properties": {
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Time"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "value"
+        ],
+        "title": "SeriesPoint"
+      },
+      "SessionOut": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user"
+        ],
+        "title": "SessionOut"
+      },
+      "SignalOut": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "direction": {
+            "type": "integer",
+            "enum": [
+              -1,
+              0,
+              1
+            ],
+            "title": "Direction"
+          },
+          "weight": {
+            "type": "number",
+            "title": "Weight"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "direction",
+          "weight",
+          "detail"
+        ],
+        "title": "SignalOut"
+      },
+      "Status": {
+        "type": "string",
+        "enum": [
+          "active",
+          "disabled"
+        ]
+      },
+      "StockOut": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "exchange": {
+            "type": "string",
+            "enum": [
+              "US",
+              "SGX"
+            ],
+            "title": "Exchange"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "previous_close": {
+            "type": "number",
+            "title": "Previous Close"
+          },
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Pct"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "data_status": {
+            "$ref": "#/components/schemas/DataStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "name",
+          "exchange",
+          "currency",
+          "price",
+          "previous_close",
+          "change_pct",
+          "as_of",
+          "data_status"
+        ],
+        "title": "StockOut"
+      },
+      "SymbolMatch": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "exchange": {
+            "type": "string",
+            "enum": [
+              "US",
+              "SGX"
+            ],
+            "title": "Exchange"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "name",
+          "exchange"
+        ],
+        "title": "SymbolMatch"
+      },
+      "TechnicalReport": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "outlook": {
+            "$ref": "#/components/schemas/OutlookOut"
+          },
+          "recent_patterns": {
+            "items": {
+              "$ref": "#/components/schemas/RecentPattern"
+            },
+            "type": "array",
+            "title": "Recent Patterns"
+          },
+          "data_status": {
+            "$ref": "#/components/schemas/PriceStatuses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "outlook",
+          "recent_patterns",
+          "data_status"
+        ],
+        "title": "TechnicalReport"
+      },
+      "TimelinePointOut": {
+        "properties": {
+          "week_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Week End"
+          },
+          "mean_score": {
+            "type": "number",
+            "title": "Mean Score"
+          },
+          "article_count": {
+            "type": "integer",
+            "title": "Article Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week_end",
+          "mean_score",
+          "article_count"
+        ],
+        "title": "TimelinePointOut"
+      },
+      "TopEventOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "sentiment": {
+            "type": "number",
+            "title": "Sentiment"
+          },
+          "article_count": {
+            "type": "integer",
+            "title": "Article Count"
+          },
+          "car_0_1": {
+            "type": "number",
+            "title": "Car 0 1"
+          },
+          "car_0_5": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Car 0 5"
+          },
+          "near_earnings": {
+            "type": "boolean",
+            "title": "Near Earnings"
+          },
+          "headlines": {
+            "items": {
+              "$ref": "#/components/schemas/HeadlineOut"
+            },
+            "type": "array",
+            "title": "Headlines"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "sentiment",
+          "article_count",
+          "car_0_1",
+          "car_0_5",
+          "near_earnings",
+          "headlines"
+        ],
+        "title": "TopEventOut"
+      },
+      "UserOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "role",
+          "created_at"
+        ],
+        "title": "UserOut"
+      },
+      "UserPatch": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Status"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UserPatch"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WatchlistOut": {
+        "properties": {
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Symbols"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbols"
+        ],
+        "title": "WatchlistOut"
+      }
+    }
+  }
+}

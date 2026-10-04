@@ -6,9 +6,7 @@ exists and is full.
 """
 
 import math
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
 
 from pymongo import ASCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -16,29 +14,13 @@ from pymongo.errors import DuplicateKeyError
 from app.config import ProviderLimits
 from app.db import Database, Document
 from app.logging_setup import get_logger
+from app.providers.quota import Priority, QuotaDecision, QuotaSnapshot, Window, daily_cap
 
 log = get_logger(__name__)
 
 QUOTA = "provider_quota"
 HEALTH = "provider_health"
-Window = Literal["minute", "day"]
 DEFAULT_WARNING_RATIO = 0.8
-
-
-@dataclass(frozen=True)
-class QuotaDecision:
-    allowed: bool
-    window_blocked: Window | None
-    used_today: int
-    daily_limit: int
-    retry_at: datetime | None
-
-
-@dataclass(frozen=True)
-class QuotaSnapshot:
-    used_today: int
-    daily_limit: int
-    resets_at: datetime  # next 00:00 UTC
 
 
 def _minute_start(now: datetime) -> datetime:
@@ -88,9 +70,13 @@ class QuotaLedger:
         return result.modified_count == 1
 
     async def try_consume(
-        self, provider: str, limits: ProviderLimits, now: datetime
+        self, provider: str, limits: ProviderLimits, now: datetime, priority: Priority
     ) -> QuotaDecision:
-        """Consume one call from the minute then the day window; log loudly near/at the limit."""
+        """Consume one call from the minute then the day window; log loudly near/at the limit.
+
+        Interactive calls stop at their share of the day (see ``daily_cap``); scheduled calls may
+        use all of it.
+        """
         minute = _minute_start(now)
         day = _day_start(now)
         resets_at = day + timedelta(days=1)
@@ -111,28 +97,20 @@ class QuotaLedger:
                 False, "minute", await self._used_today(provider, day), limits.per_day, retry_at
             )
 
-        new_day = not await self._db[QUOTA].find_one(
-            {"provider": provider, "window": "day", "start": day}, {"_id": 1}
-        )
-        day_doc = await self._bump(provider, "day", day, limits.per_day, timedelta(days=3))
+        day_cap = daily_cap(limits.per_day, priority)
+        day_doc = await self._bump(provider, "day", day, day_cap, timedelta(days=3))
         if day_doc is None:
             # Roll back so a day-blocked call does not eat the minute budget.
             await self._db[QUOTA].update_one(
                 {"provider": provider, "window": "minute", "start": minute},
                 {"$inc": {"used": -1}},
             )
-            if await self._flag_once(provider, "day", day, "blocked_logged"):
-                log.error(
-                    "provider_quota_exhausted",
-                    provider=provider,
-                    used=limits.per_day,
-                    limit=limits.per_day,
-                    resets_at=resets_at.isoformat(),
-                )
-            return QuotaDecision(False, "day", limits.per_day, limits.per_day, resets_at)
+            await self._log_day_block(provider, day, limits, resets_at, priority)
+            used = await self._used_today(provider, day)
+            return QuotaDecision(False, "day", used, limits.per_day, resets_at)
 
         used = int(day_doc["used"])
-        if new_day:
+        if used == 1:  # the upsert just created today's document
             await self._maybe_log_reset(provider, day)
         threshold = math.ceil(self._warning_ratio * limits.per_day)
         if used >= threshold and await self._flag_once(provider, "day", day, "warning_logged"):
@@ -151,6 +129,39 @@ class QuotaLedger:
                 ),
             )
         return QuotaDecision(True, None, used, limits.per_day, None)
+
+    async def _log_day_block(
+        self,
+        provider: str,
+        day: datetime,
+        limits: ProviderLimits,
+        resets_at: datetime,
+        priority: Priority,
+    ) -> None:
+        """Log (once per day) why the day window refused a call: exhausted, or reserved."""
+        day_cap = daily_cap(limits.per_day, priority)
+        if priority == "scheduled":  # nothing is reserved from scheduled work: the day is spent
+            if await self._flag_once(provider, "day", day, "blocked_logged"):
+                log.error(
+                    "provider_quota_exhausted",
+                    provider=provider,
+                    used=limits.per_day,
+                    limit=limits.per_day,
+                    resets_at=resets_at.isoformat(),
+                )
+        elif await self._flag_once(provider, "day", day, "reserved_logged"):
+            log.warning(
+                "provider_quota_reserved",
+                provider=provider,
+                used=day_cap,
+                limit=limits.per_day,
+                resets_at=resets_at.isoformat(),
+                message=(
+                    f"Interactive calls to {provider} are blocked: the last "
+                    f"{limits.per_day - day_cap} of {limits.per_day} daily calls are reserved "
+                    "for scheduled jobs."
+                ),
+            )
 
     async def _maybe_log_reset(self, provider: str, day: datetime) -> None:
         previous = await self._db[QUOTA].find_one(

@@ -23,9 +23,9 @@ dependencies = [
     "huggingface-hub>=0.35",
     "argon2-cffi>=25.1",
     "pyjwt>=2.10",
-    "slowapi>=0.1.9",
     "apscheduler>=3.11,<4",
     "structlog>=25.4",
+    "limits>=3.13",
 ]
 
 [dependency-groups]
@@ -71,7 +71,7 @@ plugins = ["pydantic.mypy"]
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["yfinance.*", "feedparser.*", "exchange_calendars.*", "onnxruntime.*", "slowapi.*", "apscheduler.*", "scipy.*"]
+module = ["yfinance.*", "feedparser.*", "exchange_calendars.*", "onnxruntime.*", "apscheduler.*", "scipy.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -11,7 +11,7 @@ from app.providers.errors import (
     RateLimitedError,
     TransientProviderError,
 )
-from app.providers.http import get_json, get_text, parse_retry_after, redact_url
+from app.providers.http import get_json, get_text, parse_retry_after
 
 URL = "https://api.example.com/v1/thing"
 
@@ -119,14 +119,3 @@ async def test_get_text_returns_body(client: httpx.AsyncClient) -> None:
     respx.get(URL).respond(200, text="hello")
 
     assert await get_text(client, URL, provider="p") == "hello"
-
-
-def test_redact_url_masks_secret_params_only() -> None:
-    url = "https://x.test/q?symbol=AAPL&token=abc&apikey=def&api_token=ghi"
-
-    redacted = redact_url(url)
-
-    assert "symbol=AAPL" in redacted
-    assert "abc" not in redacted
-    assert "def" not in redacted
-    assert "ghi" not in redacted

@@ -1,0 +1,58 @@
+# Local production-like stack: MongoDB + API + web (nginx serving the SPA and proxying /api).
+# For MongoDB Atlas, drop the `mongo` service and set STOCKEYE_MONGODB_URI=mongodb+srv://...
+#
+# Required in the environment or a .env file next to this one (compose refuses to start without):
+#   STOCKEYE_JWT_SECRET      at least 32 random characters, e.g.
+#                            python -c "import secrets; print(secrets.token_urlsafe(48))"
+#   MONGO_ROOT_USERNAME / MONGO_ROOT_PASSWORD
+#                            the MongoDB root account. Use a URL-safe password (letters, digits,
+#                            - and _): it is embedded in the connection string below. Mongo reads
+#                            these only when it first creates the volume; to change them later,
+#                            change them inside Mongo or delete the mongo-data volume.
+services:
+  mongo:
+    image: mongo:8
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?set MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD}
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # ping needs no credentials, so the check works with authentication enabled.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      retries: 5
+
+  api:
+    build: ./backend
+    environment:
+      STOCKEYE_MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin
+      STOCKEYE_JWT_SECRET: ${STOCKEYE_JWT_SECRET:?set STOCKEYE_JWT_SECRET}
+      STOCKEYE_COOKIE_SECURE: ${STOCKEYE_COOKIE_SECURE:-true}
+      STOCKEYE_CORS_ORIGINS: '["http://localhost:8080"]'
+      STOCKEYE_FINNHUB_API_KEY: ${STOCKEYE_FINNHUB_API_KEY:-}
+      STOCKEYE_MARKETAUX_API_KEY: ${STOCKEYE_MARKETAUX_API_KEY:-}
+      STOCKEYE_ALPHAVANTAGE_API_KEY: ${STOCKEYE_ALPHAVANTAGE_API_KEY:-}
+      # uvicorn trusts X-Forwarded-For only from these addresses: the stack's own subnet below,
+      # where the only client is the nginx in `web`. Keep the two in sync.
+      FORWARDED_ALLOW_IPS: 172.28.0.0/16
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+# A fixed subnet makes the trusted-proxy range above predictable instead of Docker's choice.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  mongo-data:

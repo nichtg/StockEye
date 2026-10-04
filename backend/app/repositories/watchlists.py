@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 from bson import ObjectId
 from pymongo import ASCENDING
-from pymongo.errors import DuplicateKeyError
 
-from app.db import Database, Document
+from app.db import Database
+from app.repositories.capped_set import add_to_capped_set
 
 
 class WatchlistFullError(Exception):
@@ -26,32 +26,27 @@ class WatchlistsRepository:
         return list(doc["symbols"]) if doc else []
 
     async def add(self, owner_id: ObjectId, symbol: str, max_size: int) -> None:
-        """Idempotently add ``symbol``; raise ``WatchlistFullError`` if it would exceed the cap.
-
-        The size guard lives in the filter so check and write are one atomic operation. When the
-        guard fails, the upsert tries to insert a second document for the owner, which the unique
-        index rejects: that duplicate-key error is how "full" is detected.
-        """
-        guard: Document = {
-            "$or": [{"symbols": symbol}, {f"symbols.{max_size - 1}": {"$exists": False}}]
-        }
-        try:
-            await self._col.update_one(
-                {"owner_id": owner_id, **guard},
-                {
-                    "$addToSet": {"symbols": symbol},
-                    "$set": {"updated_at": datetime.now(UTC)},
-                },
-                upsert=True,
-            )
-        except DuplicateKeyError as exc:
-            raise WatchlistFullError(max_size) from exc
+        """Idempotently add ``symbol``; raise ``WatchlistFullError`` if it would exceed the cap."""
+        added = await add_to_capped_set(
+            self._col,
+            {"owner_id": owner_id},
+            "symbols",
+            symbol,
+            max_size,
+            also={"$set": {"updated_at": datetime.now(UTC)}},
+        )
+        if not added:
+            raise WatchlistFullError(max_size)
 
     async def remove(self, owner_id: ObjectId, symbol: str) -> None:
         await self._col.update_one(
             {"owner_id": owner_id},
             {"$pull": {"symbols": symbol}, "$set": {"updated_at": datetime.now(UTC)}},
         )
+
+    async def all_symbols(self) -> list[str]:
+        """Distinct symbols across all users. For background jobs only: it carries no user ids."""
+        return sorted(await self._col.distinct("symbols"))
 
     async def delete_for_owner(self, owner_id: ObjectId) -> None:
         await self._col.delete_one({"owner_id": owner_id})

@@ -1,0 +1,257 @@
+from datetime import timedelta
+
+import pytest
+from bson import ObjectId
+
+from app.providers.errors import RateLimitedError, TransientProviderError
+from app.services.container import Services
+from app.services.errors import AppError
+from tests.services.fakes import CLOSED_NOW, FakeClock, FakeMarketData, FakeNews, FakeScorer
+
+pytestmark = pytest.mark.integration
+
+USER = ObjectId()
+
+
+async def test_technical_returns_outlook_patterns_and_ok_status(services: Services) -> None:
+    report = await services.analysis.technical("AAPL")
+
+    assert report.symbol == "AAPL"
+    assert report.outlook.lean in {"bullish", "bearish", "neutral"}
+    assert -1.0 <= report.outlook.score <= 1.0
+    assert report.outlook.signals
+    assert all(s.detail for s in report.outlook.signals)
+    assert report.outlook.expected_range is not None
+    assert report.outlook.expected_range.low < report.outlook.last_close
+    assert report.outlook.as_of.isoformat() == "2026-10-02"
+    assert report.data_status.prices.state == "ok"
+    assert report.data_status.overall.state == "ok"
+
+
+async def test_technical_recent_patterns_are_within_last_three_sessions(
+    services: Services,
+) -> None:
+    report = await services.analysis.technical("AAPL")
+
+    cutoff = report.outlook.as_of - timedelta(days=7)
+    assert all(p.date > cutoff for p in report.recent_patterns)
+    for pattern in report.recent_patterns:
+        if pattern.stats is not None:
+            assert pattern.stats.label
+            assert pattern.stats.bias == pattern.bias
+
+
+async def test_technical_second_call_is_cached_and_does_not_refetch(
+    services: Services, provider: FakeMarketData
+) -> None:
+    first = await services.analysis.technical("AAPL")
+    calls = dict(provider.calls)
+
+    second = await services.analysis.technical("AAPL")
+
+    assert provider.calls == calls
+    assert second.outlook == first.outlook
+
+
+async def test_technical_with_stale_prices_reports_stale_status(
+    services: Services, provider: FakeMarketData, clock: FakeClock
+) -> None:
+    await services.analysis.technical("AAPL")
+    clock.now = CLOSED_NOW + timedelta(days=3, hours=5)
+    provider.fail_with = RateLimitedError("yahoo")
+
+    report = await services.analysis.technical("AAPL")
+
+    assert report.data_status.prices.state == "stale"
+    assert report.data_status.overall.state == "stale"
+
+
+async def test_technical_unknown_symbol_raises_not_found(services: Services) -> None:
+    with pytest.raises(AppError) as caught:
+        await services.analysis.technical("ZZZZ")
+
+    assert caught.value.status == 404
+
+
+async def test_chart_daily_indicators_have_no_nan_gap_at_left_edge(services: Services) -> None:
+    chart = await services.analysis.chart(
+        "AAPL", "6M", ["sma50", "sma20", "rsi", "bollinger", "macd"]
+    )
+
+    first_candle = chart.candles[0].time
+    assert chart.interval == "1d"
+    assert isinstance(first_candle, str)
+    for name in ("sma50", "sma20", "rsi", "bollinger_upper", "macd", "macd_signal"):
+        series = chart.indicators[name]
+        assert series, name
+        assert series[0].time == first_candle  # warm-up history fills the left edge
+        assert len(series) == len(chart.candles)
+
+
+async def test_chart_daily_range_covers_about_six_months(services: Services) -> None:
+    chart = await services.analysis.chart("AAPL", "6M", [])
+
+    assert 120 <= len(chart.candles) <= 135
+    assert chart.indicators == {}
+
+
+async def test_chart_1w_uses_hourly_bars_over_five_sessions_with_epoch_times(
+    services: Services,
+) -> None:
+    chart = await services.analysis.chart("AAPL", "1W", ["sma20", "vwap"])
+
+    assert chart.interval == "1h"
+    assert all(isinstance(c.time, int) for c in chart.candles)
+    days = {c.time // 86400 for c in chart.candles if isinstance(c.time, int)}
+    assert len(days) == 5
+    assert len(chart.indicators["sma20"]) == len(chart.candles)
+    assert len(chart.indicators["vwap"]) == len(chart.candles)
+
+
+async def test_chart_1m_shows_22_sessions_of_hourly_bars(services: Services) -> None:
+    chart = await services.analysis.chart("AAPL", "1M", [])
+
+    days = {c.time // 86400 for c in chart.candles if isinstance(c.time, int)}
+    assert chart.interval == "1h"
+    assert len(days) == 22
+
+
+async def test_chart_daily_vwap_is_anchored_at_range_start(services: Services) -> None:
+    chart = await services.analysis.chart("AAPL", "6M", ["vwap"])
+
+    vwap = chart.indicators["vwap"]
+    assert vwap[0].time == chart.candles[0].time
+    first_bar = chart.candles[0]
+    typical = (first_bar.high + first_bar.low + first_bar.close) / 3
+    assert vwap[0].value == pytest.approx(typical)
+
+
+async def test_chart_markers_include_events_and_patterns_on_daily_ranges(
+    services: Services,
+) -> None:
+    chart = await services.analysis.chart("AAPL", "2Y", [])
+
+    kinds = {m.kind for m in chart.markers}
+    assert {"earnings", "dividend"} <= kinds
+    assert "pattern" in kinds
+    pattern = next(m for m in chart.markers if m.kind == "pattern")
+    assert pattern.pattern
+    assert pattern.bias in {"bullish", "bearish", "neutral"}
+    assert all(isinstance(m.time, str) for m in chart.markers)
+
+
+async def test_chart_hourly_ranges_have_no_pattern_markers(services: Services) -> None:
+    chart = await services.analysis.chart("AAPL", "1M", [])
+
+    assert "pattern" not in {m.kind for m in chart.markers}
+
+
+async def test_chart_unknown_indicator_is_rejected(services: Services) -> None:
+    with pytest.raises(AppError) as caught:
+        await services.analysis.chart("AAPL", "6M", ["sma20", "nonsense"])
+
+    assert caught.value.status == 422
+
+
+async def test_chart_never_triggers_macro_computation(
+    services: Services, news_provider: FakeNews
+) -> None:
+    await services.analysis.chart("AAPL", "2Y", [])
+
+    assert news_provider.queries == []
+
+
+async def test_chart_includes_news_markers_from_cached_macro_report(services: Services) -> None:
+    await services.news.ensure_ingested("AAPL", "Apple Inc.")
+    await services.news.wait("AAPL")
+    macro = await services.analysis.macro("AAPL", USER)
+    assert macro.report is not None
+    assert macro.report.top_events
+
+    chart = await services.analysis.chart("AAPL", "2Y", [])
+
+    news = [m for m in chart.markers if m.kind == "news"]
+    assert news
+    assert all(m.car_0_1 is not None for m in news)
+    assert chart.data_status.news.state == "ok"
+
+
+async def test_macro_first_call_reports_ingestion_in_progress_and_partial_news(
+    services: Services,
+) -> None:
+    response = await services.analysis.macro("AAPL", USER)
+
+    assert response.ingestion.in_progress
+    assert response.ingestion.months_total == 24
+    assert response.data_status.news.state == "partial"
+    assert response.data_status.news.reason is not None
+    assert "still being collected" in response.data_status.news.reason
+
+
+async def test_macro_after_ingestion_has_report_and_is_cached(
+    services: Services, news_provider: FakeNews
+) -> None:
+    await services.news.ensure_ingested("AAPL", "Apple Inc.")
+    await services.news.wait("AAPL")
+
+    first = await services.analysis.macro("AAPL", USER)
+    queries = len(news_provider.queries)
+    second = await services.analysis.macro("AAPL", USER)
+
+    assert not first.ingestion.in_progress
+    assert first.ingestion.months_done == 24
+    assert first.report is not None
+    assert first.report.events_total > 0
+    assert first.report.timeline
+    assert first.data_status.overall.state == "ok"
+    assert second == first
+    assert len(news_provider.queries) == queries
+
+
+async def test_macro_is_not_cached_while_ingestion_is_in_progress(services: Services) -> None:
+    first = await services.analysis.macro("AAPL", USER)
+    assert first.ingestion.in_progress
+
+    await services.news.wait("AAPL")
+    second = await services.analysis.macro("AAPL", USER)
+
+    assert second.ingestion.months_done == 24
+    assert not second.ingestion.in_progress
+
+
+async def test_macro_with_sentiment_model_missing_degrades_instead_of_failing(
+    services: Services, scorer: FakeScorer
+) -> None:
+    scorer.available = False
+    await services.news.ensure_ingested("AAPL", "Apple Inc.")
+    await services.news.wait("AAPL")
+
+    response = await services.analysis.macro("AAPL", USER)
+
+    assert response.data_status.news.state == "unavailable"
+    assert response.report is not None
+    assert response.report.events_total == 0
+    assert response.data_status.overall.state == "partial"
+
+
+async def test_macro_without_benchmark_data_returns_no_report_but_no_error(
+    services: Services, provider: FakeMarketData
+) -> None:
+    provider.fail_symbols["SPY"] = TransientProviderError("yahoo", "down")
+
+    response = await services.analysis.macro("AAPL", USER)
+
+    assert response.report is None
+    assert response.data_status.prices.state == "partial"
+    assert response.data_status.prices.reason is not None
+    assert "benchmark" in response.data_status.prices.reason
+
+
+async def test_macro_sgx_symbol_uses_sti_benchmark(services: Services) -> None:
+    await services.news.ensure_ingested("D05.SI", "DBS Group Holdings Ltd")
+    await services.news.wait("D05.SI")
+
+    response = await services.analysis.macro("D05.SI", USER)
+
+    assert response.report is not None
+    assert response.name == "DBS Group Holdings Ltd"

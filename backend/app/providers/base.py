@@ -11,6 +11,7 @@ from typing import Protocol
 from app.providers.models import (
     Bar,
     CorporateEvent,
+    Exchange,
     Interval,
     NewsItem,
     NewsQuery,
@@ -35,5 +36,8 @@ class MarketDataProvider(Protocol):
 
 class NewsProvider(Protocol):
     name: str
+    # Declared, not checked inside ``fetch``, so callers can skip an adapter that cannot answer
+    # (and spend none of its quota) before calling it.
+    exchanges: frozenset[Exchange]
 
     async def fetch(self, query: NewsQuery) -> list[NewsItem]: ...

@@ -33,6 +33,13 @@ class Quote(_Frozen):
     previous_close: float
     as_of: AwareDatetime
 
+    @property
+    def change_pct(self) -> float | None:
+        """Move versus the previous close in percent; None when there is no previous close."""
+        if not self.previous_close:
+            return None
+        return (self.price / self.previous_close - 1.0) * 100.0
+
 
 class Bar(_Frozen):
     """One OHLCV candle, split- and dividend-adjusted.
@@ -66,6 +73,7 @@ class NewsItem(_Frozen):
 
 class NewsQuery(_Frozen):
     symbol: str
+    exchange: Exchange  # adapters branch on this, never on the ticker's suffix
     company_name: str
     start: datetime
     end: datetime
