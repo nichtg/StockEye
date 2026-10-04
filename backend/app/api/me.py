@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.api.auth import UserOut
 from app.api.deps import AccountsDep, SettingsDep, UserDep
-from app.api.limits import AUTH, limited_by_ip
+from app.api.limits import AUTH, limited, limited_by_ip
 from app.auth.cookies import clear_auth_cookies
 from app.logging_setup import get_logger
 
@@ -25,8 +25,11 @@ async def me(user: UserDep) -> UserOut:
     return UserOut.of(user)
 
 
-# Same per-IP budget as login: the password check here must not be a way to guess passwords.
-@router.delete("/me", status_code=204, dependencies=[Depends(limited_by_ip(AUTH))])
+# The password check here must not be a way to guess passwords: budgeted per IP like login, and
+# per account too, so rotating addresses does not help.
+@router.delete(
+    "/me", status_code=204, dependencies=[Depends(limited_by_ip(AUTH)), Depends(limited(AUTH))]
+)
 async def delete_me(
     body: DeleteAccountIn, user: UserDep, accounts: AccountsDep, settings: SettingsDep
 ) -> Response:

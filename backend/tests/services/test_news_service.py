@@ -353,3 +353,18 @@ async def test_progress_updated_at_is_none_before_and_set_after_a_run(
     await _ingest(services)
 
     assert (await services.news.progress("AAPL")).updated_at == CLOSED_NOW
+
+
+async def test_foreign_run_counts_as_active_in_progress_and_status(
+    services: Services, db: Database, news_provider: FakeNews
+) -> None:
+    await NewsRepository(db).begin_run("AAPL", CLOSED_NOW)  # another process holds the run
+
+    progress = await services.news.progress("AAPL")
+    status = await services.news.status("AAPL")
+    ensured = await services.news.ensure_ingested("AAPL", "Apple Inc.")
+
+    assert progress.in_progress
+    assert status.reason == "Collecting news: 0 of 24 months so far."
+    assert ensured.in_progress
+    assert news_provider.queries == []  # no second run started

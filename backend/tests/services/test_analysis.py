@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from bson import ObjectId
@@ -6,6 +7,7 @@ from bson import ObjectId
 from app.db import Database
 from app.providers.errors import RateLimitedError, TransientProviderError
 from app.repositories.cache import CacheRepository
+from app.repositories.news import NewsRepository
 from app.services import compute
 from app.services.analysis import macro_cache_key
 from app.services.container import Services
@@ -321,3 +323,81 @@ async def test_news_progress_starts_collection_once_and_reports_status(
     assert first.status.state == "partial"
     assert len([q for q in news_provider.queries if q.start.day == 1]) == 24
     assert (await services.analysis.news_progress("AAPL", USER)).status.state == "ok"
+
+
+async def test_news_progress_unknown_symbol_is_404_and_starts_nothing(
+    services: Services, news_provider: FakeNews
+) -> None:
+    with pytest.raises(AppError) as caught:
+        await services.analysis.news_progress("ZZZZ", USER)
+
+    assert caught.value.status == 404
+    assert news_provider.queries == []
+    assert not await services.news.has_history("ZZZZ")
+
+
+def _count_macro_builds(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    calls: list[int] = []
+    real = compute.compute_macro
+
+    def counting(*args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(compute, "compute_macro", counting)
+    return calls
+
+
+async def _partial_ingest(services: Services, news_provider: FakeNews) -> None:
+    news_provider.fail_windows = {
+        "2025-03",
+        "2025-04",
+    }  # incomplete, so the macro report is never cached
+    await services.news.ensure_ingested("AAPL", "Apple Inc.")
+    await services.news.wait("AAPL")
+
+
+async def test_chart_partial_news_markers_are_cached_so_a_second_call_does_not_rebuild(
+    services: Services, news_provider: FakeNews, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _partial_ingest(services, news_provider)
+    builds = _count_macro_builds(monkeypatch)
+
+    first = await services.analysis.chart("AAPL", "2Y", [])
+    second = await services.analysis.chart("AAPL", "2Y", [])
+
+    assert len(builds) == 1
+    assert [m for m in first.markers if m.kind == "news"]
+    assert second.markers == first.markers
+
+
+async def test_chart_news_markers_rebuild_when_months_done_or_updated_at_changes(
+    services: Services,
+    news_provider: FakeNews,
+    db: Database,
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _partial_ingest(services, news_provider)
+    builds = _count_macro_builds(monkeypatch)
+    repo = NewsRepository(db)
+    await services.analysis.chart("AAPL", "2Y", [])
+
+    await repo.mark_month_done("AAPL", "2025-03")  # months_done changes, within the TTL
+    await services.analysis.chart("AAPL", "2Y", [])
+    await repo.mark_incremental("AAPL", clock.now + timedelta(minutes=1))  # updated_at changes
+    await services.analysis.chart("AAPL", "2Y", [])
+
+    assert len(builds) == 3
+
+
+async def test_chart_symbol_without_news_never_builds_a_macro_report(
+    services: Services, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    builds = _count_macro_builds(monkeypatch)
+
+    chart = await services.analysis.chart("AAPL", "2Y", [])
+
+    assert builds == []
+    assert chart.candles
+    assert not [m for m in chart.markers if m.kind == "news"]

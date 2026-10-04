@@ -13,7 +13,7 @@ from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import AccountsDep, AdminDep
-from app.repositories.users import Role, Status, UserRecord
+from app.repositories.users import Role, SettableStatus, Status, UserRecord
 from app.services.accounts import AppError
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -36,7 +36,7 @@ class AdminUserPage(BaseModel):
 class UserPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    status: Status | None = None
+    status: SettableStatus | None = None
     role: Role | None = None
 
 

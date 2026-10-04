@@ -26,8 +26,15 @@ from app.auth.tokens import (
 )
 from app.config import Settings
 from app.db import Database
+from app.repositories.ingest_budget import IngestBudget
 from app.repositories.refresh_tokens import RefreshTokensRepository
-from app.repositories.users import EmailTakenError, Role, Status, UserRecord, UsersRepository
+from app.repositories.users import (
+    EmailTakenError,
+    Role,
+    SettableStatus,
+    UserRecord,
+    UsersRepository,
+)
 from app.repositories.watchlists import WatchlistsRepository
 from app.services.errors import AppError
 
@@ -66,6 +73,7 @@ class AccountService:
         self._users = UsersRepository(db)
         self._tokens = RefreshTokensRepository(db)
         self._watchlists = WatchlistsRepository(db)
+        self._budget = IngestBudget(db, settings.max_new_symbols_per_user_per_day)
         self._settings = settings
 
     async def register(self, email: str, password: str) -> UserRecord:
@@ -195,7 +203,11 @@ class AccountService:
         return await self._users.list(query, page, page_size)
 
     async def update_user(
-        self, actor_id: ObjectId, target_id: ObjectId, status: Status | None, role: Role | None
+        self,
+        actor_id: ObjectId,
+        target_id: ObjectId,
+        status: SettableStatus | None,
+        role: Role | None,
     ) -> UserRecord:
         target = await self._require(target_id)
         removes_admin = _is_active_admin(target) and (status == "disabled" or role == "user")
@@ -235,13 +247,23 @@ class AccountService:
         await self._purge(target, _ONLY_ADMIN)
 
     async def _purge(self, target: UserRecord, last_admin_message: str) -> None:
-        """Remove a user with their refresh tokens and watchlist; undo if it left no admin."""
+        """Remove a user and everything keyed to them.
+
+        An admin is first claimed (status ``deleting``) and only deleted if another active
+        admin remains; otherwise the claim is released. Nothing is ever re-inserted, so a crash
+        or a race cannot leave zero admins (two admins deleting themselves at once may both be
+        refused, which is safe to retry).
+        """
+        if _is_active_admin(target):
+            if not await self._users.claim_admin(target.id):
+                raise AppError(404, "not_found", "User not found.")
+            if await self._users.count_active_admins() == 0:
+                await self._users.release_claim(target.id)
+                raise AppError(409, "conflict", last_admin_message)
         await self._users.delete(target.id)
-        if _is_active_admin(target) and await self._users.count_active_admins() == 0:
-            await self._users.restore(target)  # lost a race with another admin removal
-            raise AppError(409, "conflict", last_admin_message)
         await self._tokens.delete_for_user(target.id)
         await self._watchlists.delete_for_owner(target.id)
+        await self._budget.forget_user(target.id)
 
     async def _require(self, user_id: ObjectId) -> UserRecord:
         user = await self._users.get_by_id(user_id)

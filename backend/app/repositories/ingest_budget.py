@@ -62,3 +62,12 @@ class IngestBudget:
             if not spent:
                 await self._admitted.delete_one({"_id": symbol})
         return spent
+
+    async def forget_user(self, user_id: ObjectId) -> None:
+        """Drop a deleted user's budget documents and detach them from symbols they admitted.
+
+        The admitted symbols themselves stay (the scheduled job still backfills them); only the
+        pointer to the person goes.
+        """
+        await self._col.delete_many({"user_id": user_id})
+        await self._admitted.update_many({"user_id": user_id}, {"$unset": {"user_id": ""}})
