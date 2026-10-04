@@ -170,8 +170,15 @@ class AnalysisService:
         refused symbol starts nothing and reports the refusal as its status.
         """
         # Validate first (404 for an unknown symbol), so junk symbols never reach admission.
-        quote, _ = await self._market.quote(symbol)
-        progress, refused = await self._start_news(symbol, quote.name, user_id)
+        try:
+            name = (await self._market.quote(symbol))[0].name
+        except AppError as exc:
+            if exc.code == "not_found":
+                raise
+            # Provider down (503), not an unknown symbol: collection can still start, with the
+            # ticker as the company name, as before.
+            name = await self._market.company_name(symbol)
+        progress, refused = await self._start_news(symbol, name, user_id)
         status = refused if refused is not None else await self._news.status(symbol)
         return NewsProgressOut(**dataclasses.asdict(progress), status=status)
 
@@ -256,7 +263,9 @@ class AnalysisService:
 
     # --- chart -----------------------------------------------------------------------------
 
-    async def _marker_inputs(self, symbol: str, now: datetime) -> list[tuple[date, str, float]]:
+    async def _chart_news_markers(
+        self, symbol: str, now: datetime
+    ) -> list[tuple[date, str, float]]:
         """News markers for the chart from stored news only; never starts collection.
 
         Uses the fresh cached macro report when there is one. Otherwise it builds from stored
@@ -320,7 +329,7 @@ class AnalysisService:
             prices,
             self._market.standard_events(symbol),
             self._news.status(symbol),
-            self._marker_inputs(symbol, now),
+            self._chart_news_markers(symbol, now),
         )
         try:
             return await asyncio.to_thread(

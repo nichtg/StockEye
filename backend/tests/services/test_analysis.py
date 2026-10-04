@@ -401,3 +401,15 @@ async def test_chart_symbol_without_news_never_builds_a_macro_report(
     assert builds == []
     assert chart.candles
     assert not [m for m in chart.markers if m.kind == "news"]
+
+
+async def test_news_progress_provider_down_for_known_symbol_still_starts_collection(
+    services: Services, provider: FakeMarketData, news_provider: FakeNews
+) -> None:
+    provider.fail_symbols["AAPL"] = TransientProviderError("yahoo", "down")  # no cached quote
+
+    progress = await services.analysis.news_progress("AAPL", USER)
+    await services.news.wait("AAPL")
+
+    assert progress.in_progress
+    assert news_provider.queries  # collection ran despite the quote failure

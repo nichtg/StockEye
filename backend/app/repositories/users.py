@@ -108,7 +108,9 @@ class UsersRepository:
         if not changes:
             return await self.get_by_id(user_id)
         doc = await self._col.find_one_and_update(
-            {"_id": user_id}, {"$set": changes}, return_document=ReturnDocument.AFTER
+            {"_id": user_id, "status": {"$ne": "deleting"}},  # a claimed record is frozen
+            {"$set": changes},
+            return_document=ReturnDocument.AFTER,
         )
         return _record(doc) if doc else None
 

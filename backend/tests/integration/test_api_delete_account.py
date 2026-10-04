@@ -8,12 +8,13 @@ from fastapi import FastAPI
 from httpx import ASGITransport
 from limits import parse
 
+from app.auth.passwords import hash_password
 from app.auth.principal import Principal
 from app.config import RateLimits, Settings
 from app.db import Database
 from app.repositories.ingest_budget import IngestBudget
-from app.repositories.users import UsersRepository
-from app.services.accounts import AccountService
+from app.repositories.users import UserRecord, UsersRepository
+from app.services.accounts import AccountService, AppError
 from tests.integration.conftest import PASSWORD, ClientFactory, login, make_admin, register
 
 pytestmark = pytest.mark.integration
@@ -156,20 +157,28 @@ async def test_delete_me_removes_ingest_budget_and_detaches_admitted_symbols(
     assert "user_id" not in admitted
 
 
-async def test_delete_me_two_admins_deleting_at_once_never_leave_zero(
-    new_client: ClientFactory, db: Database
+def _principal(user: UserRecord) -> Principal:
+    return Principal(id=user.id, email=user.email, role=user.role, created_at=user.created_at)
+
+
+async def test_delete_self_two_admins_at_once_never_leave_zero(
+    db: Database, settings: Settings
 ) -> None:
-    await make_admin(db, "root@example.com")
-    await make_admin(db, "second@example.com")
-    a, b = await new_client(), await new_client()
-    await login(a, "root@example.com")
-    await login(b, "second@example.com")
+    # At the service: the HTTP auth budget (3/min per IP in this module) would add noise.
+    first = await make_admin(db, "root@example.com")
+    second = await make_admin(db, "second@example.com")
+    service = AccountService(db, settings)
 
-    results = await asyncio.gather(_delete(a), _delete(b))
+    outcomes = await asyncio.gather(
+        service.delete_self(_principal(first), PASSWORD),
+        service.delete_self(_principal(second), PASSWORD),
+        return_exceptions=True,
+    )
 
-    codes = sorted(r.status_code for r in results)
-    assert codes.count(204) <= 1  # both may be refused (409); never both deleted
-    assert await db.users.count_documents({"role": "admin", "status": "active"}) == 1
+    # Both may be refused (409, safe to retry) but never both deleted.
+    codes = sorted(204 if o is None else getattr(o, "status", -1) for o in outcomes)
+    assert codes in ([204, 409], [409, 409])
+    assert await db.users.count_documents({"role": "admin", "status": "active"}) >= 1
 
 
 async def test_delete_user_crash_after_claim_leaves_a_deleting_record_not_zero_admins(
@@ -218,3 +227,70 @@ async def test_last_admin_refusal_does_not_leave_the_record_deleting(
 
     doc = await db.users.find_one({"email": "root@example.com"})
     assert doc is not None and doc["status"] == "active"
+
+
+async def test_delete_self_wrong_attempts_lock_the_account_like_login(
+    db: Database, settings: Settings
+) -> None:
+    user = await UsersRepository(db).create("alice@example.com", await hash_password(PASSWORD))
+    service = AccountService(db, settings)
+
+    for _ in range(settings.login_max_failures):
+        with pytest.raises(AppError) as wrong:
+            await service.delete_self(_principal(user), "wrong password 123")
+        assert wrong.value.code == "invalid_password"
+    with pytest.raises(AppError) as locked:  # even the right password is refused now
+        await service.delete_self(_principal(user), PASSWORD)
+
+    assert locked.value.status == 403
+    assert await db.users.find_one({"_id": user.id}) is not None
+    with pytest.raises(AppError) as login:
+        await service.authenticate("alice@example.com", PASSWORD)
+    assert login.value.status == 401
+
+
+async def test_admin_update_of_a_deleting_user_returns_409(
+    new_client: ClientFactory, db: Database
+) -> None:
+    await make_admin(db, "root@example.com")
+    admin = await new_client()
+    await login(admin, "root@example.com")
+    alice = await UsersRepository(db).create("alice@example.com", await hash_password(PASSWORD))
+    await db.users.update_one({"_id": alice.id}, {"$set": {"status": "deleting"}})
+
+    resp = await admin.patch(f"/api/admin/users/{alice.id}", json={"status": "disabled"})
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["message"] == "This account is being deleted."
+    assert await UsersRepository(db).update(alice.id, "active", None) is None  # atomic filter
+    doc = await db.users.find_one({"_id": alice.id})
+    assert doc is not None and doc["status"] == "deleting"
+
+
+async def test_purge_claim_failure_is_409_when_user_exists_and_404_when_gone(
+    db: Database, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    actor = await make_admin(db, "root@example.com")
+    target = await make_admin(db, "second@example.com")
+    service = AccountService(db, settings)
+
+    async def refuse(self: UsersRepository, user_id: ObjectId) -> bool:
+        return False
+
+    monkeypatch.setattr(UsersRepository, "claim_admin", refuse)
+    with pytest.raises(AppError) as changed:
+        await service.delete_user(actor.id, target.id)
+
+    async def vanish(self: UsersRepository, user_id: ObjectId) -> bool:
+        await db.users.delete_one({"_id": user_id})
+        return False
+
+    monkeypatch.setattr(UsersRepository, "claim_admin", vanish)
+    with pytest.raises(AppError) as gone:
+        await service.delete_user(actor.id, target.id)
+
+    assert (changed.value.status, changed.value.message) == (
+        409,
+        "This account changed; please try again.",
+    )
+    assert gone.value.status == 404

@@ -44,6 +44,7 @@ _INVALID_LOGIN = "Incorrect email or password."
 _SESSION_EXPIRED = "Your session has expired."
 _SIGN_IN_REQUIRED = "Please sign in to continue."
 _LAST_ADMIN = "The last active admin cannot be removed or demoted."
+_BEING_DELETED = "This account is being deleted."
 _ONLY_ADMIN = "You are the only admin. Make another user an admin before deleting your account."
 
 
@@ -115,19 +116,7 @@ class AccountService:
         user = await self._users.get_by_email(email)
         if user is None:
             await self._reject(password)
-        now = datetime.now(UTC)
-        if user.locked_until is not None:
-            if user.locked_until > now:
-                await self._reject(password)
-            await self._users.clear_expired_lock(user.id, now)  # served; start counting afresh
-        # Reserved before verifying, atomically, so a burst of concurrent guesses cannot get
-        # more than ``login_max_failures`` verifications in. A success resets the counter.
-        lock_until = now + timedelta(minutes=self._settings.login_lockout_minutes)
-        if not await self._users.reserve_attempt(
-            user.id, self._settings.login_max_failures, lock_until
-        ):
-            await self._reject(password)
-        if not await passwords.verify_password(password, user.password_hash):
+        if not await self._check_password(user, password):
             raise _invalid_login()
         if user.status != "active":
             raise AppError(403, "account_disabled", "This account has been disabled.")
@@ -141,6 +130,28 @@ class AccountService:
         if logged_in is None:  # deleted mid-login: indistinguishable from an unknown email
             raise _invalid_login()
         return logged_in
+
+    async def _check_password(self, user: UserRecord, password: str) -> bool:
+        """Verify a password under the lockout rules; shared by login and account deletion.
+
+        False for a locked account, a wrong password, or when the attempt cap is already spent.
+        Every False costs the same argon2 work, so timing does not say which. An attempt is
+        reserved atomically before verifying, so a burst of concurrent guesses cannot get more
+        than ``login_max_failures`` verifications in; the attempt reaching the cap sets the lock.
+        """
+        now = datetime.now(UTC)
+        if user.locked_until is not None:
+            if user.locked_until > now:
+                await passwords.verify_dummy(password)
+                return False
+            await self._users.clear_expired_lock(user.id, now)  # served; start counting afresh
+        lock_until = now + timedelta(minutes=self._settings.login_lockout_minutes)
+        if not await self._users.reserve_attempt(
+            user.id, self._settings.login_max_failures, lock_until
+        ):
+            await passwords.verify_dummy(password)
+            return False
+        return await passwords.verify_password(password, user.password_hash)
 
     @staticmethod
     async def _reject(password: str) -> NoReturn:
@@ -210,12 +221,15 @@ class AccountService:
         role: Role | None,
     ) -> UserRecord:
         target = await self._require(target_id)
+        if target.status == "deleting":
+            raise AppError(409, "conflict", _BEING_DELETED)
         removes_admin = _is_active_admin(target) and (status == "disabled" or role == "user")
         if removes_admin:
             await self._guard_admin_removal(actor_id, target)
         updated = await self._users.update(target_id, status, role)
-        if updated is None:
-            raise AppError(404, "not_found", "User not found.")
+        if updated is None:  # gone, or claimed for deletion since the read above
+            await self._require(target_id)
+            raise AppError(409, "conflict", _BEING_DELETED)
         if removes_admin and await self._users.count_active_admins() == 0:
             # Two admins demoting each other both passed the guard above; undo this one.
             await self._users.update(target_id, target.status, target.role)
@@ -234,14 +248,15 @@ class AccountService:
     async def delete_self(self, principal: Principal, password: str) -> None:
         """Delete the caller's own account after re-checking their password.
 
-        Raises ``AppError`` 403 (``invalid_password``) for a wrong password, which neither locks
-        the account nor reveals more; the router's per-IP limit is what stops guessing. The
-        only active admin gets 409. Removes the user, their refresh tokens and their watchlist.
+        Raises ``AppError`` 403 (``invalid_password``) for a wrong password or a locked account,
+        revealing nothing more. Wrong attempts count toward the same lockout as login
+        (``login_max_failures``), and the router adds per-IP and per-account rate limits. The
+        only active admin gets 409. Removes the user, their tokens, watchlist and ingest budget.
         """
         target = await self._users.get_by_id(principal.id)
         if target is None:  # deleted since the request was authenticated
             raise AppError(401, "unauthenticated", _SIGN_IN_REQUIRED)
-        if not await passwords.verify_password(password, target.password_hash):
+        if not await self._check_password(target, password):
             raise AppError(403, "invalid_password", "That password is not correct.")
         await self._ensure_not_last_admin(target, _ONLY_ADMIN)
         await self._purge(target, _ONLY_ADMIN)
@@ -256,7 +271,8 @@ class AccountService:
         """
         if _is_active_admin(target):
             if not await self._users.claim_admin(target.id):
-                raise AppError(404, "not_found", "User not found.")
+                await self._require(target.id)  # 404 only if really gone
+                raise AppError(409, "conflict", "This account changed; please try again.")
             if await self._users.count_active_admins() == 0:
                 await self._users.release_claim(target.id)
                 raise AppError(409, "conflict", last_admin_message)
