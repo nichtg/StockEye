@@ -202,7 +202,8 @@ describe('Macro tab', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Possible news effect')).toBeInTheDocument();
     expect(screen.getByText(/A pattern this strong would appear by chance/)).toBeInTheDocument();
-    expect(screen.getByText('3.3% above its usual market-linked move')).toBeInTheDocument();
+    expect(screen.getByText('3.3%')).toBeInTheDocument();
+    expect(screen.getByText('above its usual market‑linked move')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Apple to Bring TV+ to Android' })).toHaveAttribute(
       'target',
       '_blank',

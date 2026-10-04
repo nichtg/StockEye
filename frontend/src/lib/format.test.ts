@@ -52,10 +52,10 @@ describe('dateFormat and hour12For', () => {
 });
 
 describe('moveText', () => {
-  it('says above, below or in line with the stock’s usual market-linked move', () => {
-    expect(moveText(0.021)).toBe('2.1% above its usual market-linked move');
-    expect(moveText(-0.014)).toBe('1.4% below its usual market-linked move');
-    expect(moveText(0)).toBe('In line with its usual market-linked move');
-    expect(moveText(0.00001)).toBe('In line with its usual market-linked move');
+  it('says above, below or in line with the stock’s usual market‑linked move', () => {
+    expect(moveText(0.021)).toBe('2.1% above its usual market‑linked move');
+    expect(moveText(-0.014)).toBe('1.4% below its usual market‑linked move');
+    expect(moveText(0)).toBe('In line with its usual market‑linked move');
+    expect(moveText(0.00001)).toBe('In line with its usual market‑linked move');
   });
 });
