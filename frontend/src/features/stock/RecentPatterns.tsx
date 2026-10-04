@@ -50,11 +50,13 @@ function LatestPatternSentence({
   exchange: Exchange;
 }) {
   const ago = latest.sessions_ago;
+  // Lower-cased and followed by "pattern", so plural names ("three white soldiers") read right.
+  const name = latest.label.toLowerCase();
   return (
     <>
       {' '}
-      The most recent was {indefinite(latest.label)}{' '}
-      {isTermId(latest.pattern) ? <Term id={latest.pattern}>{latest.label}</Term> : latest.label} on{' '}
+      The most recent was {indefinite(name)}{' '}
+      {isTermId(latest.pattern) ? <Term id={latest.pattern}>{name}</Term> : name} pattern on{' '}
       {formatDate(latest.date, exchange)} ({ago} trading {ago === 1 ? 'day' : 'days'} ago), too old
       to count in this week’s outlook.
     </>

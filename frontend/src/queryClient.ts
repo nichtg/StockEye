@@ -12,8 +12,13 @@ export function shouldRetry(failureCount: number, error: unknown): boolean {
   return failureCount < 1;
 }
 
+/** The mark must outlive the moment nothing observes it, until the login page clears it. */
+export function keepSignedOutMark(client: QueryClient): void {
+  client.setQueryDefaults(signedOutOnPurposeKey, { gcTime: Infinity });
+}
+
 export function createQueryClient(): QueryClient {
-  return new QueryClient({
+  const client = new QueryClient({
     defaultOptions: {
       queries: {
         staleTime: 30_000,
@@ -22,6 +27,8 @@ export function createQueryClient(): QueryClient {
       },
     },
   });
+  keepSignedOutMark(client);
+  return client;
 }
 
 /**

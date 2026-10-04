@@ -43,6 +43,7 @@ export const TERM_IDS = [
   'p_value',
   'statistical_reliability',
   'news_effect',
+  'near_earnings',
   'earnings',
   'dividend',
   'split',
@@ -219,6 +220,10 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   news_effect: {
     title: 'News effect',
     body: 'How sure we can be that news, rather than luck, is linked to these moves. It is not a buy or sell signal.',
+  },
+  near_earnings: {
+    title: 'Earnings tag',
+    body: 'Within a day of an earnings release, so the move may reflect the results rather than the news.',
   },
   earnings: {
     title: 'Earnings',

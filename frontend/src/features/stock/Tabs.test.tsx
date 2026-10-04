@@ -81,9 +81,9 @@ describe('Technical tab: latest pattern', () => {
     renderWith(6, false);
     const line = await screen.findByText(/No patterns in the last 3 trading days\./);
     expect(line).toHaveTextContent(
-      'The most recent was a Bearish engulfing on Sep 23, 2026 (6 trading days ago), too old to count in this week’s outlook.',
+      'The most recent was a bearish engulfing pattern on Sep 23, 2026 (6 trading days ago), too old to count in this week’s outlook.',
     );
-    expect(screen.getByRole('button', { name: 'What is Bearish engulfing?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'What is bearish engulfing?' })).toBeInTheDocument();
   });
 
   it('uses the singular for one day', async () => {

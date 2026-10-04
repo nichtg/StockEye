@@ -2,7 +2,6 @@ import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes, useLocation } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
-import { signedOutOnPurposeKey } from '../../api/keys';
 import type { User } from '../../api/types';
 import { AccountMenu } from '../../components/AccountMenu';
 import { stubFetch, type MockHandler } from '../../test/mockApi';
@@ -130,15 +129,12 @@ describe('delete account through the real route guards', () => {
       return undefined;
     });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
-    const { client } = renderApp(
+    renderApp(
       <>
         <App />
         <LocationProbe />
       </>,
     );
-
-    // The test client drops unobserved data at once; the app keeps it for minutes.
-    client.setQueryDefaults(signedOutOnPurposeKey, { gcTime: 60_000 });
 
     await user.click(await screen.findByRole('button', { name: 'Account menu' }));
     await user.click(await screen.findByRole('menuitem', { name: /Delete account/ }));
