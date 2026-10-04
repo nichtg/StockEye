@@ -17,6 +17,7 @@ export type ProviderStatus = Omit<S['ProviderStatus'], 'daily_limit' | 'resets_a
 export type ProviderLevel = ProviderStatus['level'];
 
 export type DataStatus = S['DataStatus'];
+export type FullStatuses = S['FullStatuses'];
 export type DataState = DataStatus['state'];
 export type StockOut = S['StockOut'];
 export type SymbolMatch = S['SymbolMatch'];

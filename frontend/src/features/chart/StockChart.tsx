@@ -4,7 +4,7 @@ import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { useEffect, useMemo } from 'react';
-import type { DataStatus, StockOut } from '../../api/types';
+import type { FullStatuses, StockOut } from '../../api/types';
 import { QueryRegion } from '../../components/QueryRegion';
 import { exchangeCurrency, exchangeOfSymbol } from '../../lib/exchange';
 import { radius } from '../../theme/tokens';
@@ -23,8 +23,8 @@ export const HEIGHT_MOBILE = 300;
 interface Props {
   symbol: string;
   stock: StockOut | undefined;
-  /** Reports the chart data's freshness, for the page's status line. */
-  onStatus: (status: DataStatus | undefined) => void;
+  /** Reports the chart data's freshness (prices, events and news), for the page's status line. */
+  onStatus: (status: FullStatuses | undefined) => void;
 }
 
 /** The price chart with its controls. Owns the range, indicator and marker choices. */
@@ -35,7 +35,7 @@ export function StockChart({ symbol, stock, onStatus }: Props) {
   const chart = useChart(symbol, settings.range);
   const sentences = usePatternReliability(symbol);
 
-  const status = chart.data?.data_status.overall;
+  const status = chart.data?.data_status;
   useEffect(() => {
     onStatus(status);
   }, [onStatus, status]);

@@ -11,20 +11,25 @@ describe('MarkerKey', () => {
     renderApp(
       <MarkerKey shown={['earnings', 'news']} counts={counts} onToggle={() => undefined} />,
     );
-    expect(screen.getByRole('button', { name: /^News\s*14$/ })).toBeEnabled();
-    expect(screen.getByRole('button', { name: /^Earnings\s*3$/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'News, 14 in this range' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Earnings, 3 in this range' })).toBeInTheDocument();
   });
 
-  it('disables a kind with none in range and says why', async () => {
+  it('dims a kind with none in range, keeps it focusable and says why', async () => {
     const user = userEvent.setup();
-    renderApp(<MarkerKey shown={['dividend']} counts={counts} onToggle={() => undefined} />);
+    const onToggle = vi.fn();
+    renderApp(<MarkerKey shown={['dividend']} counts={counts} onToggle={onToggle} />);
 
-    const dividends = screen.getByRole('button', { name: /^Dividends\s*0$/ });
-    expect(dividends).toBeDisabled();
+    const dividends = screen.getByRole('button', { name: 'Dividends, 0 in this range' });
+    expect(dividends).toHaveAttribute('aria-disabled', 'true');
     expect(dividends).toHaveAttribute('aria-pressed', 'false');
 
-    await user.hover(dividends.parentElement!);
+    // Keyboard users can reach it by tabbing.
+    while (document.activeElement !== dividends) await user.tab();
+    await user.hover(dividends);
     expect(await screen.findByText('No dividends in this range')).toBeInTheDocument();
+    await user.click(dividends);
+    expect(onToggle).not.toHaveBeenCalled();
   });
 
   it('leaves every kind usable while the chart has no data yet', () => {

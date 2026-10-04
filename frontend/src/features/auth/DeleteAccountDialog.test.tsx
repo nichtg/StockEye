@@ -6,6 +6,7 @@ import type { User } from '../../api/types';
 import { AccountMenu } from '../../components/AccountMenu';
 import { stubFetch, type MockHandler } from '../../test/mockApi';
 import { renderApp } from '../../test/render';
+import { App } from '../../App';
 import { AuthForm } from './AuthForm';
 
 const me: User = {
@@ -67,6 +68,30 @@ describe('delete account', () => {
     });
   });
 
+  it('sends any other 403, such as a CSRF failure, to the alert and not the field', async () => {
+    const { user } = await openDialog((req) =>
+      req.method === 'DELETE'
+        ? {
+            status: 403,
+            body: { error: { code: 'csrf_failed', message: 'Security check failed.' } },
+          }
+        : undefined,
+    );
+    await user.type(screen.getByLabelText(/Password/), 'a-password');
+    await user.click(screen.getByRole('button', { name: 'Delete account' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Security check failed.');
+    expect(screen.getByLabelText(/Password/)).toBeValid();
+  });
+
+  it('focuses the password field when it opens and describes the dialog', async () => {
+    const { dialog } = await openDialog(() => undefined);
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Password/)).toHaveFocus();
+    });
+    expect(dialog).toHaveAccessibleDescription(/permanently deletes your account/);
+  });
+
   it('shows the only-admin refusal as an alert', async () => {
     const message = 'You are the only admin. Make someone else an admin first.';
     const { user } = await openDialog((req) =>
@@ -79,15 +104,33 @@ describe('delete account', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
   });
+});
 
-  it('leaves for the login page with a notice once the account is gone', async () => {
-    const { user } = await openDialog((req) =>
-      req.method === 'DELETE' ? { status: 204 } : undefined,
-    );
-    await user.type(screen.getByLabelText(/Password/), 'a-password');
+describe('delete account through the real route guards', () => {
+  it('lands on /login with the notice, without a ?next= redirect, and shows it once', async () => {
+    let deleted = false;
+    stubFetch((req) => {
+      if (req.method === 'DELETE' && req.path === '/me') {
+        deleted = true;
+        return { status: 204 };
+      }
+      if (req.path === '/me') return deleted ? { status: 401 } : { body: me };
+      if (req.path === '/watchlist') return { body: { items: [] } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderApp(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Account menu' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Delete account/ }));
+    await user.type(await screen.findByLabelText(/Password/), 'a-password');
     await user.click(screen.getByRole('button', { name: 'Delete account' }));
 
     expect(await screen.findByRole('heading', { name: 'Log in' })).toBeInTheDocument();
     expect(screen.getByText('Your account was deleted.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Create an account' })).toHaveAttribute(
+      'href',
+      '/register',
+    );
   });
 });

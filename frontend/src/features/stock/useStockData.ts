@@ -22,7 +22,7 @@ import type {
   TechnicalReport,
 } from '../../api/types';
 
-export const MACRO_POLL_MS = 5000;
+export const NEWS_POLL_MS = 5000;
 
 export function useStock(symbol: string) {
   return useQuery({
@@ -73,7 +73,7 @@ export function useNewsProgress(symbol: string) {
     queryKey: newsKey(symbol),
     queryFn: ({ signal }) =>
       api.get<NewsProgress>(`/stocks/${encodeURIComponent(symbol)}/news`, { signal }),
-    refetchInterval: (q) => (q.state.data?.in_progress ? MACRO_POLL_MS : false),
+    refetchInterval: (q) => (q.state.data?.in_progress ? NEWS_POLL_MS : false),
   });
 
   const previous = useRef<{ symbol: string; monthsDone: number; inProgress: boolean } | undefined>(

@@ -10,8 +10,7 @@ import { Direction } from '../../components/Direction';
 import { SectionTitle } from '../../components/SectionTitle';
 import { Term } from '../../components/Term';
 import type { Exchange } from '../../lib/exchange';
-import { formatDate } from '../../lib/format';
-import { moveText } from './macroText';
+import { formatDate, moveText } from '../../lib/format';
 
 const TOP_SHOWN = 5;
 

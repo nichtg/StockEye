@@ -1,22 +1,14 @@
-const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+import type { AdminUser } from '../../api/types';
 
-const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
-  ['year', 365 * 24 * 3600],
-  ['month', 30 * 24 * 3600],
-  ['week', 7 * 24 * 3600],
-  ['day', 24 * 3600],
-  ['hour', 3600],
-  ['minute', 60],
-];
+const STATUS_LABELS: Record<AdminUser['status'], string> = {
+  active: 'Active',
+  disabled: 'Disabled',
+  deleting: 'Being deleted',
+};
 
-/** "3 hours ago", "yesterday". Anything under a minute reads "just now". */
-export function formatRelative(iso: string, now: number = Date.now()): string {
-  const seconds = Math.round((new Date(iso).getTime() - now) / 1000);
-  const abs = Math.abs(seconds);
-  for (const [unit, size] of UNITS) {
-    if (abs >= size) return rtf.format(Math.round(seconds / size), unit);
-  }
-  return 'just now';
+/** Exhaustive on purpose: a new status from the API fails typecheck until it is worded here. */
+export function statusLabel(status: AdminUser['status']): string {
+  return STATUS_LABELS[status];
 }
 
 export function formatAbsolute(iso: string): string {

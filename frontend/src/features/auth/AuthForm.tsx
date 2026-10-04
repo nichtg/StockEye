@@ -8,8 +8,8 @@ import InputAdornment from '@mui/material/InputAdornment';
 import Link from '@mui/material/Link';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { useRef, useState, type SyntheticEvent } from 'react';
-import { Link as RouterLink, useLocation, useSearchParams } from 'react-router';
+import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
+import { Link as RouterLink, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { isApiError, userMessage } from '../../api/errors';
 import { Wordmark } from '../../components/Wordmark';
 import { useDocumentTitle } from '../../hooks';
@@ -62,7 +62,18 @@ export function AuthForm({ mode }: { mode: Mode }) {
   useDocumentTitle(copy.title);
 
   const [params] = useSearchParams();
-  const notice = noticeFrom(useLocation().state);
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Shown once: kept here, then dropped from the history entry so a reload doesn't repeat it.
+  const [notice] = useState(() => noticeFrom(location.state));
+  useEffect(() => {
+    if (notice)
+      void navigate(
+        { pathname: location.pathname, search: location.search },
+        { replace: true, state: null },
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, for the notice we arrived with
+  }, []);
   const next = params.get('next');
   const switchTo = next ? `${copy.switchTo}?next=${encodeURIComponent(next)}` : copy.switchTo;
 

@@ -7,7 +7,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 import TextField from '@mui/material/TextField';
-import { useState, type SyntheticEvent } from 'react';
+import { useRef, useState, type SyntheticEvent } from 'react';
 import { isApiError, userMessage } from '../../api/errors';
 import { useDeleteAccount } from './useAuth';
 
@@ -20,10 +20,12 @@ interface Props {
 export function DeleteAccountDialog({ open, onClose }: Props) {
   const [password, setPassword] = useState('');
   const remove = useDeleteAccount();
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   // A wrong password belongs to the field; every other failure (last admin, rate limit) to the form.
   const error = remove.error;
-  const fieldError = isApiError(error) && error.status === 403 ? error.message : undefined;
+  const fieldError =
+    isApiError(error) && error.code === 'invalid_password' ? error.message : undefined;
   const formError = error && !fieldError ? userMessage(error) : undefined;
 
   const close = () => {
@@ -40,10 +42,12 @@ export function DeleteAccountDialog({ open, onClose }: Props) {
       open={open}
       onClose={close}
       aria-labelledby="delete-account-title"
+      aria-describedby="delete-account-description"
       maxWidth="xs"
       fullWidth
       slotProps={{
         transition: {
+          onEntered: () => passwordRef.current?.focus(),
           onExited: () => {
             setPassword('');
             remove.reset();
@@ -54,7 +58,7 @@ export function DeleteAccountDialog({ open, onClose }: Props) {
       <form noValidate onSubmit={submit}>
         <DialogTitle id="delete-account-title">Delete your account?</DialogTitle>
         <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
+          <DialogContentText id="delete-account-description" sx={{ mb: 2 }}>
             This permanently deletes your account and your watchlist. This can’t be undone.
           </DialogContentText>
           {formError && (
@@ -75,6 +79,7 @@ export function DeleteAccountDialog({ open, onClose }: Props) {
             helperText={fieldError}
             fullWidth
             required
+            inputRef={passwordRef}
             slotProps={{ htmlInput: { autoComplete: 'current-password', spellCheck: false } }}
           />
         </DialogContent>

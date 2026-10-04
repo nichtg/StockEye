@@ -205,7 +205,7 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   },
   news_event: {
     title: 'News event',
-    body: 'A day with a cluster of notable headlines about the stock. We check what the price did around these days to see whether news moved it.',
+    body: 'A day with a cluster of notable headlines. We check what the price did around it to see whether news moved it. On the chart, the dot’s tone shows the direction of the move and its size shows how big it was.',
   },
   p_value: {
     title: 'P-value',

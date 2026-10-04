@@ -2,6 +2,7 @@ import DeleteOutline from '@mui/icons-material/DeleteOutline';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
+import Typography from '@mui/material/Typography';
 import type { AdminUser, AdminUserPatch } from '../../api/types';
 
 export interface OpenMenu {
@@ -23,6 +24,7 @@ export function UserActionsMenu({ menu, onClose, onPatch, onDelete }: Props) {
       {menu && [
         <MenuItem
           key="role"
+          disabled={menu.user.status === 'deleting'}
           onClick={() => {
             const isAdmin = menu.user.role === 'admin';
             onPatch(
@@ -38,6 +40,7 @@ export function UserActionsMenu({ menu, onClose, onPatch, onDelete }: Props) {
         </MenuItem>,
         <MenuItem
           key="status"
+          disabled={menu.user.status === 'deleting'}
           onClick={() => {
             const active = menu.user.status === 'active';
             onPatch(
@@ -49,6 +52,16 @@ export function UserActionsMenu({ menu, onClose, onPatch, onDelete }: Props) {
         >
           {menu.user.status === 'active' ? 'Disable' : 'Enable'}
         </MenuItem>,
+        menu.user.status === 'deleting' && (
+          <Typography
+            key="why"
+            variant="caption"
+            component="p"
+            sx={{ px: 2, py: 0.5, color: 'ink3' }}
+          >
+            This account is being deleted, so its role and status can’t change.
+          </Typography>
+        ),
         <MenuItem
           key="delete"
           onClick={() => {

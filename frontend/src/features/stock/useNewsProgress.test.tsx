@@ -1,7 +1,8 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { stubFetch } from '../../test/mockApi';
 import { renderApp } from '../../test/render';
-import { MACRO_POLL_MS, useNewsProgress } from './useStockData';
+import { NEWS_POLL_MS, useNewsProgress } from './useStockData';
 
 function progress(done: boolean, monthsDone: number) {
   return {
@@ -18,6 +19,24 @@ function Poller({ symbol }: { symbol: string }) {
   return <p>{news.data ? `${String(news.data.months_done)} months` : 'loading'}</p>;
 }
 
+function Switcher() {
+  const [symbol, setSymbol] = useState('AAPL');
+  const news = useNewsProgress(symbol);
+  return (
+    <>
+      <p>{news.data ? `${symbol}: ${String(news.data.months_done)} months` : 'loading'}</p>
+      <button
+        type="button"
+        onClick={() => {
+          setSymbol('MSFT');
+        }}
+      >
+        Switch
+      </button>
+    </>
+  );
+}
+
 const FINISHED = 'News collection finished. Results updated.';
 
 describe('useNewsProgress', () => {
@@ -27,7 +46,7 @@ describe('useNewsProgress', () => {
 
   async function tick() {
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(MACRO_POLL_MS + 100);
+      await vi.advanceTimersByTimeAsync(NEWS_POLL_MS + 100);
     });
   }
 
@@ -64,13 +83,35 @@ describe('useNewsProgress', () => {
   });
 
   it('stays quiet when a stock is already complete on first load', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     stubFetch((req) =>
       req.path === '/stocks/AAPL/news' ? { body: progress(true, 24) } : undefined,
     );
-    renderApp(<Poller symbol="AAPL" />);
+    const { client } = renderApp(<Poller symbol="AAPL" />);
+    const spy = vi.spyOn(client, 'invalidateQueries');
     expect(await screen.findByText('24 months')).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.queryByText(FINISHED)).not.toBeInTheDocument();
+    await tick();
+    await tick();
+    expect(screen.queryByText(FINISHED)).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("treats the next stock's first answer as a baseline, not a change", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubFetch((req) => {
+      if (req.path === '/stocks/AAPL/news') return { body: progress(false, 8) };
+      // A different stock that is already complete: in_progress went true -> false across symbols.
+      if (req.path === '/stocks/MSFT/news') return { body: progress(true, 24) };
+      return undefined;
     });
+    const { client } = renderApp(<Switcher />);
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    expect(await screen.findByText('AAPL: 8 months')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch' }));
+    expect(await screen.findByText('MSFT: 24 months')).toBeInTheDocument();
+    await tick();
+    expect(screen.queryByText(FINISHED)).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
   });
 });

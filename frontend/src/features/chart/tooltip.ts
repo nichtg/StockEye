@@ -1,7 +1,13 @@
 import type { Candle, ChartMarker } from '../../api/types';
 import { exchangeTimeZone, hour12For, type Exchange } from '../../lib/exchange';
-import { formatDate, formatPct, formatPrice, formatSigned, formatVolume } from '../../lib/format';
-import { moveText } from '../stock/macroText';
+import {
+  formatDate,
+  formatPct,
+  formatPrice,
+  formatSigned,
+  formatVolume,
+  moveText,
+} from '../../lib/format';
 
 /** Pattern key -> plain-language reliability sentence (see `usePatternReliability`). */
 export type PatternSentences = Record<string, string | undefined>;

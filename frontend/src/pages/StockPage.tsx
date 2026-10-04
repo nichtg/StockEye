@@ -4,7 +4,7 @@ import Tabs from '@mui/material/Tabs';
 import { useCallback, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router';
 import { isApiError, userMessage } from '../api/errors';
-import type { DataStatus } from '../api/types';
+import type { FullStatuses } from '../api/types';
 import { ErrorState } from '../components/ErrorState';
 import { StockNotFound } from '../components/StockNotFound';
 import { StockChart } from '../features/chart/StockChart';
@@ -24,10 +24,10 @@ export default function StockPage() {
   const [params, setParams] = useSearchParams();
   const tab: TabKey = params.get('tab') === 'macro' ? 'macro' : 'technical';
   // Tagged with its symbol, so the previous symbol's freshness never shows under a new header.
-  const [reported, setReported] = useState<{ symbol: string; status?: DataStatus }>();
-  const chartStatus = reported?.symbol === symbol ? reported.status : undefined;
+  const [reported, setReported] = useState<{ symbol: string; status?: FullStatuses }>();
+  const chartStatuses = reported?.symbol === symbol ? reported.status : undefined;
   const setChartStatus = useCallback(
-    (status: DataStatus | undefined) => {
+    (status: FullStatuses | undefined) => {
       setReported({ symbol, status });
     },
     [symbol],
@@ -58,7 +58,12 @@ export default function StockPage() {
         symbol={symbol}
         stock={stock.data}
         loading={stock.isPending}
-        statuses={[stock.data?.data_status, news.data?.status ?? chartStatus]}
+        statuses={[
+          stock.data?.data_status,
+          chartStatuses?.prices,
+          chartStatuses?.events,
+          news.data?.status ?? chartStatuses?.news,
+        ]}
       />
 
       <Box sx={{ mt: 4 }}>

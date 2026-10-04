@@ -6,7 +6,8 @@ import { MARKER_DEFS, emptyMarkerText, type MarkerKind } from './markers';
 
 /**
  * Key to the chart's markers; each entry is also the switch that shows or hides that kind. It
- * counts what the chart's data holds, and a kind with nothing there is disabled and says why.
+ * counts what the chart's data holds, and a kind with nothing there is dimmed and says why. It
+ * stays focusable (aria-disabled, not disabled) so keyboard users can reach the explanation.
  */
 export function MarkerKey({
   shown,
@@ -40,56 +41,56 @@ export function MarkerKey({
         return (
           <Box key={m.kind} component="li" sx={{ display: 'inline-flex', alignItems: 'center' }}>
             <Term id={m.term}>
-              {/* The span carries the tooltip: a disabled button can't take hover. */}
-              <Tooltip title={empty ? emptyMarkerText(m.kind) : ''} placement="top">
-                <Box component="span" sx={{ display: 'inline-flex' }}>
-                  <ButtonBase
-                    aria-pressed={on}
-                    disabled={empty}
-                    onClick={() => {
-                      onToggle(m.kind);
-                    }}
+              <Tooltip title={empty ? emptyMarkerText(m.kind) : ''} placement="top" describeChild>
+                <ButtonBase
+                  aria-pressed={on}
+                  aria-disabled={empty}
+                  aria-label={
+                    count === undefined ? undefined : `${m.label}, ${String(count)} in this range`
+                  }
+                  onClick={() => {
+                    if (!empty) onToggle(m.kind);
+                  }}
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.75,
+                    height: 28,
+                    px: 1,
+                    borderRadius: '999px',
+                    border: 1,
+                    borderColor: on ? 'line' : 'transparent',
+                    bgcolor: on ? 'raised' : 'transparent',
+                    color: on ? 'ink2' : 'ink3',
+                    fontFamily: 'inherit',
+                    fontSize: '0.8125rem',
+                    transition: 'background-color 150ms ease',
+                    '&:hover': { bgcolor: 'raised' },
+                    ...(empty && { color: 'ink3', opacity: 0.6, cursor: 'default' }),
+                  }}
+                >
+                  <Box
+                    component="span"
+                    aria-hidden="true"
                     sx={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 0.75,
-                      height: 28,
-                      px: 1,
-                      borderRadius: '999px',
-                      border: 1,
-                      borderColor: on ? 'line' : 'transparent',
-                      bgcolor: on ? 'raised' : 'transparent',
-                      color: on ? 'ink2' : 'ink3',
-                      fontFamily: 'inherit',
-                      fontSize: '0.8125rem',
-                      transition: 'background-color 150ms ease',
-                      '&:hover': { bgcolor: 'raised' },
-                      '&.Mui-disabled': { color: 'ink3', opacity: 0.6 },
+                      fontWeight: 600,
+                      color: on ? 'ink' : 'ink3',
+                      minWidth: 14,
+                      textAlign: 'center',
                     }}
                   >
+                    {m.glyph}
+                  </Box>
+                  {m.label}
+                  {count !== undefined && (
                     <Box
                       component="span"
-                      aria-hidden="true"
-                      sx={{
-                        fontWeight: 600,
-                        color: on ? 'ink' : 'ink3',
-                        minWidth: 14,
-                        textAlign: 'center',
-                      }}
+                      sx={{ color: 'ink3', fontVariantNumeric: 'tabular-nums' }}
                     >
-                      {m.glyph}
+                      {count}
                     </Box>
-                    {m.label}
-                    {count !== undefined && (
-                      <Box
-                        component="span"
-                        sx={{ color: 'ink3', fontVariantNumeric: 'tabular-nums' }}
-                      >
-                        {count}
-                      </Box>
-                    )}
-                  </ButtonBase>
-                </Box>
+                  )}
+                </ButtonBase>
               </Tooltip>
             </Term>
           </Box>

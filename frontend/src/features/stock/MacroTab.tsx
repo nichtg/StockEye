@@ -11,7 +11,7 @@ import { QueryRegion } from '../../components/QueryRegion';
 import { SectionTitle } from '../../components/SectionTitle';
 import { Term } from '../../components/Term';
 import type { Exchange } from '../../lib/exchange';
-import { formatRelative } from '../admin/format';
+import { formatRelative } from '../../lib/format';
 import { radius } from '../../theme/tokens';
 import { FindingList } from './FindingList';
 import { NOT_ENOUGH_NEWS, regimeSentence, type Scope } from './macroText';
@@ -163,7 +163,7 @@ function Content({
   const collecting = progress.in_progress;
   const complete =
     !collecting && progress.months_total > 0 && progress.months_done >= progress.months_total;
-  const newsStatus = data.data_status.news;
+  const newsStatus = news?.status ?? data.data_status.news;
   return (
     <Box>
       {collecting && <CollectionProgress progress={progress} />}

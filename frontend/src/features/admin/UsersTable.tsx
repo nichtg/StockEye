@@ -13,7 +13,8 @@ import Typography from '@mui/material/Typography';
 import type { AdminUserPage } from '../../api/types';
 import { visuallyHidden } from '../../lib/a11y';
 import { radius } from '../../theme/tokens';
-import { formatAbsolute, formatAdminDate, formatRelative } from './format';
+import { formatRelative } from '../../lib/format';
+import { formatAbsolute, formatAdminDate, statusLabel } from './format';
 import type { OpenMenu } from './UserActionsMenu';
 import { USERS_PAGE_SIZE } from './useAdmin';
 
@@ -61,7 +62,7 @@ export function UsersTable({ data, me, page, onPage, onOpenMenu }: UsersTablePro
                 )}
               </TableCell>
               <TableCell>{u.role === 'admin' ? 'Admin' : 'User'}</TableCell>
-              <TableCell>{u.status === 'active' ? 'Active' : 'Disabled'}</TableCell>
+              <TableCell>{statusLabel(u.status)}</TableCell>
               <TableCell>{formatAdminDate(u.created_at)}</TableCell>
               <TableCell>
                 {u.last_login_at ? (

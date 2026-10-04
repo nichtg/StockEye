@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router';
 import { api } from '../../api/client';
 import { isApiError } from '../../api/errors';
-import { meKey } from '../../api/keys';
+import { meKey, signedOutNoticeKey } from '../../api/keys';
 import type { Session, User } from '../../api/types';
 import { clearSession } from '../../queryClient';
 
@@ -56,18 +55,15 @@ export interface LoginNotice {
 
 export const ACCOUNT_DELETED_NOTICE = 'Your account was deleted.';
 
-/** Deletes the signed-in account after re-checking the password, then leaves for the login page. */
+/** Deletes the signed-in account after re-checking the password; the route guard then leaves for /login. */
 export function useDeleteAccount() {
   const client = useQueryClient();
-  const navigate = useNavigate();
   return useMutation({
     mutationFn: (password: string) => api.delete('/me', { body: { password } }),
     onSuccess: () => {
+      // Signing out sends RequireAuth to the login page; the notice rides along with that redirect.
       clearSession(client);
-      void navigate('/login', {
-        replace: true,
-        state: { notice: ACCOUNT_DELETED_NOTICE } satisfies LoginNotice,
-      });
+      client.setQueryData(signedOutNoticeKey, ACCOUNT_DELETED_NOTICE);
     },
   });
 }
