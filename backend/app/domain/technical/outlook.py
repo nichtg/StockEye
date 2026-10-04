@@ -116,7 +116,9 @@ def _pattern_signal(
     """
     label = "Candlestick patterns"
     if not recent_hits:
-        return Signal("patterns", label, 0, 0.0, "No candlestick patterns in the last 3 sessions.")
+        return Signal(
+            "patterns", label, 0, 0.0, "No candlestick patterns in the last 3 trading days."
+        )
     signed: list[float] = []
     lines: list[str] = []
     for hit in recent_hits:
@@ -169,9 +171,9 @@ def _ema_signal(fast: pd.Series, slow: pd.Series) -> Signal | None:
         -1: "9-day EMA is below the 21-day EMA",
     }[d]
     detail += (
-        ", and the cross happened within the last 3 sessions."
+        ", and the cross happened within the last 3 trading days."
         if fresh
-        else ", with no fresh cross in the last 3 sessions."
+        else ", with no fresh cross in the last 3 trading days."
     )
     return Signal("ema_cross", "EMA 9/21", d, _W_EMA, detail)
 
@@ -210,7 +212,7 @@ def build_outlook(
 ) -> Outlook:
     """Combine indicator signals on completed daily bars into a lean and a score.
 
-    ``recent_hits`` are the pattern hits of the last 3 sessions. Signals whose inputs are
+    ``recent_hits`` are the pattern hits of the last 3 trading days. Signals whose inputs are
     still in warm-up are omitted rather than guessed.
     """
     if daily.empty:

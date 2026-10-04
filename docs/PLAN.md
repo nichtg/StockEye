@@ -290,3 +290,50 @@ Reviews:
 - Frontend review: approved in round 3.
 
 Tests: backend 767, frontend 134.
+
+## Phase 3 (approved 2026-10-04): clearer news wording, recap-headline filter, latest-pattern hint, toast notice
+
+The user reviewed the merged phase-2 app and chose 1A, 2A+2B, 4A, 6A+6B+6C and 7A. 2C, 6D, 4B, 4C and pattern time-weighting were declined.
+
+Branches (stacked, each with its own PR):
+- `feat/backend-news-clarity`, from `main`
+- `feat/frontend-news-clarity`, from the backend branch
+
+### Backend
+Two Sonnet tasks run in parallel, each owning its own files.
+- **C1: price-recap headline filter (6C).**
+  - A pure rule-based `is_price_recap(title)` in `domain/macro/` flags headlines that only report a move ("shares up 34%", "stock falls", "trading higher", "why X stock is soaring today", "X moved down 4.79% on Jun 25").
+  - Flagged articles are excluded when macro inputs are read, not at storage, so stored news is cleaned at once. Bump the macro cache version.
+  - Tests: a labelled headline list (precision and recall) and a check that event headline lists contain no recaps.
+  - Report before/after counts and statistics on live AAPL and RKLB.
+  - Opus methodology audit (false positives, no bias introduced).
+- **C2: wording and data (2A, 2B, 4A).**
+  - 2A: reliability labels become "Clear news effect", "Possible news effect" and "No clear news effect", with one source of wording.
+  - 2B: when the all-days scope is clear (p < 0.05) but the primary ex-earnings scope isn't, add the note "This effect comes mostly from news around earnings releases."
+  - 4A: the technical report adds `latest_pattern {date, label, sessions_ago}`.
+  - Tests for each.
+- **Then:** run the gates, regenerate `openapi.json` and the frontend types, run the Opus thermo-nuclear review, and fix until approved. No security review is needed: there are no new endpoints or auth changes.
+
+### Frontend
+One Sonnet task, after the types are regenerated.
+- **1A:** `<Term>` text sits on the line's baseline, and only the `?` icon is centred (`components/Term.tsx` currently uses `alignItems: center`, which lifts small text). Check every text size.
+- **2A:** new labels with a neutral badge style.
+- **2B:** show the earnings note.
+- **4A:** "No patterns in the last 3 trading days. The most recent was a <label> on <date> (<n> trading days ago), too old to count in this week's outlook."
+- **6A:** rows read "41.4% above its usual market-linked move", and the `?` tooltip explains the calculation: the abnormal return on the news day and the next day, against alpha + beta x market, fitted over [t-250, t-20].
+- **6B:** an "Earnings" tag on rows with `near_earnings`.
+- **7A:** move `NoticeProvider` to the app root, so public routes get toasts that auto-hide after 6 s and can be dismissed. The login page shows "Your account was deleted." as a toast. Delete the `signedOutNoticeKey` hand-off and the login Alert.
+- **Then:** Opus review, and fix until approved.
+
+### Verification
+- Live run: the RKLB and AAPL macro tabs, the RKLB Technical tab, a deleted account's toast disappearing, and the term alignment.
+- Re-shoot the screenshots.
+- Push, open two PRs (backend → main, frontend → backend branch), get CI green, and merge only when the user asks.
+
+### Phase 3 status
+- [x] C1 recap filter, plus the Opus audit (approved; AAPL 53/1991, RKLB 112/686, SNDK 247/792 flagged)
+- [x] C2 wording and data
+- [x] Backend thermo review approved (889 tests)
+- [x] F1 frontend, plus the Opus review approved
+- [ ] Live verification and screenshots
+- [ ] PRs open and CI green

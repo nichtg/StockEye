@@ -89,6 +89,7 @@ class MacroReport:
     timeline: list[TimelinePoint]
     events_total: int
     events_insufficient: int
+    earnings_note: str | None  # set by ``_earnings_note``; None when it does not apply
 
 
 def _pct_abs(x: float) -> str:
@@ -99,29 +100,30 @@ def _reliability_finding(p: float, what: str, based_on: int) -> Finding:
     """Reliability sentence; ``what`` is e.g. "a gap this large". The raw p stays in the field.
 
     The label and the "about X in 100" figure come from the same rounded value, so they can
-    never disagree (for example "likely a real effect ... about 5 in 100").
+    never disagree (for example "clear news effect ... about 5 in 100").
     """
     raw = round(p * 100)
     below_floor = raw < 1
     in_100 = max(1, raw)
     label = reliability_label(in_100 / 100)
     chance = "fewer than 1 in 100 times" if below_floor else f"about {in_100} in 100 times"
-    if label == "likely_real":
+    if label == "clear_effect":
         only = "" if below_floor else "only "
         text = (
-            f"Likely a real effect: if news had no influence, {what} would appear "
+            f"Clear news effect: if news had no influence, {what} would appear "
             f"by chance {only}{chance}."
         )
-    elif label == "weak_evidence":
-        text = f"Weak evidence: {what} would appear by chance {chance}."
+    elif label == "possible_effect":
+        text = f"Possible news effect: {what} would appear by chance {chance}."
     elif in_100 >= VERY_OFTEN_AT:
         text = (
-            f"Could be chance: {what} would very often appear by chance, "
+            f"No clear news effect: {what} would very often appear by chance, "
             "too often to rule out luck."
         )
     else:
         text = (
-            f"Could be chance: {what} would appear by chance {chance}, too often to rule out luck."
+            f"No clear news effect: {what} would appear by chance {chance}, "
+            "too often to rule out luck."
         )
     return Finding(text=text, based_on_events=based_on, reliability=label, p_value=p)
 
@@ -217,7 +219,7 @@ def _scope_findings(stats: MacroStats) -> list[Finding]:
         out.append(_reliability_finding(diff.p_value, "a gap this large", total))
     corr = stats.correlation
     if corr is not None:
-        if corr.label == "could_be_chance" or abs(corr.rho) < MIN_LINK:
+        if corr.label == "no_clear_effect" or abs(corr.rho) < MIN_LINK:
             text = "No clear link between how positive the news was and how the stock moved."
         elif corr.rho > 0:
             text = "More positive news tended to go with better-than-expected moves."
@@ -294,6 +296,31 @@ def _event_points(
     return out
 
 
+EARNINGS_NOTE = "This effect comes mostly from news around earnings releases."
+
+
+def _has_clear_test(stats: MacroStats) -> bool:
+    """True when the positive-vs-negative difference or any bucket test is a clear effect.
+
+    The rank correlation is left out on purpose: the note explains the two headline claims
+    ("positive days beat negative days", "this bucket moved"), not the weaker link statement.
+    """
+    if stats.difference is not None and stats.difference.label == "clear_effect":
+        return True
+    return any(b.label == "clear_effect" for b in stats.buckets.values())
+
+
+def _earnings_note(stats_all: MacroStats, stats_ex: MacroStats) -> str | None:
+    """Note for effects that vanish once earnings periods are excluded.
+
+    Applies only when both scopes were emitted (the caller checks) and the all-days scope has
+    a ``clear_effect`` in its difference or bucket tests while the ex-earnings scope has none.
+    """
+    if _has_clear_test(stats_all) and not _has_clear_test(stats_ex):
+        return EARNINGS_NOTE
+    return None
+
+
 def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contract
     events: Sequence[EventResult],
     stats_all: MacroStats,
@@ -310,17 +337,20 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
     announcements). When that scope used exactly the same events as the all-events scope
     (equal counts, since one is a subset of the other) they are identical: only one scope is
     emitted, named "all_events", and ``secondary_scope`` is None. ``headline_findings`` is
-    primary plus the regime line.
+    primary plus the regime line. ``earnings_note`` is set only when both scopes exist and the
+    effect is clear with earnings days included but not without them (see ``_earnings_note``).
     """
     primary = _scope_findings(stats_ex_earnings)
     primary_scope: Scope = "excluding_earnings"
     secondary: list[Finding] = []
     secondary_scope: Scope | None = None
+    note: str | None = None
     if stats_ex_earnings.n_used == stats_all.n_used:
         primary_scope = "all_events"  # no event was excluded, so the two scopes are the same
     else:
         secondary = _scope_findings(stats_all)
         secondary_scope = "all_events"
+        note = _earnings_note(stats_all, stats_ex_earnings)
     headline = list(primary)
     if regime is not None:
         headline.append(_regime_finding(regime))
@@ -338,4 +368,5 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
         timeline=list(timeline),
         events_total=len(events),
         events_insufficient=sum(1 for e in events if e.status != "ok"),
+        earnings_note=note,
     )

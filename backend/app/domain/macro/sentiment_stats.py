@@ -18,14 +18,14 @@ from scipy import stats
 from app.domain.macro.event_study import EventResult
 
 Bucket = Literal["positive", "negative", "neutral"]
-Reliability = Literal["likely_real", "weak_evidence", "could_be_chance"]
+Reliability = Literal["clear_effect", "possible_effect", "no_clear_effect"]
 RegimeLabel = Literal["more_positive_than_usual", "more_negative_than_usual", "typical"]
 
 BUCKETS: tuple[Bucket, ...] = ("positive", "neutral", "negative")
 MIN_BLOCKS = 8  # non-overlapping 30-day baseline blocks needed for the regime z-score
 POSITIVE_ABOVE = 0.3
-LIKELY_REAL_BELOW = 0.05
-WEAK_EVIDENCE_BELOW = 0.2
+CLEAR_EFFECT_BELOW = 0.05
+POSSIBLE_EFFECT_BELOW = 0.2
 MIN_DISTINCT = 2  # rank correlation needs variation in both inputs
 MIN_SPREAD = 1e-12  # float noise on constant series is ~1e-17
 
@@ -41,11 +41,11 @@ def bucket_of(score: float) -> Bucket:
 
 def reliability_label(p: float) -> Reliability:
     """Plain-language reliability of a p-value."""
-    if p < LIKELY_REAL_BELOW:
-        return "likely_real"
-    if p < WEAK_EVIDENCE_BELOW:
-        return "weak_evidence"
-    return "could_be_chance"
+    if p < CLEAR_EFFECT_BELOW:
+        return "clear_effect"
+    if p < POSSIBLE_EFFECT_BELOW:
+        return "possible_effect"
+    return "no_clear_effect"
 
 
 @dataclass(frozen=True)

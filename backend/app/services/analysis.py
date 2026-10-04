@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from app.clock import utc_now
 from app.db import Database
-from app.domain.macro import ScoredArticle
+from app.domain.macro import ScoredArticle, exclude_price_recaps
 from app.logging_setup import get_logger
 from app.repositories.cache import CacheRepository
 from app.services import compute
@@ -37,7 +37,7 @@ from app.services.reports import (
     RangeKey,
     TechnicalReport,
 )
-from app.services.status import DataStatus, combine
+from app.services.status import DataStatus, combine, ok
 
 log = get_logger(__name__)
 
@@ -48,10 +48,15 @@ NEWS_WINDOW_DAYS = 730  # two years of news
 MIN_HISTORY_BARS = 30
 NEW_SYMBOL_LIMIT_REASON = "Daily limit for analysing new stocks reached; try again tomorrow."
 # Bump when a cached report's shape changes, so a deploy never serves the old shape.
-CACHE_SCHEMA = 2
-# Macro reports have their own version: 3 = estimation window [t-250, t-20] with only earnings
-# masked, plus the ``events`` list. Reports cached under the old method must never be served.
-MACRO_CACHE_SCHEMA = 3
+# 3 = TechnicalReport gained ``latest_pattern``.
+CACHE_SCHEMA = 3
+# Macro reports have their own version. 5 = estimation window [t-250, t-20] with only earnings
+# masked, the ``events`` list, price-recap headlines excluded, renamed reliability labels and
+# ``earnings_note``. Reports cached under an older method must never be served.
+MACRO_CACHE_SCHEMA = 5
+RECAP_ONLY_REASON = (
+    "Only price-move recap headlines were found; they are left out of the news study."
+)
 
 
 type _NewsInputs = tuple[IngestProgress, list[ScoredArticle], DataStatus]
@@ -215,7 +220,12 @@ class AnalysisService:
             self._benchmark(symbol),
             self._market.standard_events(symbol),
         )
-        progress, articles, news_status = await news_inputs(name)
+        progress, stored, news_status = await news_inputs(name)
+        # Recaps report a move that already happened (reverse causality). Dropped here, at read
+        # time and for every path into the macro study, so already-stored news is cleaned too.
+        articles = exclude_price_recaps(stored)
+        if stored and not articles and news_status.state == "ok":
+            news_status = ok(news_status.as_of, RECAP_ONLY_REASON)
         report: MacroReportOut | None = None
         if bench is not None:
             cal = session_calendar(

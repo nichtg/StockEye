@@ -65,6 +65,7 @@ This report covers what StockEye is built with, what each piece is for, how the 
 1. **News collection.**
    - 24 monthly Google News windows are backfilled, then refreshed incrementally. Keyed providers are added when configured.
    - Articles are de-duplicated and filtered for relevance (the company's core name or ticker must appear).
+   - Price-recap headlines that merely report a move that already happened ("Stock Drops 6% After ...") are excluded from the analysis, because their sentiment reflects the price move rather than causing it. They are excluded, not rescored, and stay in storage. Known gap: a headline with the company as subject but no "stock"/"shares" and no percent ("Apple falls after earnings") is not caught, because catching it would risk dropping genuine news.
    - Each article is scored with FinBERT.
 2. **Timing without look-ahead.**
    - Each article maps to the **first trading session whose close is after publication**, using the real exchange calendar (America/New_York or Asia/Singapore).

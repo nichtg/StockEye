@@ -64,7 +64,7 @@ def _stats(
     )
 
 
-def _diff(p: float, label: str = "likely_real", mean_diff: float = 0.012) -> Difference:
+def _diff(p: float, label: str = "clear_effect", mean_diff: float = 0.012) -> Difference:
     return Difference(
         mean_diff=mean_diff,
         t=2.5,
@@ -110,11 +110,11 @@ def test_build_macro_report_each_bucket_sentence_is_followed_by_its_own_reliabil
 
     assert "positive news" in findings[0].text
     assert findings[1].p_value == 0.03
-    assert findings[1].reliability == "likely_real"
+    assert findings[1].reliability == "clear_effect"
     assert findings[1].based_on_events == 17
     assert "negative news" in findings[2].text
     assert findings[3].p_value == 0.4
-    assert findings[3].reliability == "could_be_chance"
+    assert findings[3].reliability == "no_clear_effect"
     assert findings[3].based_on_events == 14
 
 
@@ -123,42 +123,42 @@ def test_build_macro_report_each_bucket_sentence_is_followed_by_its_own_reliabil
     [
         (
             0.03,
-            "likely_real",
-            "Likely a real effect: if news had no influence, a gap this large would appear "
+            "clear_effect",
+            "Clear news effect: if news had no influence, a gap this large would appear "
             "by chance only about 3 in 100 times.",
         ),
         (
             0.12,
-            "weak_evidence",
-            "Weak evidence: a gap this large would appear by chance about 12 in 100 times.",
+            "possible_effect",
+            "Possible news effect: a gap this large would appear by chance about 12 in 100 times.",
         ),
         (
             0.5,
-            "could_be_chance",
-            "Could be chance: a gap this large would appear by chance about 50 in 100 times, "
+            "no_clear_effect",
+            "No clear news effect: a gap this large would appear by chance about 50 in 100 times, "
             "too often to rule out luck.",
         ),
         (
             0.002,
-            "likely_real",
-            "Likely a real effect: if news had no influence, a gap this large would appear "
+            "clear_effect",
+            "Clear news effect: if news had no influence, a gap this large would appear "
             "by chance fewer than 1 in 100 times.",
         ),
         (  # 0.049 prints as 5 in 100, so the label must agree with the printed figure
             0.049,
-            "weak_evidence",
-            "Weak evidence: a gap this large would appear by chance about 5 in 100 times.",
+            "possible_effect",
+            "Possible news effect: a gap this large would appear by chance about 5 in 100 times.",
         ),
         (  # 0.196 prints as 20 in 100: could be chance, not weak evidence
             0.196,
-            "could_be_chance",
-            "Could be chance: a gap this large would appear by chance about 20 in 100 times, "
+            "no_clear_effect",
+            "No clear news effect: a gap this large would appear by chance about 20 in 100 times, "
             "too often to rule out luck.",
         ),
         (
             0.97,
-            "could_be_chance",
-            "Could be chance: a gap this large would very often appear by chance, "
+            "no_clear_effect",
+            "No clear news effect: a gap this large would very often appear by chance, "
             "too often to rule out luck.",
         ),
     ],
@@ -184,7 +184,7 @@ def test_build_macro_report_gap_is_worded_as_a_comparison():
 
 
 def test_build_macro_report_tiny_gap_is_the_same_not_a_signed_zero():
-    report = _report(_stats(difference=_diff(0.9, "could_be_chance", mean_diff=-0.00001)))
+    report = _report(_stats(difference=_diff(0.9, "no_clear_effect", mean_diff=-0.00001)))
 
     assert "Positive-news days did about the same as negative-news days." in _texts(report)
 
@@ -195,18 +195,18 @@ def test_build_macro_report_tiny_gap_is_the_same_not_a_signed_zero():
         (
             0.4,
             0.01,
-            "likely_real",
+            "clear_effect",
             "More positive news tended to go with better-than-expected moves.",
         ),
         (
             -0.4,
             0.01,
-            "likely_real",
+            "clear_effect",
             "More positive news tended to go with worse-than-expected moves.",
         ),
-        (0.4, 0.5, "could_be_chance", NO_LINK),
-        (0.05, 0.01, "likely_real", NO_LINK),
-        (0.0, 0.01, "likely_real", NO_LINK),
+        (0.4, 0.5, "no_clear_effect", NO_LINK),
+        (0.05, 0.01, "clear_effect", NO_LINK),
+        (0.0, 0.01, "clear_effect", NO_LINK),
     ],
 )
 def test_build_macro_report_correlation_wording_never_implies_direction_without_evidence(
@@ -312,7 +312,7 @@ def test_build_macro_report_identical_scopes_are_emitted_once_without_prefix():
 
 
 def test_build_macro_report_findings_never_contain_bare_n_or_p():
-    corr = Correlation(rho=0.4, p_value=0.01, n=34, label="likely_real")
+    corr = Correlation(rho=0.4, p_value=0.01, n=34, label="clear_effect")
     regime = Regime(0.3, 0.0, 1.5, 14, "more_positive_than_usual")
     for p in (0.03, 0.12, 0.6, 0.99):
         pos = _bucket("positive", 17, 0.008, p=p, pre=0.02)
@@ -413,7 +413,7 @@ def test_build_macro_report_end_to_end_with_compute_stats_has_findings():
     assert all(isinstance(f, Finding) for f in report.headline_findings)
     reliab = [f for f in report.headline_findings if f.reliability]
     assert reliab
-    assert all(f.reliability == "likely_real" and f.p_value is not None for f in reliab)
+    assert all(f.reliability == "clear_effect" and f.p_value is not None for f in reliab)
 
 
 def test_build_macro_report_events_sorted_ok_only_with_headline_mapping():
@@ -435,3 +435,45 @@ def test_build_macro_report_events_sorted_ok_only_with_headline_mapping():
     assert report.events[0].car_0_1 == -0.01
     assert report.events[1].headline is None
     assert len(report.top_events) == 1  # top_events is unaffected by the full list
+
+
+def _earn_stats(label_p: float | None, *, n_used: int, exclude: bool) -> MacroStats:
+    diff = None if label_p is None else _diff(label_p, reliability_label(label_p))
+    return _stats(
+        n_used=n_used,
+        pos=_bucket("positive", 17, 0.008, p=0.5),
+        neg=_bucket("negative", 17, -0.004, p=0.5),
+        difference=diff,
+        exclude=exclude,
+    )
+
+
+def test_build_macro_report_effect_only_with_earnings_days_gets_earnings_note():
+    ex = _earn_stats(0.5, n_used=30, exclude=True)
+    allv = _earn_stats(0.01, n_used=34, exclude=False)
+
+    report = _report(ex, allv)
+
+    assert report.earnings_note == "This effect comes mostly from news around earnings releases."
+
+
+def test_build_macro_report_all_days_clear_bucket_test_gets_earnings_note():
+    ex = _earn_stats(0.5, n_used=30, exclude=True)
+    allv = _stats(n_used=34, pos=_bucket("positive", 20, 0.02, p=0.01), exclude=False)
+
+    assert _report(ex, allv).earnings_note is not None
+
+
+@pytest.mark.parametrize(
+    ("p_ex", "p_all", "n_ex", "n_all"),
+    [
+        (0.01, 0.01, 30, 34),  # clear without earnings too
+        (0.5, 0.5, 30, 34),  # nothing clear anywhere
+        (0.5, 0.01, 34, 34),  # scopes identical: a single scope is emitted
+    ],
+)
+def test_build_macro_report_earnings_note_absent_when_rule_does_not_apply(p_ex, p_all, n_ex, n_all):
+    ex = _earn_stats(p_ex, n_used=n_ex, exclude=True)
+    allv = _earn_stats(p_all, n_used=n_all, exclude=False)
+
+    assert _report(ex, allv).earnings_note is None

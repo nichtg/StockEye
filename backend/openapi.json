@@ -1059,9 +1059,9 @@
               {
                 "type": "string",
                 "enum": [
-                  "likely_real",
-                  "weak_evidence",
-                  "could_be_chance"
+                  "clear_effect",
+                  "possible_effect",
+                  "no_clear_effect"
                 ]
               },
               {
@@ -1214,9 +1214,9 @@
           "label": {
             "type": "string",
             "enum": [
-              "likely_real",
-              "weak_evidence",
-              "could_be_chance"
+              "clear_effect",
+              "possible_effect",
+              "no_clear_effect"
             ],
             "title": "Label"
           }
@@ -1337,9 +1337,9 @@
           "label": {
             "type": "string",
             "enum": [
-              "likely_real",
-              "weak_evidence",
-              "could_be_chance"
+              "clear_effect",
+              "possible_effect",
+              "no_clear_effect"
             ],
             "title": "Label"
           },
@@ -1442,9 +1442,9 @@
               {
                 "type": "string",
                 "enum": [
-                  "likely_real",
-                  "weak_evidence",
-                  "could_be_chance"
+                  "clear_effect",
+                  "possible_effect",
+                  "no_clear_effect"
                 ]
               },
               {
@@ -1592,6 +1592,45 @@
         ],
         "title": "IngestionOut"
       },
+      "LatestPatternOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "pattern": {
+            "type": "string",
+            "title": "Pattern"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "bias": {
+            "type": "string",
+            "enum": [
+              "bullish",
+              "bearish",
+              "neutral"
+            ],
+            "title": "Bias"
+          },
+          "sessions_ago": {
+            "type": "integer",
+            "title": "Sessions Ago"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "pattern",
+          "label",
+          "bias",
+          "sessions_ago"
+        ],
+        "title": "LatestPatternOut"
+      },
       "MacroReportOut": {
         "properties": {
           "top_events": {
@@ -1682,6 +1721,17 @@
           "events_insufficient": {
             "type": "integer",
             "title": "Events Insufficient"
+          },
+          "earnings_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Earnings Note"
           }
         },
         "type": "object",
@@ -2609,6 +2659,16 @@
             },
             "type": "array",
             "title": "Recent Patterns"
+          },
+          "latest_pattern": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LatestPatternOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "data_status": {
             "$ref": "#/components/schemas/PriceStatuses"
