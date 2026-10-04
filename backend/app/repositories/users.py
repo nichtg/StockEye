@@ -175,6 +175,12 @@ class UsersRepository:
         )
         return result.modified_count == 1
 
+    async def reset_failures(self, user_id: ObjectId) -> None:
+        """Zero the failure counter and drop any lock (a verified password, as after a login)."""
+        await self._col.update_one(
+            {"_id": user_id}, {"$set": {"failed_logins": 0, "locked_until": None}}
+        )
+
     async def clear_expired_lock(self, user_id: ObjectId, now: datetime) -> None:
         """Reset the failure counter if (and only if) a lock has run out.
 

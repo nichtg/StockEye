@@ -256,9 +256,12 @@ class AccountService:
         target = await self._users.get_by_id(principal.id)
         if target is None:  # deleted since the request was authenticated
             raise AppError(401, "unauthenticated", _SIGN_IN_REQUIRED)
+        # Before the password check: it reveals nothing (the caller owns the account) and keeps
+        # a refused last admin from spending lockout attempts on correct passwords.
+        await self._ensure_not_last_admin(target, _ONLY_ADMIN)
         if not await self._check_password(target, password):
             raise AppError(403, "invalid_password", "That password is not correct.")
-        await self._ensure_not_last_admin(target, _ONLY_ADMIN)
+        await self._users.reset_failures(target.id)  # right password: not a guess, as for login
         await self._purge(target, _ONLY_ADMIN)
 
     async def _purge(self, target: UserRecord, last_admin_message: str) -> None:

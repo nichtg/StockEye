@@ -294,3 +294,17 @@ async def test_purge_claim_failure_is_409_when_user_exists_and_404_when_gone(
         "This account changed; please try again.",
     )
     assert gone.value.status == 404
+
+
+async def test_only_admin_repeated_correct_password_never_locks_them_out(
+    db: Database, settings: Settings
+) -> None:
+    root = await make_admin(db, "root@example.com")
+    service = AccountService(db, settings)
+
+    for _ in range(settings.login_max_failures + 2):
+        with pytest.raises(AppError) as refused:
+            await service.delete_self(_principal(root), PASSWORD)
+        assert refused.value.status == 409
+
+    assert (await service.authenticate("root@example.com", PASSWORD)).id == root.id

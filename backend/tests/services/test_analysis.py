@@ -403,13 +403,31 @@ async def test_chart_symbol_without_news_never_builds_a_macro_report(
     assert not [m for m in chart.markers if m.kind == "news"]
 
 
-async def test_news_progress_provider_down_for_known_symbol_still_starts_collection(
+async def test_news_progress_quote_outage_still_collects_for_an_admitted_symbol(
     services: Services, provider: FakeMarketData, news_provider: FakeNews
 ) -> None:
-    provider.fail_symbols["AAPL"] = TransientProviderError("yahoo", "down")  # no cached quote
+    await services.analysis.news_progress("AAPL", USER)  # admitted while prices work
+    await services.news.wait("AAPL")
+    queries = len(news_provider.queries)
+    provider.fail_symbols["AAPL"] = TransientProviderError("yahoo", "down")
 
     progress = await services.analysis.news_progress("AAPL", USER)
-    await services.news.wait("AAPL")
 
-    assert progress.in_progress
-    assert news_provider.queries  # collection ran despite the quote failure
+    assert progress.status.state != "unavailable"
+    assert progress.months_done == 24
+    assert len(news_provider.queries) >= queries
+
+
+async def test_news_progress_quote_outage_does_not_admit_or_start_an_unknown_symbol(
+    services: Services, provider: FakeMarketData, news_provider: FakeNews
+) -> None:
+    provider.fail_symbols["MSFT"] = TransientProviderError("yahoo", "down")
+
+    progress = await services.analysis.news_progress("MSFT", USER)
+
+    assert progress.status.state == "unavailable"
+    assert progress.status.reason is not None
+    assert "can't be checked right now" in progress.status.reason
+    assert not progress.in_progress
+    assert news_provider.queries == []
+    assert not await services.admission.is_admitted("MSFT")

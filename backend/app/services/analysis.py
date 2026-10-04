@@ -69,6 +69,12 @@ class _MarkerCache(BaseModel):
     markers: list[_MarkerEntry]
 
 
+_QUOTE_OUTAGE_STATUS = DataStatus(
+    state="unavailable",
+    reason="Prices for this stock can't be checked right now, so news collection will start later.",
+)
+
+
 def markers_cache_key(symbol: str, progress: IngestProgress) -> str:
     """Changes whenever stored news changes (a month finishes or a top-up lands)."""
     stamp = progress.updated_at.isoformat() if progress.updated_at is not None else "never"
@@ -175,8 +181,12 @@ class AnalysisService:
         except AppError as exc:
             if exc.code == "not_found":
                 raise
-            # Provider down (503), not an unknown symbol: collection can still start, with the
-            # ticker as the company name, as before.
+            # Provider down, so the symbol cannot be validated. Only an already admitted symbol
+            # may proceed; admitting a possibly made-up ticker during an outage would reopen the
+            # unknown-symbol hole.
+            if not await self._admission.is_admitted(symbol):
+                progress = await self._news.progress(symbol)
+                return NewsProgressOut(**dataclasses.asdict(progress), status=_QUOTE_OUTAGE_STATUS)
             name = await self._market.company_name(symbol)
         progress, refused = await self._start_news(symbol, name, user_id)
         status = refused if refused is not None else await self._news.status(symbol)
