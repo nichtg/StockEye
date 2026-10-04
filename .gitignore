@@ -33,3 +33,6 @@ backend/models/*
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Session handoff (briefs, ledger, skill texts)
+.handoff/
