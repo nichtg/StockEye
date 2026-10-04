@@ -31,6 +31,7 @@ from app.services.charts import RANGES
 from app.services.reports import (
     ChartData,
     FullStatuses,
+    LatestPatternOut,
     MacroReportOut,
     OutlookOut,
     PriceStatuses,
@@ -125,8 +126,23 @@ def compute_technical(symbol: str, frame: pd.DataFrame, statuses: PriceStatuses)
             "as_of": as_of.date(),
         }
     )
+    # The chart draws every hit, so the latest one is simply the last hit in the history.
+    latest = None
+    if not recent and hits:
+        hit = max(hits, key=lambda h: h.index)
+        latest = LatestPatternOut(
+            date=pd.Timestamp(hit.date).date(),
+            pattern=hit.key.value,
+            label=PATTERNS[hit.key].label,
+            bias=hit.bias.value,
+            sessions_ago=last - hit.index,
+        )
     return TechnicalReport(
-        symbol=symbol, outlook=outlook_out, recent_patterns=patterns, data_status=statuses
+        symbol=symbol,
+        outlook=outlook_out,
+        recent_patterns=patterns,
+        latest_pattern=latest,
+        data_status=statuses,
     )
 
 

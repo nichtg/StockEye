@@ -18,7 +18,7 @@ from scipy import stats
 from app.domain.macro.event_study import EventResult
 
 Bucket = Literal["positive", "negative", "neutral"]
-Reliability = Literal["likely_real", "weak_evidence", "could_be_chance"]
+Reliability = Literal["clear_effect", "possible_effect", "no_clear_effect"]
 RegimeLabel = Literal["more_positive_than_usual", "more_negative_than_usual", "typical"]
 
 BUCKETS: tuple[Bucket, ...] = ("positive", "neutral", "negative")
@@ -42,10 +42,10 @@ def bucket_of(score: float) -> Bucket:
 def reliability_label(p: float) -> Reliability:
     """Plain-language reliability of a p-value."""
     if p < LIKELY_REAL_BELOW:
-        return "likely_real"
+        return "clear_effect"
     if p < WEAK_EVIDENCE_BELOW:
-        return "weak_evidence"
-    return "could_be_chance"
+        return "possible_effect"
+    return "no_clear_effect"
 
 
 @dataclass(frozen=True)

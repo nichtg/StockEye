@@ -163,7 +163,7 @@ def test_build_outlook_fresh_ema_cross_within_three_sessions_is_mentioned() -> N
 
     ema_sig = _sig(out, "ema_cross")
     assert ema_sig.direction == 1
-    assert "cross happened within the last 3 sessions" in ema_sig.detail
+    assert "cross happened within the last 3 trading days" in ema_sig.detail
 
 
 def test_build_outlook_old_ema_cross_is_not_called_fresh() -> None:

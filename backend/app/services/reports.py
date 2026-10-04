@@ -77,10 +77,19 @@ class RecentPattern(BaseModel):
     stats: PatternStatsOut | None
 
 
+class LatestPatternOut(BaseModel):
+    date: date
+    pattern: str  # pattern key
+    label: str
+    bias: Lean
+    sessions_ago: int  # trading sessions before the last completed bar (0 = the last bar)
+
+
 class TechnicalReport(BaseModel):
     symbol: str
     outlook: OutlookOut
     recent_patterns: list[RecentPattern]
+    latest_pattern: LatestPatternOut | None = None  # only when recent_patterns is empty
     data_status: PriceStatuses
 
 
@@ -186,6 +195,7 @@ class MacroReportOut(BaseModel):
     timeline: list[TimelinePointOut]
     events_total: int
     events_insufficient: int
+    earnings_note: str | None = None  # set when the effect comes mostly from earnings-time news
 
 
 class IngestionOut(BaseModel):

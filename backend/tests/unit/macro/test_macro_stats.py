@@ -40,12 +40,12 @@ def test_bucket_of_thresholds_are_strict(score, expected):
 @pytest.mark.parametrize(
     ("p", "expected"),
     [
-        (0.0, "likely_real"),
-        (0.049, "likely_real"),
-        (0.05, "weak_evidence"),
-        (0.199, "weak_evidence"),
-        (0.2, "could_be_chance"),
-        (0.9, "could_be_chance"),
+        (0.0, "clear_effect"),
+        (0.049, "clear_effect"),
+        (0.05, "possible_effect"),
+        (0.199, "possible_effect"),
+        (0.2, "no_clear_effect"),
+        (0.9, "no_clear_effect"),
     ],
 )
 def test_reliability_label_boundaries(p, expected):
@@ -78,7 +78,7 @@ def test_compute_stats_welch_difference_matches_hand_calculation():
     expected_t = 0.04 / np.sqrt(2 * var / 10)
     assert diff.t == pytest.approx(expected_t)
     assert diff.p_value < 1e-10
-    assert diff.label == "likely_real"
+    assert diff.label == "clear_effect"
 
 
 def test_compute_stats_difference_is_none_when_a_bucket_is_below_min_n():
@@ -106,7 +106,7 @@ def test_compute_stats_spearman_perfect_monotone_relationship():
     assert corr.rho == pytest.approx(1.0)
     assert corr.n == 12
     assert corr.p_value < 0.001
-    assert corr.label == "likely_real"
+    assert corr.label == "clear_effect"
 
 
 def test_compute_stats_correlation_none_below_min_n_and_never_a_p_value():
@@ -394,7 +394,7 @@ def test_compute_stats_bucket_gets_its_own_one_sample_t_test_against_zero():
     expected = stats_lib.ttest_1samp(cars, 0.0)
     assert bucket.t == pytest.approx(float(expected.statistic))
     assert bucket.p_value == pytest.approx(float(expected.pvalue))
-    assert bucket.label == "likely_real"
+    assert bucket.label == "clear_effect"
 
 
 def test_compute_stats_bucket_test_is_none_below_min_n_or_without_spread():
