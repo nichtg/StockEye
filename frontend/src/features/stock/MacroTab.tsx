@@ -111,7 +111,9 @@ function Results({
   const empty =
     report.events_total === 0 && report.top_events.length === 0 && report.timeline.length === 0;
   if (empty && !collecting) return <Typography>{NOT_ENOUGH_NEWS}</Typography>;
-  const showScopes = report.secondary_findings.length > 0;
+  const showScopes = report.secondary_scope != null;
+  const primaryStats =
+    report.primary_scope === 'excluding_earnings' ? report.stats_ex_earnings : report.stats_all;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -132,13 +134,7 @@ function Results({
             <Typography variant="caption" component="p" sx={{ color: 'ink3', mb: 0.5 }}>
               <ScopeLabel scope={report.primary_scope} />
             </Typography>
-            <NewsBasis
-              stats={
-                report.primary_scope === 'excluding_earnings'
-                  ? report.stats_ex_earnings
-                  : report.stats_all
-              }
-            />
+            <NewsBasis stats={primaryStats} />
             <FindingList findings={report.primary_findings} />
             {report.earnings_note && (
               <Typography variant="body2" sx={{ color: 'ink2', mt: 1.5, maxWidth: 720 }}>
@@ -183,10 +179,7 @@ function Results({
             <FindingList findings={report.secondary_findings} />
           </Box>
         )}
-        <ScopeTable
-          scope={showScopes ? 'excluding_earnings' : 'all_events'}
-          stats={report.stats_ex_earnings}
-        />
+        <ScopeTable scope={report.primary_scope} stats={primaryStats} />
         {showScopes && <ScopeTable scope="all_events" stats={report.stats_all} />}
         <Typography variant="body2" sx={{ px: 2, pb: 2, color: 'ink2' }}>
           {detailsLine(report)}
