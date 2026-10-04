@@ -23,7 +23,8 @@ test-results/
 !.env.example
 
 # Models and local data
-backend/models/
+backend/models/*
+!backend/models/README.md
 *.onnx
 
 # Tooling
