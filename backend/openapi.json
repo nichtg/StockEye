@@ -1803,6 +1803,30 @@
             "type": "integer",
             "title": "N Used"
           },
+          "first_event": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Event"
+          },
+          "last_event": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event"
+          },
           "correlation": {
             "anyOf": [
               {
@@ -1843,6 +1867,8 @@
           "exclude_near_earnings",
           "min_n",
           "n_used",
+          "first_event",
+          "last_event",
           "correlation",
           "buckets",
           "difference"
