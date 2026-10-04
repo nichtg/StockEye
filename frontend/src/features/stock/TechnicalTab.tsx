@@ -23,7 +23,9 @@ function Report({ report, exchange }: { report: TechnicalReport; exchange: Excha
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <section aria-label="Outlook">
         <Typography sx={{ fontSize: '1.0625rem', color: 'ink' }}>
-          <Term id="outlook">Short-term lean:</Term>{' '}
+          <Term id="outlook" suffix=":">
+            Short-term lean
+          </Term>{' '}
           <Box component="strong" sx={{ fontWeight: 600 }}>
             {LEAN_WORD[outlook.lean]}
           </Box>
@@ -31,7 +33,9 @@ function Report({ report, exchange }: { report: TechnicalReport; exchange: Excha
         <ScoreBar score={outlook.score} lean={outlook.lean} />
         {range && (
           <Typography sx={{ mt: 2.5 }}>
-            <Term id="expected_range">Typical 1-week range:</Term>{' '}
+            <Term id="expected_range" suffix=":">
+              Typical 1-week range
+            </Term>{' '}
             <Box
               component="span"
               sx={{ color: 'ink', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}
