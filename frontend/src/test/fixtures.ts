@@ -124,7 +124,7 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
       headline_findings: [],
       primary_findings: [
         {
-          text: 'Across 29 news days studied, more positive news tended to go with better-than-expected moves (that day and the next).',
+          text: 'Across 34 news days studied, more positive news tended to go with better-than-expected moves (that day and the next).',
           based_on_events: 34,
           reliability: null,
           p_value: null,

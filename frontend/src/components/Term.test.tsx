@@ -74,6 +74,37 @@ describe('Term', () => {
     ).toBeInTheDocument();
   });
 
+  it('names the button from `label` when given, else from text children, else the entry title', () => {
+    renderApp(
+      <>
+        <Term id="rsi" label="Relative strength">
+          some words
+        </Term>
+        <Term id="vwap">VWAP</Term>
+        <Term id="sma" />
+      </>,
+    );
+    expect(screen.getByRole('button', { name: 'What is Relative strength?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'What is VWAP?' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: `What is ${GLOSSARY.sma.title}?` }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the suffix and the last word together with the "?" in one no-wrap span', () => {
+    renderApp(
+      <p data-testid="p">
+        <Term id="rsi" suffix=".">
+          {'see the words  '}
+        </Term>
+      </p>,
+    );
+    const btn = screen.getByRole('button', { name: /^What is see the words/u });
+    const nowrap = btn.parentElement;
+    expect(nowrap?.textContent).toBe('words.');
+    expect(screen.getByTestId('p').textContent).toBe('see the words.');
+  });
+
   it('has a short plain-English entry for every term', () => {
     for (const id of TERM_IDS) {
       const { title, body } = GLOSSARY[id];

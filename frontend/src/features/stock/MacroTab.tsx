@@ -5,7 +5,13 @@ import Chip from '@mui/material/Chip';
 import LinearProgress from '@mui/material/LinearProgress';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
-import type { Ingestion, MacroResponse, MacroStatsOut, NewsProgress } from '../../api/types';
+import type {
+  Ingestion,
+  MacroReportOut,
+  MacroResponse,
+  MacroStatsOut,
+  NewsProgress,
+} from '../../api/types';
 import { DetailsAccordion } from '../../components/DetailsAccordion';
 import { QueryRegion } from '../../components/QueryRegion';
 import { SectionTitle } from '../../components/SectionTitle';
@@ -52,34 +58,39 @@ function NewsBasis({ stats }: { stats: MacroStatsOut | null | undefined }) {
         <Typography variant="caption" component="p" sx={{ color: 'ink3' }}>
           Based on news from {period}. Each result compares the stock’s move on a news day and the
           next trading day with{' '}
-          <Term id="market_adjusted_return">
-            <>what the market predicted</>
+          <Term id="market_adjusted_return" label="Market-adjusted move" suffix=".">
+            what the market predicted
           </Term>
-          .
         </Typography>
       )}
       {total > 0 && (
         <Typography variant="caption" component="p" sx={{ color: 'ink3' }}>
-          {total}{' '}
-          <Term id="news_days_studied">
-            <>news {total === 1 ? 'day' : 'days'} studied</>
-          </Term>
-          : {counts.positive}{' '}
-          <Term id="positive_news_day">
-            <>positive</>
-          </Term>
-          , {counts.neutral}{' '}
-          <Term id="neutral_news_day">
-            <>neutral</>
-          </Term>
-          , {counts.negative}{' '}
-          <Term id="negative_news_day">
-            <>negative</>
+          <Term id="news_days_studied" label="News days studied" suffix=":">
+            {`${String(total)} news ${total === 1 ? 'day' : 'days'} studied`}
+          </Term>{' '}
+          <Term id="news_day_tones" label="Positive, neutral and negative news days">
+            {`${String(counts.positive)} positive, ${String(counts.neutral)} neutral, ${String(counts.negative)} negative`}
           </Term>
         </Typography>
       )}
     </Box>
   );
+}
+
+/** "34 news days found; 3 left out because …, and 5 near earnings releases." Adds up with the counts above. */
+function detailsLine(report: MacroReportOut): string {
+  const found = `${String(report.events_total)} news ${report.events_total === 1 ? 'day' : 'days'} found`;
+  const short = report.events_insufficient;
+  const near =
+    report.primary_scope === 'excluding_earnings'
+      ? Math.max(0, report.stats_all.n_used - report.stats_ex_earnings.n_used)
+      : 0;
+  const shortText = `${String(short)} left out because there was too little price history around ${short === 1 ? 'it' : 'them'}`;
+  const nearText = `${String(near)} near earnings ${near === 1 ? 'release' : 'releases'}`;
+  if (short > 0 && near > 0) return `${found}; ${shortText}, and ${nearText}.`;
+  if (short > 0) return `${found}; ${shortText}.`;
+  if (near > 0) return `${found}; ${String(near)} left out for being near earnings releases.`;
+  return `${found}.`;
 }
 
 function Results({
@@ -108,7 +119,7 @@ function Results({
               variant="outlined"
               size="small"
               label={<Term id="preliminary">Preliminary</Term>}
-              sx={{ alignSelf: 'center', mb: 1.5 }}
+              sx={{ alignSelf: 'center', mb: 1.5, '& .MuiChip-label': { overflow: 'visible' } }}
             />
           )}
         </Box>
@@ -127,8 +138,9 @@ function Results({
             <FindingList findings={report.primary_findings} />
             {report.earnings_note && (
               <Typography variant="body2" sx={{ color: 'ink2', mt: 1.5, maxWidth: 720 }}>
-                {report.earnings_note}
-                <Term id="earnings" />
+                <Term id="earnings" label="Earnings">
+                  {report.earnings_note}
+                </Term>
               </Typography>
             )}
           </>
@@ -173,9 +185,7 @@ function Results({
         />
         {showScopes && <ScopeTable title="Including earnings periods" stats={report.stats_all} />}
         <Typography variant="body2" sx={{ px: 2, pb: 2, color: 'ink2' }}>
-          {report.events_total} news {report.events_total === 1 ? 'day' : 'days'} found;{' '}
-          {report.events_insufficient} left out because there was too little price history around
-          them.
+          {detailsLine(report)}
         </Typography>
       </DetailsAccordion>
     </Box>

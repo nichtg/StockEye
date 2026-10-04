@@ -10,15 +10,19 @@ interface TermProps {
   id: TermId;
   /** The jargon itself. Leave out to render just the "?" button, e.g. beside a chip. */
   children?: ReactNode;
+  /** Names the button for assistive tech ("What is <label>?"). Defaults to the children when they are plain text, else the entry's title. */
+  label?: string;
+  /** Punctuation that follows the "?" ("." or ":"), kept on the same line as it. */
+  suffix?: string;
 }
 
 /**
  * Jargon wrapper: renders the text plus a small "?" button. The explanation opens on hover, on
  * keyboard focus and on tap (touch), and closes on Escape, blur or a tap elsewhere.
  */
-export function Term({ id, children }: TermProps) {
+export function Term({ id, children, label: labelProp, suffix }: TermProps) {
   const entry = GLOSSARY[id];
-  const label = typeof children === 'string' ? children : entry.title;
+  const label = labelProp ?? (typeof children === 'string' ? children : entry.title);
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLSpanElement>(null);
   const touching = useRef(false);
@@ -42,10 +46,12 @@ export function Term({ id, children }: TermProps) {
   let lead: ReactNode = null;
   let tail: ReactNode = children;
   if (typeof children === 'string') {
-    const m = /^([\s\S]*\s)(\S+)$/.exec(children);
+    const m = /^([\s\S]*\s)(\S+)$/.exec(children.trimEnd());
     if (m) {
       lead = m[1];
       tail = m[2];
+    } else {
+      tail = children.trimEnd();
     }
   }
 
@@ -99,7 +105,7 @@ export function Term({ id, children }: TermProps) {
               height: '1.1em',
               minWidth: 0,
               p: 0,
-              ml: children === undefined ? 0 : '0.25em',
+              ml: '0.25em',
               fontSize: 'inherit',
               lineHeight: 1,
               borderRadius: '50%',
@@ -120,6 +126,7 @@ export function Term({ id, children }: TermProps) {
             <HelpOutline sx={{ display: 'block', width: '100%', height: '100%' }} />
           </IconButton>
         </Tooltip>
+        {suffix}
       </Box>
     </Box>
   );

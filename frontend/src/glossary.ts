@@ -37,9 +37,7 @@ export const TERM_IDS = [
   'finbert',
   'sentiment_regime',
   'market_adjusted_return',
-  'positive_news_day',
-  'neutral_news_day',
-  'negative_news_day',
+  'news_day_tones',
   'benchmark',
   'news_event',
   'news_days_studied',
@@ -201,17 +199,9 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
     title: 'Market-adjusted move',
     body: 'The stock’s actual move minus the move its usual link to the market would predict, added up over the news day and the next trading day. The usual link is measured over about a year of trading before the news.',
   },
-  positive_news_day: {
-    title: 'Positive news day',
-    body: 'A day whose headlines averaged a sentiment score above +0.3, on a scale from −1 (very negative) to +1 (very positive).',
-  },
-  neutral_news_day: {
-    title: 'Neutral news day',
-    body: 'A day whose headlines averaged a sentiment score between −0.3 and +0.3, on a scale from −1 (very negative) to +1 (very positive).',
-  },
-  negative_news_day: {
-    title: 'Negative news day',
-    body: 'A day whose headlines averaged a sentiment score below −0.3, on a scale from −1 (very negative) to +1 (very positive).',
+  news_day_tones: {
+    title: 'Positive, neutral and negative news days',
+    body: 'A day’s headlines are scored from −1 to +1 and averaged. Above +0.3 is a positive news day, below −0.3 is a negative one, and anything in between is neutral.',
   },
   preliminary: {
     title: 'Preliminary',
@@ -222,12 +212,12 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
     body: 'The market index the stock is compared against, such as the S&P 500 for US stocks or the Straits Times Index for Singapore.',
   },
   news_event: {
-    title: 'News event',
+    title: 'News day',
     body: 'A day with a cluster of notable headlines. We check what the price did around it to see whether news moved it. On the chart, the dot’s tone shows the direction of the move and its size shows how big it was.',
   },
   news_days_studied: {
     title: 'News days studied',
-    body: 'At most one news day in any six trading days is studied (the one with the most notable news), so each move stays separate. Days with too little earlier price history (the first four months) or near earnings, where noted, are left out.',
+    body: 'At most one news day in any six trading days is studied (the most notable), keeping moves separate. Days in a stock’s first four months of trading (too little earlier price history), or near earnings where noted, are left out.',
   },
   p_value: {
     title: 'P-value',

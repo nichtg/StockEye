@@ -183,13 +183,15 @@ describe('Macro tab', () => {
         : undefined,
     );
     const first = renderApp(<MacroTab symbol="AAPL" exchange="US" />);
-    expect(await screen.findByText(note)).toBeInTheDocument();
+    expect(
+      await screen.findByText((_, el) => el?.tagName === 'P' && el.textContent === note),
+    ).toBeInTheDocument();
     first.unmount();
 
     stubFetch((req) => (req.path === '/stocks/AAPL/macro' ? { body: macroFixture() } : undefined));
     renderApp(<MacroTab symbol="AAPL" exchange="US" />);
     await screen.findByText('Possible news effect');
-    expect(screen.queryByText(note)).not.toBeInTheDocument();
+    expect(screen.queryByText(/mostly from news around earnings/)).not.toBeInTheDocument();
   });
 
   it('shows findings with a reliability chip, and the p-value only inside Details', async () => {
@@ -364,9 +366,15 @@ describe('Macro tab period and counts', () => {
     ).toBeInTheDocument();
     const counts = countsLine(/^29 news days studied:/);
     expect(counts.textContent).toBe('29 news days studied: 17 positive, 7 neutral, 5 negative');
-    for (const name of ['Positive news day', 'Neutral news day', 'Negative news day']) {
-      expect(within(counts).getByRole('button', { name: `What is ${name}?` })).toBeInTheDocument();
-    }
+    expect(
+      within(counts).getByRole('button', { name: 'What is News days studied?' }),
+    ).toBeInTheDocument();
+    expect(
+      within(counts).getByRole('button', {
+        name: 'What is Positive, neutral and negative news days?',
+      }),
+    ).toBeInTheDocument();
+    expect(within(counts).getAllByRole('button')).toHaveLength(2);
   });
 
   it('uses one month, the singular, and zero for a missing bucket', async () => {
@@ -430,5 +438,48 @@ describe('Macro tab period and counts', () => {
     await user.click(screen.getByRole('button', { name: 'Details' }));
     expect(await findCounts(/^40 news days studied:/)).toBeInTheDocument();
     expect(screen.getByText(/Mar 2023 to Feb 2026/)).toBeInTheDocument();
+  });
+
+  async function detailsText(mutate: Parameters<typeof withStats>[0]) {
+    show(withStats(mutate));
+    const user = userEvent.setup();
+    await screen.findByText('Possible news effect');
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    return (await screen.findByText(/news days? found/)).textContent;
+  }
+
+  it('reconciles the Details line with the counts: short history and near-earnings days', async () => {
+    expect(
+      await detailsText((r) => {
+        r.events_total = 42;
+        r.events_insufficient = 3;
+        r.stats_all = stats(39, '2024-10-01', '2026-10-02');
+        r.stats_ex_earnings = stats(34, '2024-10-01', '2026-10-02');
+      }),
+    ).toBe(
+      '42 news days found; 3 left out because there was too little price history around them, and 5 near earnings releases.',
+    );
+  });
+
+  it('handles singular and zero in the Details line', async () => {
+    expect(
+      await detailsText((r) => {
+        r.events_total = 36;
+        r.events_insufficient = 1;
+        r.stats_all = stats(35, null, null);
+        r.stats_ex_earnings = stats(35, null, null);
+      }),
+    ).toBe('36 news days found; 1 left out because there was too little price history around it.');
+  });
+
+  it('says only how many are near earnings when nothing lacks history', async () => {
+    expect(
+      await detailsText((r) => {
+        r.events_total = 1;
+        r.events_insufficient = 0;
+        r.stats_all = stats(1, null, null);
+        r.stats_ex_earnings = stats(0, null, null);
+      }),
+    ).toBe('1 news day found; 1 left out for being near earnings releases.');
   });
 });
