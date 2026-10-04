@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -35,6 +36,7 @@ def _bucket(
         mean_car_0_5=mean,
         median_car_0_5=mean,
         mean_car_pre_5=pre,
+        n_car_pre_5=n if pre is not None else 0,
         t=2.0 if tested else None,
         p_value=p if tested else None,
         label=reliability_label(p) if p is not None and tested else None,
@@ -54,6 +56,8 @@ def _stats(
         exclude_near_earnings=exclude,
         min_n=10,
         n_used=n_used,
+        first_event=date(2025, 1, 6),
+        last_event=date(2026, 9, 30),
         correlation=correlation,
         buckets={
             "positive": pos or _bucket("positive", 17, 0.008),
@@ -83,7 +87,10 @@ def _texts(report) -> list[str]:
     return [f.text for f in report.headline_findings]
 
 
-NO_LINK = "No clear link between how positive the news was and how the stock moved."
+NO_LINK = (
+    "Across 34 news days studied, there was no clear link between how positive the news was "
+    "and how the stock moved compared with the market's prediction (that day and the next)."
+)
 
 
 def test_build_macro_report_bucket_sentences_use_market_model_wording():
@@ -91,14 +98,16 @@ def test_build_macro_report_bucket_sentences_use_market_model_wording():
 
     texts = _texts(report)
     assert (
-        "Around days with positive news (that day and the next), the stock did 0.8% better than "
-        "its usual relationship with the market would predict." in texts
+        "On average, on 17 positive-news days studied, the stock did 0.8% better than "
+        "its usual relationship with the market would predict (that day and the next)." in texts
     )
     assert (
-        "Around days with negative news (that day and the next), the stock did 0.4% worse than "
-        "its usual relationship with the market would predict." in texts
+        "On average, on 17 negative-news days studied, the stock did 0.4% worse than "
+        "its usual relationship with the market would predict (that day and the next)." in texts
     )
-    pos_finding = next(f for f in report.headline_findings if "positive news" in f.text)
+    pos_finding = next(
+        f for f in report.headline_findings if "positive-news days studied" in f.text
+    )
     assert pos_finding.based_on_events == 17
 
 
@@ -108,11 +117,11 @@ def test_build_macro_report_each_bucket_sentence_is_followed_by_its_own_reliabil
 
     findings = _report(_stats(pos=pos, neg=neg)).headline_findings
 
-    assert "positive news" in findings[0].text
+    assert "positive-news days studied" in findings[0].text
     assert findings[1].p_value == 0.03
     assert findings[1].reliability == "clear_effect"
     assert findings[1].based_on_events == 17
-    assert "negative news" in findings[2].text
+    assert "negative-news days studied" in findings[2].text
     assert findings[3].p_value == 0.4
     assert findings[3].reliability == "no_clear_effect"
     assert findings[3].based_on_events == 14
@@ -177,16 +186,26 @@ def test_build_macro_report_reliability_line_per_label_keeps_raw_p_in_field_only
 
 def test_build_macro_report_gap_is_worded_as_a_comparison():
     report = _report(_stats(difference=_diff(0.03, mean_diff=0.011)))
-    assert "Positive-news days did 1.1% better than negative-news days." in _texts(report)
+    assert (
+        "On average, the 17 positive-news days studied did 1.1% better than the 17 "
+        "negative-news days (that day and the next)." in _texts(report)
+    )
 
     worse = _report(_stats(difference=_diff(0.03, mean_diff=-0.011)))
-    assert "Positive-news days did 1.1% worse than negative-news days." in _texts(worse)
+    assert (
+        "On average, the 17 positive-news days studied did 1.1% worse than the 17 "
+        "negative-news days (that day and the next)." in _texts(worse)
+    )
 
 
 def test_build_macro_report_tiny_gap_is_the_same_not_a_signed_zero():
     report = _report(_stats(difference=_diff(0.9, "no_clear_effect", mean_diff=-0.00001)))
 
-    assert "Positive-news days did about the same as negative-news days." in _texts(report)
+    expected = (
+        "On average, the 17 positive-news days studied did about the same as the 17 "
+        "negative-news days (that day and the next)."
+    )
+    assert expected in _texts(report)
 
 
 @pytest.mark.parametrize(
@@ -196,13 +215,15 @@ def test_build_macro_report_tiny_gap_is_the_same_not_a_signed_zero():
             0.4,
             0.01,
             "clear_effect",
-            "More positive news tended to go with better-than-expected moves.",
+            "Across 34 news days studied, more positive news tended to go with "
+            "better-than-expected moves (that day and the next).",
         ),
         (
             -0.4,
             0.01,
             "clear_effect",
-            "More positive news tended to go with worse-than-expected moves.",
+            "Across 34 news days studied, more positive news tended to go with "
+            "worse-than-expected moves (that day and the next).",
         ),
         (0.4, 0.5, "no_clear_effect", NO_LINK),
         (0.05, 0.01, "clear_effect", NO_LINK),
@@ -225,9 +246,9 @@ def test_build_macro_report_untested_bucket_gets_no_sentence_only_not_enough_fin
     report = _report(_stats(pos=_bucket("positive", 3, 0.02, p=None)))
 
     texts = _texts(report)
-    assert "Not enough positive-news events yet to judge (found 3; need at least 10)." in texts
-    assert not any("Around days with positive news" in t for t in texts)
-    assert any("Around days with negative news" in t for t in texts)
+    assert "Not enough positive-news days yet to judge (found 3; need at least 10)." in texts
+    assert not any("positive-news days studied" in t for t in texts)
+    assert any("negative-news days studied" in t for t in texts)
 
 
 def test_build_macro_report_two_untested_buckets_share_one_not_enough_finding():
@@ -237,24 +258,51 @@ def test_build_macro_report_two_untested_buckets_share_one_not_enough_finding():
 
     not_enough = [t for t in _texts(report) if t.startswith("Not enough")]
     assert not_enough == [
-        "Not enough positive-news or negative-news events yet to judge "
+        "Not enough positive-news or negative-news days yet to judge "
         "(found 3 positive-news and 4 negative-news; need at least 10 of each)."
     ]
-    assert not any("Around days" in t for t in _texts(report))
+    assert not any("days studied" in t for t in _texts(report))
 
 
-def test_build_macro_report_flags_pre_event_move_when_large_enough():
+def test_build_macro_report_pre_move_same_sign_as_bucket_says_part_of_this_move():
     report = _report(_stats(pos=_bucket("positive", 17, 0.008, pre=0.013)))
     assert (
-        "Part of this move started before the news: in the 5 days before, the stock had "
-        "already moved 1.3% (better than expected)." in _texts(report)
+        "Part of this move started earlier: on average, in the 5 trading days before these "
+        "news days, the stock had already moved 1.3% better than expected." in _texts(report)
+    )
+    caveat = next(f for f in report.headline_findings if "started earlier" in f.text)
+    assert caveat.based_on_events == 17
+
+    worse = _report(_stats(neg=_bucket("negative", 14, -0.004, pre=-0.012)))
+    assert (
+        "Part of this move started earlier: on average, in the 5 trading days before these "
+        "news days, the stock had already moved 1.2% worse than expected." in _texts(worse)
     )
 
-    worse = _report(_stats(pos=_bucket("positive", 17, 0.008, pre=-0.012)))
-    assert any("moved 1.2% (worse than expected)" in t for t in _texts(worse))
 
+def test_build_macro_report_pre_move_opposite_sign_makes_no_part_of_this_move_claim():
+    report = _report(_stats(pos=_bucket("positive", 17, 0.008, pre=-0.012)))
+
+    texts = _texts(report)
+    assert (
+        "In the 5 trading days before these news days, the stock had on average moved "
+        "1.2% worse than expected." in texts
+    )
+    assert not any("Part of this move" in t for t in texts)
+
+
+def test_build_macro_report_pre_move_caveat_counts_its_own_events():
+    pos = replace(_bucket("positive", 17, 0.008, pre=0.013), n_car_pre_5=11)
+
+    report = _report(_stats(pos=pos))
+
+    caveat = next(f for f in report.headline_findings if "5 trading days" in f.text)
+    assert caveat.based_on_events == 11
+
+
+def test_build_macro_report_small_pre_move_gets_no_caveat():
     small = _report(_stats(pos=_bucket("positive", 17, 0.008, pre=0.009)))
-    assert not any("started before the news" in t for t in _texts(small))
+    assert not any("5 trading days" in t for t in _texts(small))
 
 
 def test_build_macro_report_zero_bucket_effect_is_in_line_with_market():
@@ -264,19 +312,19 @@ def test_build_macro_report_zero_bucket_effect_is_in_line_with_market():
 
     texts = _texts(report)
     assert (
-        "Around days with positive news (that day and the next), the stock moved in line with "
-        "what the market predicted." in texts
+        "On average, on 17 positive-news days studied, the stock moved in line with "
+        "what the market predicted (that day and the next)." in texts
     )
     assert (
-        "Around days with negative news (that day and the next), the stock moved in line with "
-        "what the market predicted." in texts
+        "On average, on 17 negative-news days studied, the stock moved in line with "
+        "what the market predicted (that day and the next)." in texts
     )
 
 
 def test_build_macro_report_insufficient_events_gives_not_enough_message():
     report = _report(_stats(n_used=6))
 
-    assert _texts(report)[0] == "Not enough news events yet to judge (found 6; need at least 10)."
+    assert _texts(report)[0] == "Not enough news days yet to judge (found 6; need at least 10)."
     assert report.headline_findings[0].based_on_events == 6
     assert report.headline_findings[0].p_value is None
 
@@ -288,7 +336,7 @@ def test_build_macro_report_distinct_scopes_put_ex_earnings_first_and_other_in_s
 
     report = _report(ex, allv, regime=regime)
 
-    assert report.primary_findings[0].text.startswith("Around days")
+    assert report.primary_findings[0].text.startswith("On average, on 17 positive-news days")
     assert report.secondary_findings
     assert report.primary_scope == "excluding_earnings"
     assert report.secondary_scope == "all_events"
@@ -477,3 +525,60 @@ def test_build_macro_report_earnings_note_absent_when_rule_does_not_apply(p_ex, 
     allv = _earn_stats(p_all, n_used=n_all, exclude=False)
 
     assert _report(ex, allv).earnings_note is None
+
+
+def test_build_macro_report_correlation_sentence_leads_with_its_own_day_count():
+    corr = Correlation(rho=0.4, p_value=0.01, n=29, label="clear_effect")
+
+    texts = _texts(_report(_stats(correlation=corr)))
+
+    assert (
+        "Across 29 news days studied, more positive news tended to go with "
+        "better-than-expected moves (that day and the next)." in texts
+    )
+
+
+def test_build_macro_report_pre_move_with_zero_rounded_bucket_mean_makes_no_part_claim():
+    report = _report(_stats(pos=_bucket("positive", 17, 0.0004, pre=0.013)))
+
+    texts = _texts(report)
+    assert (
+        "On average, on 17 positive-news days studied, the stock moved in line with "
+        "what the market predicted (that day and the next)." in texts
+    )
+    assert (
+        "In the 5 trading days before these news days, the stock had on average moved "
+        "1.3% better than expected." in texts
+    )
+    assert not any("Part of this move" in t for t in texts)
+
+
+def test_build_macro_report_findings_never_contain_bare_n_or_p_tokens():
+    corr = Correlation(rho=0.4, p_value=0.01, n=29, label="clear_effect")
+    full = _stats(
+        pos=_bucket("positive", 17, 0.008, pre=0.013),  # same sign: "Part of this move"
+        neg=_bucket("negative", 12, -0.004, pre=0.013),  # opposite sign
+        difference=_diff(0.03),
+        correlation=corr,
+    )
+    reports = [
+        _report(full),
+        _report(
+            _stats(correlation=Correlation(rho=0.0, p_value=0.9, n=29, label="no_clear_effect"))
+        ),
+        _report(_stats(pos=_bucket("positive", 5, 0.01, p=None))),  # one untested bucket
+        _report(
+            _stats(
+                pos=_bucket("positive", 5, 0.01, p=None), neg=_bucket("negative", 3, 0.0, p=None)
+            )
+        ),
+        _report(_stats(n_used=4)),  # overall not enough
+    ]
+
+    texts = [t for r in reports for t in _texts(r)]
+    assert any("Part of this move" in t for t in texts)
+    assert any(t.startswith("In the 5 trading days") for t in texts)
+    assert any(t.startswith("Not enough positive-news or negative-news") for t in texts)
+    assert any(t.startswith("Across 29 news days") for t in texts)
+    for text in texts:
+        assert not BARE_SYMBOL.search(text), text

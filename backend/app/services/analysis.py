@@ -52,8 +52,9 @@ NEW_SYMBOL_LIMIT_REASON = "Daily limit for analysing new stocks reached; try aga
 CACHE_SCHEMA = 3
 # Macro reports have their own version. 5 = estimation window [t-250, t-20] with only earnings
 # masked, the ``events`` list, price-recap headlines excluded, renamed reliability labels and
-# ``earnings_note``. Reports cached under an older method must never be served.
-MACRO_CACHE_SCHEMA = 5
+# ``earnings_note``. 6 = scope period dates, averaged-finding wording, ``n_car_pre_5``.
+# Reports cached under an older method must never be served.
+MACRO_CACHE_SCHEMA = 6
 RECAP_ONLY_REASON = (
     "Only price-move recap headlines were found; they are left out of the news study."
 )

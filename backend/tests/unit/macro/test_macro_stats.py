@@ -154,10 +154,12 @@ def test_compute_stats_bucket_summaries_skip_missing_car_0_5():
     assert pos.mean_car_0_5 == pytest.approx(0.04)
     assert pos.median_car_0_5 == pytest.approx(0.04)
     assert pos.mean_car_pre_5 == pytest.approx(0.01)
+    assert pos.n_car_pre_5 == 2  # the third positive event has no pre-window
     neutral = stats.buckets["neutral"]
     assert neutral.n == 1
     assert neutral.mean_car_0_5 is None
     assert neutral.mean_car_pre_5 is None
+    assert neutral.n_car_pre_5 == 0
     empty = stats.buckets["negative"]
     assert (empty.n, empty.mean_car_0_1, empty.median_car_0_1) == (0, None, None)
 
@@ -407,3 +409,39 @@ def test_compute_stats_bucket_test_is_none_below_min_n_or_without_spread():
     assert stats.buckets["positive"].label is None
     assert stats.buckets["negative"].p_value is None  # constant: t undefined
     assert stats.buckets["neutral"].t is None
+
+
+def test_compute_stats_period_is_min_and_max_date_of_used_events():
+    events = [
+        make_event(_day(5), 0.6, 0.01),
+        make_event(_day(2), 0.6, 0.01),
+        make_event(_day(9), 0.6, 0.01),
+        make_event(_day(0), 0.6, None),  # no forward window: not used
+        make_event(_day(30), 0.6, None, ok=False),  # insufficient estimation: not used
+    ]
+
+    stats = compute_stats(events, exclude_near_earnings=False)
+
+    assert (stats.first_event, stats.last_event) == (_day(2), _day(9))
+
+
+def test_compute_stats_period_ignores_near_earnings_events_when_excluded():
+    events = [
+        make_event(_day(0), 0.6, 0.01, near_earnings=True),
+        make_event(_day(5), 0.6, 0.01),
+        make_event(_day(9), 0.6, 0.01),
+        make_event(_day(20), 0.6, 0.01, near_earnings=True),
+    ]
+
+    ex = compute_stats(events, exclude_near_earnings=True)
+    full = compute_stats(events, exclude_near_earnings=False)
+
+    assert (ex.first_event, ex.last_event) == (_day(5), _day(9))
+    assert (full.first_event, full.last_event) == (_day(0), _day(20))
+
+
+def test_compute_stats_period_is_none_for_empty_scope():
+    stats = compute_stats([make_event(_day(0), 0.6, None)], exclude_near_earnings=False)
+
+    assert stats.n_used == 0
+    assert (stats.first_event, stats.last_event) == (None, None)
