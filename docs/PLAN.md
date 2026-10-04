@@ -336,7 +336,7 @@ One Sonnet task, after the types are regenerated.
 - [x] Backend thermo review approved (889 tests)
 - [x] F1 frontend, plus the Opus review approved
 - [x] Live verification and screenshots
-- [ ] PRs open and CI green
+- [x] PRs open and CI green; merged (#6, #7)
 
 ## Phase 4 (approved 2026-10-04): "?" icon alignment and dated, averaged macro findings
 
@@ -380,4 +380,97 @@ One Sonnet task (F1), after the types are regenerated.
 - [x] F1 icon alignment, period line and breakdown line (plus one "news days" noun, reconciled Details counts)
 - [x] Frontend Opus review approved (round 3; 155 tests)
 - [x] Live verification and screenshots (admin shot unchanged: admin page untouched)
+- [x] PRs open and CI green; merged (#8, #9)
+
+## Phase 5 (approved 2026-10-04): $0 deployment, frontend on GitHub Pages, backend on an Oracle free VM
+
+The user asked to deploy with the frontend on GitHub Pages, keeping every secret safe, and approved a $0 plan.
+A senior-pentester review (Opus, 3 rounds) signed it off with changes, which are folded in below.
+The custom domain, Fly.io and is-a.dev were considered and declined.
+
+### Architecture
+- Frontend: GitHub Pages, published from a free GitHub organization (a dedicated origin, so no other Pages site
+  shares its localStorage or `'self'`). The repo is made public, after a full-history gitleaks scan.
+- Backend: an Oracle Cloud Always Free Arm VM on a reserved public IP. Docker compose runs Caddy (the only published
+  ports, 80/443), the API and MongoDB (internal network only, auth on). HTTPS is a Let's Encrypt IP-address certificate
+  (`shortlived` profile, auto-renewed by Caddy) plus HSTS. If a reserved IP isn't free, the fallback is an is-a.dev
+  hostname.
+- Cross-site (github.io is on the Public Suffix List), so auth moves from cookies to bearer tokens.
+
+### Branches (stacked, each with its own PR)
+- `feat/token-auth`, from `main`: backend and frontend auth migration, which must land together.
+- `feat/deploy`, from `feat/token-auth`: images, VM setup, Caddy, workflows and runbook.
+
+### Token auth (feat/token-auth)
+- **Backend (Sonnet):**
+  - The principal comes only from `Authorization: Bearer` (15-minute access JWT).
+  - Login, register and refresh return `{access_token, refresh_token, ...}` in the body; refresh and logout take the
+    refresh token in the JSON body.
+  - Delete every cookie set and read, the CSRF middleware and `/auth/csrf`.
+  - CORS: exact origins, `allow_credentials=False`, allowing `Authorization` and `Content-Type`.
+  - Absolute session cap: `family_started_at`, and rotation is refused after 30 days.
+  - Password change, admin disable and account deletion revoke all families; logout revokes the family.
+  - `mongodb_uri` becomes `SecretStr`.
+  - Tests: a cookie-only request gets 401, the cap, reuse detection, and revocation.
+- **Frontend (Sonnet), after the types are regenerated:**
+  - Access token in memory; refresh token in localStorage.
+  - Refresh runs under a cross-tab Web Locks lock and re-reads the stored token inside it.
+  - On a 401: refresh once, then retry. Logout clears storage.
+  - `VITE_API_BASE_URL` and the Pages base path come from build env; `404.html` is a copy of `index.html`; no
+    source maps.
+  - A meta CSP whose `connect-src` is the API origin, plus a hide-until-verified frame-buster.
+  - Local docker compose keeps working same-origin.
+- Reviews: an Opus security review of the auth migration and an Opus thermo review; fix until approved.
+
+### Deploy (feat/deploy, Sonnet)
+- **Arm64 image:**
+  - Built on GitHub's free `ubuntu-24.04-arm` runner and pushed to GHCR.
+  - The deploy is by **digest**, over SSH.
+  - The SSH key in the GitHub `production` environment is restricted by an authorized_keys forced command, with
+    no-pty and no forwarding.
+  - The deploy script accepts only `sha256:[0-9a-f]{64}`, and the host key is pinned in the workflow.
+- **VM setup script:**
+  - Unattended upgrades with automatic reboot; SSH key-only with no root login; Oracle iptables plus security list
+    open on 22/80/443 only.
+  - Docker; a root-only 0600 env file for secrets.
+  - Nightly mongodump to private OCI Object Storage via instance principal, with retention.
+- **Caddy:**
+  - IP certificate and HSTS.
+  - It overwrites X-Forwarded-For; uvicorn trusts only Caddy's address.
+- **Workflows:**
+  - Every workflow starts with `permissions: {}`, and jobs are split (build/test, image push, deploy).
+  - Actions are pinned to SHAs.
+  - A Pages deploy via OIDC.
+  - A gitleaks workflow, plus a dist secret-pattern grep.
+  - Dependabot.
+  - A daily health and certificate-expiry check that fails loudly.
+- **Runbook (`docs/DEPLOY.md`):**
+  - The user's one-time steps (Oracle account upgraded to Pay-As-You-Go to avoid idle reclaim, the org, a reserved
+    IP, the admin over getpass).
+  - Rotation of each secret.
+  - Teardown order: delete DNS records and config before releasing the IP or deleting the site.
+- **Reviews:** an Opus security review of all deployment code; fix until approved.
+
+### Go-live probes
+- A cookie-only request returns 401.
+- Two tabs refresh without logging out.
+- Spoofed X-Forwarded-For is ignored.
+- Mongo is unreachable from outside, and a port scan shows only 22/80/443.
+- CORS from a foreign origin and from the `null` origin is refused.
+- Framing is hidden.
+- TLS and header scan; gitleaks clean; no key patterns in dist.
+
+### Accepted residual risks
+- XSS could ride a session (mitigated by strict CSP, rotation and reuse detection).
+- Register enumeration (rate-limited) and the 15-minute lockout.
+- Single VM, no WAF.
+- Oracle capacity and reclaim risk.
+
+### Phase 5 status
+- [ ] Backend token auth
+- [ ] Frontend token client
+- [ ] Auth security and thermo reviews approved
+- [ ] Deploy infrastructure
+- [ ] Deploy security review approved
 - [ ] PRs open and CI green
+- [ ] User one-time setup, then the go-live probes
