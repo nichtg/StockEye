@@ -18,39 +18,13 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
     permissions:
       contents: read
-    defaults:
-      run:
-        working-directory: backend
-    services:
-      mongo:
-        image: mongo:8
-        ports:
-          - 27017:27017
-    env:
-      STOCKEYE_MONGODB_URI: mongodb://127.0.0.1:27017
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          python-version: "3.13"
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
-      - run: uv sync --locked
-      - run: uv run ruff check app tests
-      - run: uv run ruff format --check app tests
-      - run: uv run mypy app
-      - run: uv run lint-imports
-      - run: uv run pytest --cov --cov-report=term-missing
-      - run: uv export --locked --no-dev --no-emit-project --no-hashes -o ${{ runner.temp }}/requirements.txt
-      - run: uvx pip-audit --requirement ${{ runner.temp }}/requirements.txt --no-deps --disable-pip
+    uses: ./.github/workflows/backend-gates.yml
 
   image:
     needs: test
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -86,6 +60,7 @@ jobs:
 
   deploy:
     needs: image
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # The production environment holds DEPLOY_SSH_KEY and can require a manual approval.
     environment: production

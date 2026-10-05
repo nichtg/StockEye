@@ -1,12 +1,8 @@
 name: docker
 
+# No `paths:` filter, so the required checks report on every PR (see backend.yml).
 on:
   pull_request:
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "docker-compose.yml"
-      - ".github/workflows/docker.yml"
   push:
     branches: [main]
 
@@ -14,6 +10,7 @@ permissions: {}
 
 jobs:
   build:
+    name: docker-build (${{ matrix.service }})
     runs-on: ubuntu-latest
     permissions:
       contents: read

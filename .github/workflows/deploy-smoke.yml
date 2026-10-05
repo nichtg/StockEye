@@ -1,0 +1,111 @@
+name: deploy-smoke
+
+# Proves the production compose file really works: it validates, Mongo creates the app user on
+# first start, the API connects with that user and reports database ok, and the metadata-service
+# block rule stops containers reaching 169.254.169.254. Caddy is not started (it needs a public
+# IP and Let's Encrypt). No `paths:` filter, so this reports on every PR.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  smoke:
+    name: deploy-smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Dummy environment (throwaway values, CI only)
+        run: |
+          cat >"$RUNNER_TEMP/smoke.env" <<'ENVEOF'
+          PUBLIC_IP=203.0.113.7
+          GHCR_IMAGE=ghcr.io/example/stockeye-api
+          MONGO_ROOT_USERNAME=root_ci
+          MONGO_ROOT_PASSWORD=ci0root0password0aaaaaaaaaaaaaaaa
+          MONGO_APP_USERNAME=app_ci
+          MONGO_APP_PASSWORD=ci0app0password0bbbbbbbbbbbbbbbbbb
+          STOCKEYE_JWT_SECRET=ci0jwt0secret0cccccccccccccccccccccccccccccccc
+          STOCKEYE_CORS_ORIGINS='["https://example.github.io"]'
+          API_IMAGE=stockeye-api:smoke
+          ENVEOF
+          {
+            echo "COMPOSE_FILE=deploy/compose.yml"
+            echo "COMPOSE_ENV_FILES=$RUNNER_TEMP/smoke.env"
+            echo "COMPOSE_PROJECT_NAME=smoke"
+          } >>"$GITHUB_ENV"
+
+      - name: Compose file validates
+        run: docker compose config --quiet
+
+      - name: Build the API image (amd64)
+        run: docker build -t stockeye-api:smoke backend
+
+      - name: Start mongo and api
+        run: |
+          docker compose up -d mongo api
+          for _ in $(seq 1 60); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q api)" 2>/dev/null || true)"
+            [[ "$status" == healthy ]] && { echo "api healthy"; exit 0; }
+            sleep 5
+          done
+          echo "::error::api did not become healthy (healthy = HTTP 200 and database ok)"
+          docker compose logs --no-color api mongo | tail -n 80
+          exit 1
+
+      - name: App user exists with the right scope; anonymous access is refused
+        run: |
+          # Authenticated as the app user: can write to stockeye.
+          docker compose exec -T mongo mongosh --quiet \
+            "mongodb://app_ci:ci0app0password0bbbbbbbbbbbbbbbbbb@127.0.0.1:27017/stockeye?authSource=stockeye" \
+            --eval 'if (!db.smoke.insertOne({ok: 1}).acknowledged) quit(1)'
+          # The app user must not be able to touch another database.
+          if docker compose exec -T mongo mongosh --quiet \
+            "mongodb://app_ci:ci0app0password0bbbbbbbbbbbbbbbbbb@127.0.0.1:27017/stockeye?authSource=stockeye" \
+            --eval 'db.getSiblingDB("other").smoke.insertOne({x: 1})' >/dev/null 2>&1; then
+            echo "::error::app user can write outside the stockeye database"
+            exit 1
+          fi
+          # No credentials: refused.
+          if docker compose exec -T mongo mongosh --quiet \
+            --eval 'db.getSiblingDB("stockeye").smoke.countDocuments({})' >/dev/null 2>&1; then
+            echo "::error::MongoDB accepted an unauthenticated read"
+            exit 1
+          fi
+
+      - name: API reports database ok
+        run: |
+          body="$(docker compose exec -T api python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/api/health', timeout=5).read().decode())")"
+          echo "$body"
+          echo "$body" | grep -q '"database":"ok"'
+
+      - name: Containers cannot reach the metadata service once the DOCKER-USER rule is applied
+        run: |
+          probe="import socket; s = socket.socket(); s.settimeout(4); s.connect(('169.254.169.254', 80))"
+          # Control: informational. If the runner exposes the metadata service, we prove the rule is what blocks it.
+          if docker compose exec -T api python -c "$probe"; then
+            echo "control: metadata service reachable from a container before the rule"
+          else
+            echo "control: not reachable even before the rule (runner has no metadata service); the check below is weaker"
+          fi
+          sudo bash deploy/docker-user-fw.sh
+          sudo iptables -S DOCKER-USER
+          if docker compose exec -T api python -c "$probe"; then
+            echo "::error::container reached 169.254.169.254 after the DOCKER-USER rule"
+            exit 1
+          fi
+          echo "metadata service unreachable from containers"
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color | tail -n 150
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

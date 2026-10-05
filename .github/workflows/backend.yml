@@ -1,48 +1,15 @@
 name: backend
 
+# No `paths:` filter: a required status check from a path-filtered workflow never reports on PRs
+# that do not touch those paths, which would block them from merging. Main is covered by
+# backend-image.yml, which runs the same gates before building the image.
 on:
   pull_request:
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend.yml"
-  push:
-    branches: [main]
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend.yml"
 
 permissions: {}
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  backend:
     permissions:
       contents: read
-    defaults:
-      run:
-        working-directory: backend
-    services:
-      mongo:
-        image: mongo:8
-        ports:
-          - 27017:27017
-    env:
-      STOCKEYE_MONGODB_URI: mongodb://127.0.0.1:27017
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          python-version: "3.13"
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
-      - run: uv sync --locked
-      - run: uv run ruff check app tests
-      - run: uv run ruff format --check app tests
-      - run: uv run mypy app
-      - run: uv run lint-imports
-      - run: uv run pytest --cov --cov-report=term-missing
-      # Known-vulnerability scan of the locked runtime dependencies (not the dev tools).
-      - run: uv export --locked --no-dev --no-emit-project --no-hashes -o ${{ runner.temp }}/requirements.txt
-      - run: uvx pip-audit --requirement ${{ runner.temp }}/requirements.txt --no-deps --disable-pip
+    uses: ./.github/workflows/backend-gates.yml

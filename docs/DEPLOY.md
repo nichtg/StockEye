@@ -24,8 +24,13 @@ Naming used below: `<org>` is your GitHub organization, `<PUBLIC_IP>` the VM's r
    until it is green. If it finds something, rotate that credential first, then clean the history.
 4. Make the repository public (Settings > General > Danger Zone).
 5. Right away: Settings > Code security: enable **Secret scanning** and **Push protection**, and Dependabot alerts.
-6. Settings > Branches > add a rule for `main`: require a pull request, require the `backend`, `frontend`, `docker`
-   and `gitleaks` checks, block force pushes.
+6. Settings > Branches > add a rule for `main`: require a pull request, block force pushes, and require these status
+   checks (the exact names GitHub shows once each has run once; **verify:** the reusable-workflow name):
+   `backend / gates`, `frontend-check`, `docker-build (backend)`, `docker-build (frontend)`, `gitleaks`,
+   `deploy-smoke`.
+   These workflows deliberately have no `paths:` filter: a required check from a path-filtered workflow never
+   reports on a PR that does not touch those paths, and GitHub would then block the merge forever. Running every
+   check on every PR costs a few minutes and is the simplest correct setup.
 7. Settings > Environments > New environment `production`. Add a required reviewer (yourself) so each deploy waits
    for a click. Restrict it to the `main` branch.
 
@@ -58,18 +63,34 @@ sudo apt-get update && sudo apt-get install -y git
 git clone https://github.com/<org>/StockEye.git && cd StockEye
 less deploy/setup-vm.sh          # read it; it changes sshd, firewall and sudo rules
 sudo ADMIN_PUBKEY='ssh-ed25519 AAAA... you@laptop' \
-     DEPLOY_PUBKEY="$(cat /path/to/stockeye-deploy.pub)" \
-     ./deploy/setup-vm.sh
+     DEPLOY_PUBKEY='ssh-ed25519 AAAA... github-deploy' \
+     bash ./deploy/setup-vm.sh
 ```
-(For `DEPLOY_PUBKEY`, paste the contents of `stockeye-deploy.pub` as the quoted text.)
+(`DEPLOY_PUBKEY` is the one line from `stockeye-deploy.pub`. The scripts are also marked executable, so
+`sudo ... ./deploy/setup-vm.sh` works; `sudo bash` is the fallback if a copy lost the mode.)
 
 It installs unattended upgrades (automatic reboot at 04:00 server time), makes sshd key-only with no root login,
-opens 22/80/443 in iptables persistently, installs Docker from Docker's apt repo (checking its key fingerprint),
-creates the `admin` and `deploy` users, installs the deploy and backup scripts, and starts a nightly backup timer.
-It ends by printing the SSH host key fingerprint and a `known_hosts` line. Keep that output.
+opens 22/80/443 by editing `/etc/iptables/rules.v4` and the live rules (it never runs `netfilter-persistent save`,
+which would also save Docker's own chains), installs Docker from Docker's apt repo (checking its key fingerprint),
+creates the `admin` and `deploy` users, installs the deploy and backup scripts, blocks containers from the cloud
+metadata service (below), and starts a nightly backup timer. It ends by printing the SSH host key fingerprint and a
+`known_hosts` line. Keep that output.
 
-**Before closing your session**, open a second terminal and check `ssh admin@<PUBLIC_IP>` works. Re-running the
-script is safe (it never overwrites `/etc/stockeye/stockeye.env`); re-run it after pulling a new compose file.
+**Metadata block.** Containers must not be able to reach `169.254.169.254`, or a bug in the API could be used to
+fetch the VM's instance-principal credentials. `stockeye-docker-user.service` adds
+`iptables -I DOCKER-USER -d 169.254.0.0/16 -j DROP` after `docker.service` on every boot and is `PartOf` Docker, so
+it is re-applied after a Docker restart as well; the rule is idempotent and is not saved into `/etc/iptables`.
+Check: `sudo iptables -S DOCKER-USER`. The `deploy-smoke` workflow tests the same rule on a CI runner.
+
+**Lock down SSH (second step).** Re-running setup is safe (it never overwrites `/etc/stockeye/stockeye.env`; re-run it
+after pulling a new compose file). But first, from a **second terminal**, confirm
+`ssh admin@<PUBLIC_IP> 'sudo -n true && echo ok'` prints `ok`. Only then, on the VM:
+```bash
+sudo CONFIRM_ADMIN_LOGIN_TESTED=yes bash ./deploy/harden-ssh.sh
+```
+It sets `AllowUsers admin deploy`, locks the default `ubuntu` user and removes its sudo rule. (It is separate so a
+mistake in the admin key cannot lock you out before you tested it. If you are locked out anyway, use the Oracle
+console's serial console or re-attach the boot volume to recover.)
 
 Then fill in the secrets file:
 ```bash
@@ -142,7 +163,7 @@ native Arm runner, push to GHCR, output the digest) -> `deploy` (SSH to `deploy@
 command). The `deploy` user's key is locked by `authorized_keys` to
 `command="/usr/bin/sudo /usr/local/sbin/stockeye-deploy",restrict`: no shell, no forwarding, no pty. The script
 accepts only `sha256:` plus 64 hex characters, pulls that digest, records it in `/etc/stockeye/state.env`, runs
-`docker compose up -d`, waits up to 3 minutes for the API to be healthy and otherwise restores the previous digest.
+`docker compose up -d`, waits up to 3 minutes for the API to be healthy (the image's HEALTHCHECK: HTTP 200 *and* the API can reach MongoDB) and otherwise restores the previous digest. Afterwards it deletes older `stockeye-api` images.
 It logs to syslog (`journalctl -t stockeye-deploy`).
 
 The sudo rule allows exactly that one script with no arguments and keeps only `SSH_ORIGINAL_COMMAND`. A group
@@ -157,8 +178,8 @@ Always edit with `sudo -e /etc/stockeye/stockeye.env`, then apply with the comma
 |---|---|
 | `STOCKEYE_JWT_SECRET` | New value (`openssl rand -hex 32`), then `sudo stockeye-compose up -d api`. All users are signed out. |
 | Market-data API keys | Get a new key from the provider, edit the line, `sudo stockeye-compose up -d api`, revoke the old key. |
-| `MONGO_APP_PASSWORD` | `sudo stockeye-compose exec mongo sh -c 'mongosh admin -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --eval "db.getSiblingDB(\"stockeye\").changeUserPassword(\"<MONGO_APP_USERNAME>\", \"<new password>\")"'`, then put the same password in the env file and `sudo stockeye-compose up -d`. |
-| `MONGO_ROOT_PASSWORD` | Same pattern with `db.getSiblingDB("admin").changeUserPassword("<root user>", "<new>")`, then update the env file and `up -d` (the backup script reads it from the container environment, so recreate mongo: `sudo stockeye-compose up -d --force-recreate mongo`). |
+| `MONGO_APP_PASSWORD` | Open an interactive shell that asks for the root password (no password in a command line or shell history): `sudo stockeye-compose exec -it mongo sh -c 'exec mongosh admin -u "$MONGO_INITDB_ROOT_USERNAME" --authenticationDatabase admin'` (type the root password from the env file when asked), then in mongosh: `db.getSiblingDB("stockeye").changeUserPassword("stockeye_app", passwordPrompt())` and type the new password (also put it in the env file; use hex: `openssl rand -hex 24`). Then `sudo stockeye-compose up -d --force-recreate api`. |
+| `MONGO_ROOT_PASSWORD` | Same interactive shell, then `db.getSiblingDB("admin").changeUserPassword("<root user>", passwordPrompt())`. Update the env file and recreate mongo so the backup script sees the new value: `sudo stockeye-compose up -d --force-recreate mongo`. |
 | CI deploy key | Make a new key pair on your computer, replace the key in `/home/deploy/.ssh/authorized_keys` by re-running `setup-vm.sh` with the new `DEPLOY_PUBKEY`, update the `DEPLOY_SSH_KEY` environment secret. |
 | VM host key | `sudo rm /etc/ssh/ssh_host_* && sudo dpkg-reconfigure openssh-server`, then update the `DEPLOY_KNOWN_HOSTS` variable with the new key. |
 | Admin password | Run `create-admin` again with the same email; it promotes/updates the account. **verify:** that it also resets the password in your version. |
@@ -177,7 +198,7 @@ Always edit with `sudo -e /etc/stockeye/stockeye.env`, then apply with the comma
 2. Stop writers: `sudo stockeye-compose stop api`.
 3. Restore (replaces existing documents with the dump's):
    ```bash
-   sudo stockeye-compose exec -T mongo sh -c 'mongorestore --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --archive --gzip --drop' < /var/backups/stockeye/stockeye-<timestamp>.archive.gz
+   sudo stockeye-compose exec -T mongo sh -c 'umask 077; cfg="$(mktemp)"; trap "rm -f \"$cfg\"" EXIT; printf "password: %s\n" "$MONGO_INITDB_ROOT_PASSWORD" >"$cfg"; mongorestore --config="$cfg" --username "$MONGO_INITDB_ROOT_USERNAME" --authenticationDatabase admin --archive --gzip --drop' < /var/backups/stockeye/stockeye-<timestamp>.archive.gz
    ```
 4. `sudo stockeye-compose start api`. Practice this once on the live VM before you need it. The dump contains password
    hashes and token hashes: treat the file as a secret.
@@ -199,8 +220,10 @@ Run these from your own computer after the first full deploy. All should pass.
    `Origin: https://<org>.github.io` must.
 6. **Framing is hidden.** Embed the site in an `<iframe>` on any test page (e.g. a local HTML file): the app should show
    nothing, not the login form.
-7. **TLS and headers.** Run `curl -sI https://<PUBLIC_IP>/api/health`: expect `strict-transport-security: max-age=31536000`,
-   `x-content-type-options: nosniff`, and no `server` header. `curl -si https://<PUBLIC_IP>/` returns 404. Run
+7. **TLS and headers.** Run `curl -sI https://<PUBLIC_IP>/api/health`: expect `x-content-type-options: nosniff`, the
+   `referrer-policy` header, and no `server` header. (Caddy also sends `strict-transport-security`, but browsers
+   ignore HSTS for IP-address hosts, so it gives no protection here; HTTPS-only comes from the app only ever being
+   called at `https://` URLs, which the `pages` build enforces.) `curl -si https://<PUBLIC_IP>/` returns 404. Run
    `testssl.sh` or SSL Labs equivalent (SSL Labs does not scan bare IPs; use testssl.sh) and expect TLS 1.2+ only.
    `http://<PUBLIC_IP>/api/health` should redirect to HTTPS.
 8. **Repository hygiene.** The `gitleaks` workflow is green on `main`; the `pages` build's secret-pattern step passed;
@@ -208,10 +231,25 @@ Run these from your own computer after the first full deploy. All should pass.
 
 ## Monitoring
 `healthcheck.yml` runs daily and on demand. It fetches `https://<PUBLIC_IP>/api/health` with normal certificate
-verification and fails (so GitHub emails you) if the API or database is not ok, or if the certificate has under one
-day left. Caddy renews the 6-day certificate with about 2 days left, so a 3-day threshold would alert on every
-healthy renewal; one day means renewal has really been failing. GitHub disables scheduled workflows after 60 days
+verification and fails (so GitHub emails you) if the API or database is not ok, or if the certificate has under 36
+hours left. Caddy renews the 6-day certificate with about 2 days left, so a 3-day threshold would alert on every
+healthy renewal; 36 hours means renewal has really been failing. GitHub disables scheduled workflows after 60 days
 without repository activity; if the emails stop, check the Actions tab.
+
+### Weekly check (the daily workflow cannot see the VM)
+The healthcheck only sees the public API. It cannot tell that the nightly backup stopped. Once a week, on the VM:
+```bash
+systemctl list-timers stockeye-backup.timer     # NEXT and LAST look sane
+ls /var/lib/stockeye/BACKUP_FAILED 2>&1          # must say "No such file"
+journalctl -u stockeye-backup --since "8 days ago" | tail
+```
+and in the Oracle console check that the newest object in the bucket is from last night. A failed backup also logs
+`BACKUP FAILED` at crit level (`journalctl -p crit -t stockeye-backup`) and leaves the marker file until the next
+good backup.
+
+### Disk
+Log files rotate (compose `local` driver, 10 MB x 3 per service). After each successful deploy the script removes
+every `stockeye-api` image except the new one and the previous one. Check `df -h /` occasionally.
 
 ## Accepted risks
 - A stolen `DEPLOY_SSH_KEY` can only deploy an image digest that exists in the public GHCR package, but anyone with
@@ -226,8 +264,13 @@ without repository activity; if the emails stop, check the Actions tab.
   Backups are encrypted by Oracle at rest but not client-side.
 - Docker-published ports bypass the host's iptables INPUT rules; Mongo is protected by having no published port and
   an internal-only network, and the Oracle security list is the real perimeter.
+- HSTS is sent but browsers ignore it for IP-address hosts: it is not a protection here.
+- The OCI CLI is installed from a hash-pinned requirements file (`deploy/oci-cli.requirements.txt`, generated with
+  `uv pip compile --generate-hashes`), so installs are reproducible, but it is not auto-updated: regenerate it
+  yourself now and then.
 - An IP-address certificate has no domain name: browsers show the address, and losing the reserved IP means a new
   certificate, a new `API_ORIGIN` and a rebuild of the frontend.
-- Unattended upgrades cover Ubuntu packages only. Docker Engine, the pinned images (Dependabot proposes updates) and
-  the OCI CLI are updated by you; Caddy and Mongo images are pinned by digest.
+- Unattended upgrades cover Ubuntu and Docker's apt repo (a Docker Engine upgrade restarts the containers briefly).
+  The pinned images (Dependabot proposes updates) and the OCI CLI are updated by you; Caddy, Mongo and the Python
+  base images are pinned by digest.
 - `restart: unless-stopped` plus the 04:00 automatic reboot cause a short outage when a kernel update lands.

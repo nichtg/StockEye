@@ -1,20 +1,16 @@
 name: frontend
 
+# No `paths:` filter, so the required check reports on every PR (see backend.yml).
 on:
   pull_request:
-    paths:
-      - "frontend/**"
-      - ".github/workflows/frontend.yml"
   push:
     branches: [main]
-    paths:
-      - "frontend/**"
-      - ".github/workflows/frontend.yml"
 
 permissions: {}
 
 jobs:
   check:
+    name: frontend-check
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -16,6 +16,7 @@ env:
 
 jobs:
   scan:
+    name: gitleaks
     runs-on: ubuntu-latest
     permissions:
       contents: read
