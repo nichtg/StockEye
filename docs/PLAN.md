@@ -467,9 +467,9 @@ The custom domain, Fly.io and is-a.dev were considered and declined.
 - Oracle capacity and reclaim risk.
 
 ### Phase 5 status
-- [ ] Backend token auth
-- [ ] Frontend token client
-- [ ] Auth security and thermo reviews approved
+- [x] Backend token auth (refresh families, 30-day cap, refresh rate limit, validated CORS; 935 tests)
+- [x] Frontend token client (Web Locks, compare-and-set, timeouts, frame gate; 207 tests)
+- [x] Auth security reviews approved (backend 2 rounds, frontend 3 rounds); live two-tab test OK
 - [ ] Deploy infrastructure
 - [ ] Deploy security review approved
 - [ ] PRs open and CI green
