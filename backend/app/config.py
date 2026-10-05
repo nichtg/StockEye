@@ -71,14 +71,18 @@ class Settings(BaseSettings):
     environment: Literal["dev", "test", "prod"] = "dev"
     log_level: str = "INFO"
 
-    mongodb_uri: str = "mongodb://127.0.0.1:27017"
+    # SecretStr: Atlas URIs embed the password, so it must never reach a log line or a repr.
+    mongodb_uri: SecretStr = SecretStr("mongodb://127.0.0.1:27017")
     mongodb_db: str = "stockeye"
 
     # No default: an unset secret is a startup error everywhere except the ``test`` environment.
     jwt_secret: SecretStr = SecretStr("")
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 14
-    cookie_secure: bool = True
+    # Hard ceiling on a session: rotation stops this many days after login however active the
+    # user is, so a stolen refresh token cannot be kept alive forever by rotating it.
+    refresh_absolute_days: int = 30
+    # Exact origins (scheme://host[:port], no wildcard, no path) allowed to call the API.
     cors_origins: list[str] = ["http://localhost:5173"]
     login_max_failures: int = 5
     login_lockout_minutes: int = 15

@@ -1,23 +1,17 @@
-"""Registration, login, token refresh/rotation, logout and the CSRF token endpoint.
+"""Registration, login, token refresh/rotation and logout.
 
-The account module owns every session decision; these handlers only turn its results into
-cookies and JSON.
+Auth is bearer tokens in JSON bodies, never cookies: the SPA lives on another site, where
+browsers drop third-party cookies. The account module owns every session decision; these
+handlers only turn its results into JSON.
 """
 
 from datetime import datetime
-from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, Response
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.api.deps import AccountsDep, SettingsDep
 from app.api.limits import AUTH, limited_by_ip
-from app.auth.cookies import (
-    clear_auth_cookies,
-    set_auth_cookies,
-    set_csrf_cookie,
-)
-from app.auth.csrf import new_csrf_token
 from app.auth.principal import Principal
 from app.config import Settings
 from app.repositories.users import Role, UserRecord
@@ -40,6 +34,11 @@ class RegisterIn(BaseModel):
     password: str
 
 
+class RefreshIn(BaseModel):
+    # No min length: logout must answer 204 for any junk, so there is no token-validity oracle.
+    refresh_token: str = Field(max_length=512)
+
+
 class UserOut(BaseModel):
     id: str
     email: str
@@ -52,69 +51,42 @@ class UserOut(BaseModel):
 
 
 class SessionOut(BaseModel):
+    """A fresh token pair. The refresh token is single-use: store the one from the latest reply."""
+
+    access_token: str
+    access_expires_in: int = Field(description="Seconds until the access token expires.")
+    refresh_token: str
     user: UserOut
 
 
-class CsrfOut(BaseModel):
-    csrf_token: str
-
-
-def _sign_in(response: Response, settings: Settings, tokens: SessionTokens) -> None:
-    """Set the session cookies and a fresh CSRF token (a new session must not reuse the old one)."""
-    set_auth_cookies(response, settings, tokens.access, tokens.refresh)
-    set_csrf_cookie(response, settings, new_csrf_token())
-
-
-@router.get("/csrf")
-async def csrf(response: Response, settings: SettingsDep) -> CsrfOut:
-    token = new_csrf_token()
-    set_csrf_cookie(response, settings, token)
-    return CsrfOut(csrf_token=token)
+def _session(settings: Settings, tokens: SessionTokens, user: UserRecord) -> SessionOut:
+    return SessionOut(
+        access_token=tokens.access,
+        access_expires_in=settings.access_token_ttl_minutes * 60,
+        refresh_token=tokens.refresh,
+        user=UserOut.of(user),
+    )
 
 
 @router.post("/register", status_code=201, dependencies=[Depends(limited_by_ip(AUTH))])
-async def register(
-    body: RegisterIn,
-    response: Response,
-    accounts: AccountsDep,
-    settings: SettingsDep,
-) -> SessionOut:
+async def register(body: RegisterIn, accounts: AccountsDep, settings: SettingsDep) -> SessionOut:
     user = await accounts.register(body.email, body.password)
-    _sign_in(response, settings, await accounts.start_session(user))
-    return SessionOut(user=UserOut.of(user))
+    return _session(settings, await accounts.start_session(user), user)
 
 
 @router.post("/login", dependencies=[Depends(limited_by_ip(AUTH))])
-async def login(
-    body: Credentials,
-    response: Response,
-    accounts: AccountsDep,
-    settings: SettingsDep,
-) -> SessionOut:
+async def login(body: Credentials, accounts: AccountsDep, settings: SettingsDep) -> SessionOut:
     user = await accounts.authenticate(body.email, body.password)
-    _sign_in(response, settings, await accounts.start_session(user))
-    return SessionOut(user=UserOut.of(user))
+    return _session(settings, await accounts.start_session(user), user)
 
 
 @router.post("/refresh")
-async def refresh(
-    response: Response,
-    accounts: AccountsDep,
-    settings: SettingsDep,
-    se_refresh: Annotated[str | None, Cookie()] = None,
-) -> SessionOut:
-    tokens, user = await accounts.rotate(se_refresh)
-    _sign_in(response, settings, tokens)
-    return SessionOut(user=UserOut.of(user))
+async def refresh(body: RefreshIn, accounts: AccountsDep, settings: SettingsDep) -> SessionOut:
+    tokens, user = await accounts.rotate(body.refresh_token)
+    return _session(settings, tokens, user)
 
 
 @router.post("/logout", status_code=204)
-async def logout(
-    accounts: AccountsDep,
-    settings: SettingsDep,
-    se_refresh: Annotated[str | None, Cookie()] = None,
-) -> Response:
-    await accounts.end_session(se_refresh)
-    out = Response(status_code=204)
-    clear_auth_cookies(out, settings)
-    return out
+async def logout(body: RefreshIn, accounts: AccountsDep) -> Response:
+    await accounts.end_session(body.refresh_token)
+    return Response(status_code=204)

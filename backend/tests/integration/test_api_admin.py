@@ -157,7 +157,7 @@ async def test_admin_delete_user_also_removes_their_watchlist_and_tokens(
     assert (await alice.get("/api/me")).status_code == 401
 
 
-async def test_disabled_user_existing_access_cookie_stops_working_immediately(
+async def test_disabled_user_existing_access_token_stops_working_immediately(
     new_client: ClientFactory, db: Database
 ) -> None:
     admin = await _admin_client(new_client, db)

@@ -167,6 +167,63 @@ async def test_rotate_for_disabled_user_raises_401_and_revokes_the_family(
     assert await db.refresh_tokens.count_documents({"revoked_at": None}) == 0
 
 
+async def _age_family(db: Database, age: timedelta) -> None:
+    await db.refresh_tokens.update_many(
+        {}, {"$set": {"family_started_at": datetime.now(UTC) - age}}
+    )
+
+
+async def test_rotate_within_the_absolute_cap_succeeds(
+    accounts: AccountService, db: Database, settings: Settings
+) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    tokens = await accounts.start_session(user)
+    await _age_family(db, timedelta(days=settings.refresh_absolute_days) - timedelta(minutes=5))
+
+    rotated, _ = await accounts.rotate(tokens.refresh)
+
+    assert rotated.refresh
+
+
+async def test_rotate_past_the_absolute_cap_raises_401_and_revokes_the_family(
+    accounts: AccountService, db: Database, settings: Settings
+) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    tokens = await accounts.start_session(user)
+    await _age_family(db, timedelta(days=settings.refresh_absolute_days) + timedelta(minutes=5))
+
+    error = await _raises(accounts.rotate(tokens.refresh))
+
+    assert (error.status, error.code) == (401, "unauthenticated")
+    assert await db.refresh_tokens.count_documents({"revoked_at": None}) == 0
+
+
+async def test_rotate_keeps_the_original_family_start_so_the_cap_cannot_be_extended(
+    accounts: AccountService, db: Database
+) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    first = await accounts.start_session(user)
+    started = (await db.refresh_tokens.find_one({}))["family_started_at"]  # type: ignore[index]
+
+    await accounts.rotate(first.refresh)
+
+    stamps = {d["family_started_at"] async for d in db.refresh_tokens.find({})}
+    assert stamps == {started}
+
+
+async def test_update_user_disabling_revokes_all_of_their_refresh_families(
+    accounts: AccountService, db: Database
+) -> None:
+    admin, _ = await accounts.create_or_promote_admin("root@example.com", PASSWORD)
+    user = await accounts.register("alice@example.com", PASSWORD)
+    await accounts.start_session(user)  # two devices, two families
+    await accounts.start_session(user)
+
+    await accounts.update_user(admin.id, user.id, "disabled", None)
+
+    assert await db.refresh_tokens.count_documents({"user_id": user.id, "revoked_at": None}) == 0
+
+
 async def test_end_session_revokes_the_family_and_tolerates_no_token(
     accounts: AccountService,
 ) -> None:

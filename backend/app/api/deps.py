@@ -4,7 +4,6 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
-from app.auth.cookies import ACCESS_COOKIE
 from app.auth.principal import Principal
 from app.config import Settings
 from app.db import Database
@@ -32,8 +31,20 @@ def get_accounts(db: DbDep, settings: SettingsDep) -> AccountService:
 AccountsDep = Annotated[AccountService, Depends(get_accounts)]
 
 
+def bearer_token(request: Request) -> str | None:
+    """The token from ``Authorization: Bearer <token>``, or None if absent or malformed.
+
+    This is the only place a credential is read from a request: cookies are ignored on purpose.
+    """
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token or " " in token:
+        return None
+    return token
+
+
 async def current_user(request: Request, accounts: AccountsDep) -> Principal:
-    return await accounts.principal(request.cookies.get(ACCESS_COOKIE))
+    return await accounts.principal(bearer_token(request))
 
 
 async def require_admin(user: Annotated[Principal, Depends(current_user)]) -> Principal:

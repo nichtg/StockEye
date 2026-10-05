@@ -12,7 +12,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api import admin, auth, health, me, providers_status, stocks, watchlist
 from app.api.errors import install_error_handlers
 from app.api.limits import RateLimiter
-from app.api.middleware import CsrfMiddleware, RequestContextMiddleware
+from app.api.middleware import RequestContextMiddleware
 from app.config import Settings, get_settings
 from app.db import IndexInstaller, create_client, ensure_indexes
 from app.jobs.scheduler import build_scheduler
@@ -64,7 +64,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        client = create_client(settings.mongodb_uri)
+        client = create_client(settings.mongodb_uri.get_secret_value())
         db = client[settings.mongodb_db]
         app.state.db = db
         app.state.settings = settings
@@ -102,15 +102,15 @@ def create_app(
         app.include_router(router, prefix="/api")
 
     # add_middleware wraps outward: the last one added runs first. CORS is outermost so even
-    # error responses carry CORS headers; CSRF is innermost so its 403 gets a request id.
-    app.add_middleware(CsrfMiddleware)
+    # error responses carry CORS headers. Credentials are off: auth is a bearer header, never a
+    # cookie, so a foreign page has nothing ambient to ride on and no CSRF defence is needed.
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "X-CSRF-Token", "X-Request-ID"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
         expose_headers=["X-Request-ID"],
     )
     return app

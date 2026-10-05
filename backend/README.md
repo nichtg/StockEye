@@ -44,12 +44,12 @@ The password is read from `STOCKEYE_ADMIN_PASSWORD` if set, otherwise you are pr
 uv run uvicorn app.main:create_app --factory --reload
 ```
 
-Interactive docs are at http://127.0.0.1:8000/docs. All routes live under `/api`. For plain-http local development set `STOCKEYE_COOKIE_SECURE=false`, otherwise browsers drop the auth cookies.
+Interactive docs are at http://127.0.0.1:8000/docs. All routes live under `/api`.
 
 ### Auth model
 
-- Cookies: `se_access` (JWT, httpOnly), `se_refresh` (httpOnly, scoped to `/api/auth`, rotated on every use; reuse revokes the whole token family) and `se_csrf` (readable by the SPA).
-- Every POST/PUT/PATCH/DELETE must send `X-CSRF-Token` equal to the `se_csrf` cookie. Call `GET /api/auth/csrf` first.
+- Bearer tokens, no cookies. Login, register and `POST /api/auth/refresh` return `{access_token, access_expires_in, refresh_token, user}`; send `Authorization: Bearer <access_token>` on every other call. `refresh` and `logout` take `{"refresh_token"}` in the JSON body. Refresh tokens rotate on every use, reuse revokes the whole family, and a session ends `STOCKEYE_REFRESH_ABSOLUTE_DAYS` (30) after login however often it is refreshed.
+- CORS allows only the exact origins in `STOCKEYE_CORS_ORIGINS`, without credentials. There is no CSRF token because nothing is cookie-authenticated.
 - The user is re-read from the database on every request, so disabling a user or changing a role takes effect immediately.
 - Errors always look like `{"error": {"code", "message", "request_id", "details"}}`.
 

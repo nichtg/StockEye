@@ -69,22 +69,12 @@ async def app(
 
 @pytest.fixture
 async def new_client(app: FastAPI) -> AsyncIterator[ClientFactory]:
-    """Factory for independent clients (separate cookie jars) with a CSRF token primed."""
+    """Factory for independent anonymous clients; ``register`` and ``login`` sign them in."""
     opened: list[httpx.AsyncClient] = []
 
     async def factory() -> httpx.AsyncClient:
         client = httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver")
-
-        async def follow_csrf_rotation(response: httpx.Response) -> None:
-            # Like the SPA, which re-reads the cookie on every request: login and register
-            # issue a fresh token.
-            if rotated := response.cookies.get("se_csrf"):
-                client.headers["X-CSRF-Token"] = rotated
-
-        client.event_hooks["response"].append(follow_csrf_rotation)
         opened.append(client)
-        resp = await client.get("/api/auth/csrf")
-        client.headers["X-CSRF-Token"] = resp.json()["csrf_token"]
         return client
 
     yield factory
@@ -97,10 +87,22 @@ async def client(new_client: ClientFactory) -> httpx.AsyncClient:
     return await new_client()
 
 
+def bearer(access_token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {access_token}"}
+
+
+def adopt_session(client: httpx.AsyncClient, resp: httpx.Response) -> httpx.Response:
+    """Do what the SPA does: keep the access token and send it on every later request."""
+    if resp.status_code < 400:
+        client.headers.update(bearer(resp.json()["access_token"]))
+    return resp
+
+
 async def register(
     client: httpx.AsyncClient, email: str, password: str = PASSWORD
 ) -> httpx.Response:
-    return await client.post("/api/auth/register", json={"email": email, "password": password})
+    resp = await client.post("/api/auth/register", json={"email": email, "password": password})
+    return adopt_session(client, resp)
 
 
 async def make_admin(db: Database, email: str = "root@example.com") -> UserRecord:
@@ -108,4 +110,5 @@ async def make_admin(db: Database, email: str = "root@example.com") -> UserRecor
 
 
 async def login(client: httpx.AsyncClient, email: str, password: str = PASSWORD) -> httpx.Response:
-    return await client.post("/api/auth/login", json={"email": email, "password": password})
+    resp = await client.post("/api/auth/login", json={"email": email, "password": password})
+    return adopt_session(client, resp)

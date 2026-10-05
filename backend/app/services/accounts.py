@@ -2,7 +2,7 @@
 
 One deep interface for everything about who a user is and whether they may be signed in. The
 password, token and repository machinery stays behind it; routers only turn results into
-cookies and JSON. ``AppError`` lives in ``app.services.errors`` (re-exported here and by
+JSON. ``AppError`` lives in ``app.services.errors`` (re-exported here and by
 ``app.api.errors``) because the layering contract lets services raise it but forbids them from
 importing the API.
 """
@@ -178,34 +178,41 @@ class AccountService:
 
     async def start_session(self, user: UserRecord) -> SessionTokens:
         """Begin a new session (a new refresh-token family) for an authenticated user."""
-        return await self._issue(user.id, uuid.uuid4().hex)
+        return await self._issue(user.id, uuid.uuid4().hex, datetime.now(UTC))
 
     async def rotate(self, raw_refresh: str | None) -> tuple[SessionTokens, UserRecord]:
         """Exchange a refresh token for a new pair, in the same family.
 
         Presenting an already-used or revoked token revokes its whole family (theft signal).
-        Raises ``AppError`` 401 for a missing, unknown, expired, reused or disabled-user token.
+        Raises ``AppError`` 401 for a missing, unknown, expired, reused or disabled-user token,
+        and for a family older than ``refresh_absolute_days`` (which is then revoked): that cap
+        counts from the original login, so rotating never extends it.
         """
         if not raw_refresh:
             raise AppError(401, "unauthenticated", _SESSION_EXPIRED)
         rotated = await self._tokens.consume(hash_refresh_token(raw_refresh))
         if rotated is None:
             raise AppError(401, "unauthenticated", _SESSION_EXPIRED)
+        age = datetime.now(UTC) - rotated.family_started_at
         user = await self._users.get_by_id(rotated.user_id)
-        if not _eligible(user):
+        if age > timedelta(days=self._settings.refresh_absolute_days) or not _eligible(user):
             await self._tokens.revoke_family(rotated.family_id)
             raise AppError(401, "unauthenticated", _SESSION_EXPIRED)
-        return await self._issue(user.id, rotated.family_id), user
+        return await self._issue(user.id, rotated.family_id, rotated.family_started_at), user
 
     async def end_session(self, raw_refresh: str | None) -> None:
         """Sign out: revoke the refresh token's whole family. No-op without a token."""
         if raw_refresh:
             await self._tokens.revoke_by_hash(hash_refresh_token(raw_refresh))
 
-    async def _issue(self, user_id: ObjectId, family_id: str) -> SessionTokens:
+    async def _issue(
+        self, user_id: ObjectId, family_id: str, family_started_at: datetime
+    ) -> SessionTokens:
         refresh = new_refresh_token()
         expires = datetime.now(UTC) + timedelta(days=self._settings.refresh_token_ttl_days)
-        await self._tokens.issue(hash_refresh_token(refresh), user_id, family_id, expires)
+        await self._tokens.issue(
+            hash_refresh_token(refresh), user_id, family_id, expires, family_started_at
+        )
         return SessionTokens(create_access_token(str(user_id), self._settings), refresh)
 
     async def list_users(
@@ -234,6 +241,8 @@ class AccountService:
             # Two admins demoting each other both passed the guard above; undo this one.
             await self._users.update(target_id, target.status, target.role)
             raise AppError(409, "conflict", _LAST_ADMIN)
+        if status == "disabled":  # end their sessions now; refresh would refuse them anyway
+            await self._tokens.revoke_for_user(target_id)
         return updated
 
     async def delete_user(self, actor_id: ObjectId, target_id: ObjectId) -> None:

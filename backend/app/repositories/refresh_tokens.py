@@ -13,6 +13,7 @@ from app.db import Database, Document
 class RotatedToken:
     user_id: ObjectId
     family_id: str
+    family_started_at: datetime  # when the login that began this family happened
 
 
 async def install_indexes(db: Database) -> None:
@@ -28,13 +29,19 @@ class RefreshTokensRepository:
         self._col = db.refresh_tokens
 
     async def issue(
-        self, token_hash: str, user_id: ObjectId, family_id: str, expires_at: datetime
+        self,
+        token_hash: str,
+        user_id: ObjectId,
+        family_id: str,
+        expires_at: datetime,
+        family_started_at: datetime,
     ) -> None:
         doc: Document = {
             "token_hash": token_hash,
             "user_id": user_id,
             "family_id": family_id,
             "expires_at": expires_at,
+            "family_started_at": family_started_at,
             "used_at": None,
             "revoked_at": None,
         }
@@ -58,7 +65,12 @@ class RefreshTokensRepository:
             return_document=ReturnDocument.AFTER,
         )
         if doc:
-            return RotatedToken(user_id=doc["user_id"], family_id=doc["family_id"])
+            return RotatedToken(
+                user_id=doc["user_id"],
+                family_id=doc["family_id"],
+                # Absent only on tokens issued before the cap existed; those get a fresh window.
+                family_started_at=doc.get("family_started_at", now),
+            )
         stale = await self._col.find_one({"token_hash": token_hash})
         if stale:
             await self.revoke_family(stale["family_id"])
@@ -74,6 +86,13 @@ class RefreshTokensRepository:
         doc = await self._col.find_one({"token_hash": token_hash})
         if doc:
             await self.revoke_family(doc["family_id"])
+
+    async def revoke_for_user(self, user_id: ObjectId) -> None:
+        """Revoke every live family of a user (sign them out everywhere)."""
+        await self._col.update_many(
+            {"user_id": user_id, "revoked_at": None},
+            {"$set": {"revoked_at": datetime.now(UTC)}},
+        )
 
     async def delete_for_user(self, user_id: ObjectId) -> None:
         await self._col.delete_many({"user_id": user_id})

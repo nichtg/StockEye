@@ -16,7 +16,7 @@ from app.services.accounts import AccountService
 async def create_admin(email: str, password: str) -> str:
     """Create an admin, or promote the existing user with this email. Returns a status message."""
     settings = get_settings()
-    client = create_client(settings.mongodb_uri)
+    client = create_client(settings.mongodb_uri.get_secret_value())
     try:
         db = client[settings.mongodb_db]
         await users.install_indexes(db)
