@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createApiClient } from './client';
+import { createApiClient, timeoutSignal } from './client';
 import { REFRESH_KEY, tokenStore } from './tokens';
 
 const json = (body: unknown, status = 200) =>
@@ -84,6 +84,16 @@ describe('sign-out versus refresh', () => {
     expect(tokenStore.getRefresh()).toBeNull();
     // The refresh result was discarded; the server still learns of the logout.
     expect(calls.filter((c) => c.url === '/api/auth/logout')).toHaveLength(1);
+  });
+
+  it('the logout request survives the page closing (keepalive)', async () => {
+    tokenStore.set({ access: 'a', refresh: 'ref-1', userId: 'u1' });
+    const { client, calls } = build(() => new Response(null, { status: 204 }));
+
+    await client.logout();
+
+    const logout = calls.find((c) => c.url === '/api/auth/logout');
+    expect(logout?.init.keepalive).toBe(true);
   });
 
   it('storage removed by another tab during a pending refresh stays removed', async () => {
@@ -198,5 +208,23 @@ describe('cross-tab ordering', () => {
     await expect(client.get('/me')).resolves.toEqual({ ok: true });
     expect(calls.map((c) => c.url)).toEqual(['/api/me', '/api/me']);
     expect(bearer(calls[1])).toBe('Bearer fresh');
+  });
+});
+
+describe('timeoutSignal', () => {
+  it('aborts after the delay when AbortSignal.timeout is missing (Safari before 16)', () => {
+    vi.useFakeTimers();
+    const original = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout');
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true });
+    try {
+      const signal = timeoutSignal(10_000);
+      expect(signal.aborted).toBe(false);
+
+      vi.advanceTimersByTime(10_000);
+
+      expect(signal.aborted).toBe(true);
+    } finally {
+      if (original) Object.defineProperty(AbortSignal, 'timeout', original);
+    }
   });
 });

@@ -24,8 +24,22 @@ export interface ApiClientOptions {
   lockWaitMs?: number;
 }
 
+const FETCH_TIMEOUT_MS = 10_000;
+
+/** `AbortSignal.timeout` is missing before Safari 16; without this, every refresh would fail there. */
+export function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+  const controller = new AbortController();
+  setTimeout(() => {
+    controller.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+  }, ms);
+  return controller.signal;
+}
+
 export interface RequestOptions {
   signal?: AbortSignal;
+  /** Let the request finish after the page unloads (used for logout). */
+  keepalive?: boolean;
   query?: Record<string, string | number | undefined>;
 }
 
@@ -158,6 +172,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         credentials: 'omit',
         ...(body !== undefined && { body: JSON.stringify(body) }),
         ...(opts?.signal && { signal: opts.signal }),
+        ...(opts?.keepalive && { keepalive: true }),
       });
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
@@ -237,7 +252,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         'POST',
         '/auth/refresh',
         { refresh_token: refresh },
-        { signal: AbortSignal.timeout(10_000) },
+        { signal: timeoutSignal(FETCH_TIMEOUT_MS) },
         null,
       );
       if (res.ok) {
@@ -289,7 +304,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
             'POST',
             '/auth/logout',
             { refresh_token: newest },
-            { signal: AbortSignal.timeout(10_000) },
+            // keepalive: a sign-out followed by closing the tab must still revoke the session.
+            { signal: timeoutSignal(FETCH_TIMEOUT_MS), keepalive: true },
             null,
           ).catch(() => undefined);
         }
