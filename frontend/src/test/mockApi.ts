@@ -9,7 +9,6 @@ export type MockHandler = (req: MockRequest) => { status?: number; body?: unknow
 
 /** Stubs global fetch with a handler that sees every request; unknown routes answer 404. */
 export function stubFetch(handler: MockHandler): MockRequest[] {
-  document.cookie = 'se_csrf=test; path=/';
   const seen: MockRequest[] = [];
   vi.stubGlobal(
     'fetch',

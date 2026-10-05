@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { isApiError } from '../../api/errors';
 import { meKey } from '../../api/keys';
+import { tokenStore } from '../../api/tokens';
 import type { Session, User } from '../../api/types';
 import { useNotice } from '../../components/useNotice';
 import { clearSession } from '../../queryClient';
@@ -33,6 +34,7 @@ export function useAuthMutation(mode: 'login' | 'register') {
   return useMutation({
     mutationFn: (c: Credentials) => api.post<Session>(`/auth/${mode}`, c),
     onSuccess: (session) => {
+      tokenStore.set({ access: session.access_token, refresh: session.refresh_token });
       client.setQueryData(meKey, session.user);
     },
   });
@@ -41,10 +43,14 @@ export function useAuthMutation(mode: 'login' | 'register') {
 export function useLogout() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<undefined>('/auth/logout'),
-    onSettled: () => {
-      // Even if the call failed we drop local state; the cookies expire server-side regardless.
-      clearSession(client);
+    mutationFn: () => {
+      // Fire and forget: revoking server-side is best effort, signing out locally is not.
+      const refreshToken = tokenStore.getRefresh();
+      if (refreshToken) {
+        api.post('/auth/logout', { refresh_token: refreshToken }).catch(() => undefined);
+      }
+      clearSession(client); // also clears the tokens
+      return Promise.resolve();
     },
   });
 }

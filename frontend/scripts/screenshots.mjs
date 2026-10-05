@@ -37,19 +37,24 @@ async function session(viewport, mode) {
   await page.locator('button[type=submit]').click();
   await page.waitForURL(`${BASE}/`, { timeout: 15000 });
   // Seed the watchlist through the UI's own API calls.
-  await page.evaluate(async () => {
-    const csrf = document.cookie
-      .split('; ')
-      .find((c) => c.startsWith('se_csrf='))
-      ?.split('=')[1];
-    for (const s of ['AAPL', 'D05.SI', 'MSFT', 'ZZZZ']) {
-      await fetch(`/api/watchlist/${s}`, {
-        method: 'PUT',
-        credentials: 'include',
-        headers: { 'X-CSRF-Token': decodeURIComponent(csrf ?? '') },
+  await page.evaluate(
+    async ({ email, password }) => {
+      // Tokens are not readable from the page, so sign in again for a bearer token.
+      const login = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
       });
-    }
-  });
+      const { access_token } = await login.json();
+      for (const s of ['AAPL', 'D05.SI', 'MSFT', 'ZZZZ']) {
+        await fetch(`/api/watchlist/${s}`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${access_token}` },
+        });
+      }
+    },
+    { email, password },
+  );
   await ctx.close();
 }
 

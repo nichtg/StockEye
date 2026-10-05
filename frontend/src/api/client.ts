@@ -1,15 +1,21 @@
 import { ApiError } from './errors';
-import type { ErrorEnvelope, FieldIssue } from './types';
+import { API_BASE_URL } from '../config';
+import { tokenStore, type TokenStore } from './tokens';
+import type { ErrorEnvelope, FieldIssue, Session } from './types';
 
-const CSRF_COOKIE = 'se_csrf';
 export const RATE_LIMITED_CODE = 'rate_limited';
 export const RATE_LIMITED_MESSAGE = 'Too many requests. Please wait a minute and try again.';
-const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+export const REFRESH_LOCK = 'stockeye-refresh';
 
 export interface ApiClientOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
-  readCookie?: (name: string) => string | undefined;
+  tokens?: TokenStore;
+  /**
+   * Web Locks, used to serialise refreshes across tabs. Defaults to `navigator.locks`; pass `null`
+   * to run without it (tests, or browsers that lack it).
+   */
+  locks?: Pick<LockManager, 'request'> | null;
   /** Called when a 401 could not be recovered by refreshing the session. */
   onSessionExpired?: () => void;
 }
@@ -26,19 +32,12 @@ export interface ApiClient {
   patch: <T>(path: string, body?: unknown, opts?: RequestOptions) => Promise<T>;
   /** `body` is for the rare DELETE that must carry a confirmation, such as a password. */
   delete: <T = void>(path: string, opts?: RequestOptions & { body?: unknown }) => Promise<T>;
-  /** Fetches the CSRF cookie. Call once at app start; unsafe requests also self-heal. */
-  initCsrf: () => Promise<void>;
+  /**
+   * Call once at app start. With a stored refresh token, trades it for an access token; protected
+   * requests wait for this, so the first call does not need a 401 round trip.
+   */
+  initSession: () => Promise<void>;
   setSessionExpiredHandler: (handler: (() => void) | undefined) => void;
-}
-
-function defaultReadCookie(name: string): string | undefined {
-  for (const part of document.cookie.split('; ')) {
-    const eq = part.indexOf('=');
-    if (eq > 0 && part.slice(0, eq) === name) {
-      return decodeURIComponent(part.slice(eq + 1));
-    }
-  }
-  return undefined;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -100,15 +99,24 @@ async function toApiError(res: Response): Promise<ApiError> {
   });
 }
 
+type RefreshOutcome = 'ok' | 'rejected' | 'failed';
+
 export function createApiClient(options: ApiClientOptions = {}): ApiClient {
-  const baseUrl = options.baseUrl ?? '/api';
-  const readCookie = options.readCookie ?? defaultReadCookie;
+  const baseUrl = options.baseUrl ?? API_BASE_URL;
+  const tokens = options.tokens ?? tokenStore;
   let onSessionExpired = options.onSessionExpired;
   const doFetch: typeof fetch = (...args) => (options.fetchImpl ?? fetch)(...args);
+  const getLocks = (): Pick<LockManager, 'request'> | null => {
+    if (options.locks !== undefined) return options.locks;
+    return typeof navigator !== 'undefined' && 'locks' in navigator ? navigator.locks : null;
+  };
 
-  // Concurrent callers share one in-flight promise, so a burst of 401s triggers one refresh.
-  let csrfInFlight: Promise<void> | null = null;
-  let refreshInFlight: Promise<boolean> | null = null;
+  // Concurrent callers in this tab share one refresh. Across tabs, the Web Lock below serialises
+  // them. Without navigator.locks only this in-tab dedupe protects us, so two tabs that both hit
+  // an expired access token at the same instant can send the same refresh token twice, and the
+  // server would treat the second as reuse and revoke the session. Rare, and the user signs in again.
+  let refreshInFlight: Promise<RefreshOutcome> | null = null;
+  let startup: Promise<void> | null = null;
 
   function buildUrl(path: string, query?: RequestOptions['query']): string {
     let url = `${baseUrl}${path}`;
@@ -128,19 +136,16 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     path: string,
     body: unknown,
     opts: RequestOptions | undefined,
+    access: string | null,
   ): Promise<Response> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (UNSAFE.has(method)) {
-      if (!readCookie(CSRF_COOKIE)) await initCsrf();
-      const token = readCookie(CSRF_COOKIE);
-      if (token) headers['X-CSRF-Token'] = token;
-    }
+    if (access) headers.Authorization = `Bearer ${access}`;
     try {
       return await doFetch(buildUrl(path, opts?.query), {
         method,
         headers,
-        credentials: 'include',
+        credentials: 'omit',
         ...(body !== undefined && { body: JSON.stringify(body) }),
         ...(opts?.signal && { signal: opts.signal }),
       });
@@ -154,25 +159,52 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     }
   }
 
-  function initCsrf(): Promise<void> {
-    csrfInFlight ??= (async () => {
-      try {
-        const res = await send('GET', '/auth/csrf', undefined, undefined);
-        if (!res.ok) throw await toApiError(res);
-      } finally {
-        csrfInFlight = null;
+  /**
+   * Runs inside the cross-tab lock. The refresh token is re-read here, never taken from the
+   * caller: another tab may have rotated it while we waited, and re-sending a rotated token is
+   * treated by the server as theft (the whole session family is revoked).
+   */
+  async function refreshLocked(
+    failedAccess: string | null,
+    startedWith: string | null,
+  ): Promise<RefreshOutcome> {
+    const current = tokens.getRefresh();
+    if (!current) {
+      tokens.clear(); // signed out (here or in another tab)
+      return 'rejected';
+    }
+    if (current !== startedWith) {
+      // Another tab rotated the token while we waited. Its new token is valid; the only thing we
+      // may still lack is an access token of our own.
+      const access = tokens.getAccess();
+      if (access && access !== failedAccess) return 'ok';
+    }
+    try {
+      const res = await send('POST', '/auth/refresh', { refresh_token: current }, undefined, null);
+      if (res.ok) {
+        const session = (await res.json()) as Session;
+        tokens.set({ access: session.access_token, refresh: session.refresh_token });
+        return 'ok';
       }
-    })();
-    return csrfInFlight;
+      if (res.status === 401) {
+        tokens.clear();
+        return 'rejected';
+      }
+      return 'failed';
+    } catch {
+      return 'failed';
+    }
   }
 
-  function refreshSession(): Promise<boolean> {
+  function refreshSession(failedAccess: string | null): Promise<RefreshOutcome> {
+    const startedWith = tokens.getRefresh();
     refreshInFlight ??= (async () => {
       try {
-        const res = await send('POST', '/auth/refresh', undefined, undefined);
-        return res.ok;
+        const locks = getLocks();
+        const run = () => refreshLocked(failedAccess, startedWith);
+        return locks ? await locks.request(REFRESH_LOCK, run) : await run();
       } catch {
-        return false;
+        return 'failed';
       } finally {
         refreshInFlight = null;
       }
@@ -186,11 +218,16 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     body?: unknown,
     opts?: RequestOptions,
   ): Promise<T> {
-    let res = await send(method, path, body, opts);
+    const isAuthCall = path.startsWith('/auth/');
+    if (!isAuthCall && startup) await startup;
+    const usedAccess = tokens.getAccess();
+    let res = await send(method, path, body, opts, usedAccess);
 
-    if (res.status === 401 && !path.startsWith('/auth/')) {
-      if (await refreshSession()) res = await send(method, path, body, opts);
-      if (res.status === 401) onSessionExpired?.();
+    // Refresh at most once and retry at most once; auth endpoints never trigger it.
+    if (res.status === 401 && !isAuthCall) {
+      const outcome = await refreshSession(usedAccess);
+      if (outcome === 'ok') res = await send(method, path, body, opts, tokens.getAccess());
+      if (outcome === 'rejected' || (outcome === 'ok' && res.status === 401)) onSessionExpired?.();
     }
 
     if (!res.ok) throw await toApiError(res);
@@ -205,7 +242,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     put: (path, body, opts) => request('PUT', path, body, opts),
     patch: (path, body, opts) => request('PATCH', path, body, opts),
     delete: (path, opts) => request('DELETE', path, opts?.body, opts),
-    initCsrf,
+    initSession: () => {
+      startup ??= tokens.getRefresh()
+        ? refreshSession(null).then(() => undefined)
+        : Promise.resolve();
+      return startup;
+    },
     setSessionExpiredHandler: (handler) => {
       onSessionExpired = handler;
     },
