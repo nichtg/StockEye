@@ -1,0 +1,121 @@
+# Production stack on the Oracle VM. Installed to /opt/stockeye/ by setup-vm.sh and always run
+# through `stockeye-compose`, which passes the two env files below:
+#   /etc/stockeye/stockeye.env  secrets and settings (root:root 0600, filled in by hand)
+#   /etc/stockeye/state.env     API_IMAGE=<ghcr digest ref>, written only by deploy.sh
+# Compose reads them for ${...} interpolation. The API gets an explicit list of variables, so the
+# MongoDB root password never enters the API container.
+services:
+  caddy:
+    image: caddy:2.11@sha256:13b7fbadd017b042956fddbceedeeea12bb1e560534f9b3df281269dbcc61813
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_IP: ${PUBLIC_IP:?set PUBLIC_IP}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      edge:
+        ipv4_address: 172.29.0.2
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    image: ${API_IMAGE:?API_IMAGE is written by deploy.sh; run the Deploy workflow}
+    restart: unless-stopped
+    environment:
+      STOCKEYE_MONGODB_URI: mongodb://${MONGO_APP_USERNAME:?}:${MONGO_APP_PASSWORD:?}@mongo:27017/stockeye?authSource=stockeye
+      STOCKEYE_JWT_SECRET: ${STOCKEYE_JWT_SECRET:?set STOCKEYE_JWT_SECRET}
+      STOCKEYE_CORS_ORIGINS: ${STOCKEYE_CORS_ORIGINS:?set STOCKEYE_CORS_ORIGINS}
+      STOCKEYE_FINNHUB_API_KEY: ${STOCKEYE_FINNHUB_API_KEY:-}
+      STOCKEYE_MARKETAUX_API_KEY: ${STOCKEYE_MARKETAUX_API_KEY:-}
+      STOCKEYE_ALPHAVANTAGE_API_KEY: ${STOCKEYE_ALPHAVANTAGE_API_KEY:-}
+      # uvicorn believes X-Forwarded-* only from Caddy's pinned address on the edge network.
+      FORWARDED_ALLOW_IPS: 172.29.0.2
+    networks:
+      edge: {}
+      data: {}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"
+      interval: 15s
+      timeout: 4s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:8.0@sha256:d0d926f94df099bff534b7ee5b5986458131a22489dfff8664509af0c1e2ca9c
+    restart: unless-stopped
+    # No `ports:`. Auth is on because MONGO_INITDB_ROOT_* makes the image start with --auth.
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?set MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD}
+      MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:?}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?}
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+      - ./mongo-init.sh:/docker-entrypoint-initdb.d/10-app-user.sh:ro
+    networks:
+      data: {}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    # The entrypoint starts as root to chown the volume, then drops to the mongodb user.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+networks:
+  # edge: Caddy and the API (needs outbound internet: ACME, market-data providers).
+  edge:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+  # data: API and MongoDB only, with no route off the host.
+  data:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.1.0/24
+
+volumes:
+  caddy-data:
+  caddy-config:
+  mongo-data:
+  mongo-config:

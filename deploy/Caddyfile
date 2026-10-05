@@ -1,0 +1,43 @@
+# Production reverse proxy. PUBLIC_IP comes from the compose environment.
+{
+	# The reserved public IP is NATed to the VM's private address, and browsers send no SNI for
+	# an IP URL, so name the certificate to serve when a handshake carries no server name.
+	default_sni {$PUBLIC_IP}
+	servers {
+		# Only 80/443 over TCP are open in the firewall; skip HTTP/3 (UDP 443).
+		protocols h1 h2
+	}
+}
+
+{$PUBLIC_IP} {
+	# Let's Encrypt IP-address certificate: only the "shortlived" ACME profile (~6 days) issues
+	# them. Caddy renews automatically (about 2 days before expiry).
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	request_body {
+		max_size 1MB
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000 {
+			# Overwrite, never append: a client-supplied X-Forwarded-For must not reach uvicorn.
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	# Everything else (including /) is not served from here; the SPA lives on GitHub Pages.
+	handle {
+		respond "Not found" 404
+	}
+}
