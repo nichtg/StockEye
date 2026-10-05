@@ -78,9 +78,13 @@ metadata service (below), and starts a nightly backup timer. It ends by printing
 
 **Metadata block.** Containers must not be able to reach `169.254.169.254`, or a bug in the API could be used to
 fetch the VM's instance-principal credentials. `stockeye-docker-user.service` adds
-`iptables -I DOCKER-USER -d 169.254.0.0/16 -j DROP` after `docker.service` on every boot and is `PartOf` Docker, so
-it is re-applied after a Docker restart as well; the rule is idempotent and is not saved into `/etc/iptables`.
-Check: `sudo iptables -S DOCKER-USER`. The `deploy-smoke` workflow tests the same rule on a CI runner.
+a `DROP` for `169.254.0.0/16` to the `DOCKER-USER` chain after `docker.service` on every boot and is `PartOf` Docker,
+so it is re-applied after a Docker restart as well; it is idempotent and is not saved into `/etc/iptables`. On Oracle
+the VCN DNS resolver is also `169.254.169.254` (port 53), so DNS to it is let through ahead of the drop; without that,
+containers could not resolve names (no certificate, no market data).
+Checks: `sudo iptables -S DOCKER-USER` shows the two port-53 `RETURN` rules before the `DROP`, and
+`sudo stockeye-compose exec caddy nslookup acme-v02.api.letsencrypt.org` resolves. The `deploy-smoke` workflow tests
+the metadata block on a CI runner (whose DNS is elsewhere, so the DNS exception is only verified here).
 
 **Lock down SSH (second step).** Re-running setup is safe (it never overwrites `/etc/stockeye/stockeye.env`; re-run it
 after pulling a new compose file). But first, from a **second terminal**, confirm

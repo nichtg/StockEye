@@ -29,6 +29,8 @@ jobs:
           set -euo pipefail
           # Caddy renews a ~6-day shortlived certificate with ~2 days left. Alert at under 36 hours:
           # renewal has then been failing for about a day, with time left to fix it.
-          echo | openssl s_client -connect "${API_HOST}:443" -verify_return_error -verify_ip "${API_HOST}" 2>/dev/null             | openssl x509 -outform PEM >"$RUNNER_TEMP/cert.pem"
+          echo | openssl s_client -connect "${API_HOST}:443" -verify_return_error -verify_ip "${API_HOST}" 2>/dev/null \
+            | openssl x509 -outform PEM >"$RUNNER_TEMP/cert.pem"
           openssl x509 -in "$RUNNER_TEMP/cert.pem" -noout -enddate
-          openssl x509 -in "$RUNNER_TEMP/cert.pem" -noout -checkend 129600             || { echo "::error::certificate expires within 36 hours"; exit 1; }
+          openssl x509 -in "$RUNNER_TEMP/cert.pem" -noout -checkend 129600 \
+            || { echo "::error::certificate expires within 36 hours"; exit 1; }

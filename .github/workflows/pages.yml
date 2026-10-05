@@ -29,6 +29,8 @@ jobs:
       VITE_BASE_PATH: ${{ vars.PAGES_BASE_PATH }}
     steps:
       - name: Require an https API origin
+        # Runs before checkout, when frontend/ (the job's default directory) doesn't exist yet.
+        working-directory: .
         run: |
           if ! [[ "$VITE_API_BASE_URL" =~ ^https://[^/]+/api$ ]]; then
             echo "::error::repository variable API_ORIGIN must be https://<host> (got an unset or non-https value)"

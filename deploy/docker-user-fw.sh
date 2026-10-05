@@ -18,6 +18,21 @@ for _ in $(seq 1 30); do
 done
 iptables -w -n -L DOCKER-USER >/dev/null 2>&1 || { echo "DOCKER-USER chain not found" >&2; exit 1; }
 
-if ! iptables -w -C DOCKER-USER -d 169.254.0.0/16 -j DROP 2>/dev/null; then
-  iptables -w -I DOCKER-USER 1 -d 169.254.0.0/16 -j DROP
-fi
+# On Oracle the VCN DNS resolver is also 169.254.169.254 (port 53), and Docker's embedded DNS
+# forwards to it from inside the container's namespace, so DNS must stay open ahead of the DROP.
+# Rules are removed then re-inserted in a fixed order, which keeps re-runs idempotent.
+rules=(
+  "-d 169.254.169.254/32 -p udp --dport 53 -j RETURN"
+  "-d 169.254.169.254/32 -p tcp --dport 53 -j RETURN"
+  "-d 169.254.0.0/16 -j DROP"
+)
+for rule in "${rules[@]}"; do
+  # shellcheck disable=SC2086  # each rule is a list of iptables words
+  while iptables -w -D DOCKER-USER $rule 2>/dev/null; do :; done
+done
+position=1
+for rule in "${rules[@]}"; do
+  # shellcheck disable=SC2086
+  iptables -w -I DOCKER-USER "$position" $rule
+  position=$((position + 1))
+done
