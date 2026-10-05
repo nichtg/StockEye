@@ -131,7 +131,8 @@ class Settings(BaseSettings):
                     f"STOCKEYE_CORS_ORIGINS entry {origin!r} must look like https://host[:port]"
                     " (http or https, no path, no trailing slash, no wildcard, not null)"
                 )
-        return origins
+        # Browsers send the Origin host in lowercase; a mixed-case entry would silently never match.
+        return [origin.lower() for origin in origins]
 
     @model_validator(mode="after")
     def _require_strong_jwt_secret(self) -> "Settings":

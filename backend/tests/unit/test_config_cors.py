@@ -37,3 +37,9 @@ def test_cors_origins_exact_scheme_host_port_is_accepted(origin: str) -> None:
 def test_cors_origins_wildcards_paths_and_odd_forms_are_rejected(origin: str) -> None:
     with pytest.raises(ValidationError, match="STOCKEYE_CORS_ORIGINS"):
         _settings(["https://ok.example.com", origin])
+
+
+def test_settings_cors_origins_mixed_case_host_is_lowercased() -> None:
+    settings = Settings(environment="test", cors_origins=["https://Org.GitHub.io"])
+
+    assert settings.cors_origins == ["https://org.github.io"]
