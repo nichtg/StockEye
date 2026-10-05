@@ -1,0 +1,3 @@
+# Reviewed false positives only; each line is one exact finding fingerprint (commit:file:rule:line).
+# A pinned sha256 checksum of the FinBERT tokenizer download, not a credential.
+8ec1426b129e522a381d16aab388ed6c98ac9423:backend/scripts/download_finbert.py:generic-api-key:30
