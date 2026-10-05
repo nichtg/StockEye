@@ -446,7 +446,7 @@ The custom domain, Fly.io and is-a.dev were considered and declined.
   - Dependabot.
   - A daily health and certificate-expiry check that fails loudly.
 - **Runbook (`docs/DEPLOY.md`):**
-  - The user's one-time steps (Oracle account upgraded to Pay-As-You-Go to avoid idle reclaim, a reserved
+  - The user's one-time steps (Oracle account; Pay-As-You-Go optional, 1 OCPU / 6 GB so memory stays above the idle threshold; a reserved
     IP, the admin over getpass).
   - Rotation of each secret.
   - Teardown order: delete DNS records and config before releasing the IP or deleting the site.

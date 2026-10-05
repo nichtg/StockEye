@@ -40,15 +40,22 @@ Naming used below: `<org>` is the repository owner, `nichtg` (lowercase in image
 ### 2. Oracle Cloud account
 1. Sign up at oracle.com/cloud/free. Pick a home region carefully: it cannot be changed, and Always Free Arm
    capacity varies by region.
-2. **Upgrade to Pay-As-You-Go** (Billing > Upgrade). Idle Always Free instances on a pure free-tier account can be
-   reclaimed; a PAYG account is not, and resources inside the Always Free limits are still charged $0. Create a
-   budget alert of $1 (Billing > Budgets) as a safety net. **verify:** current Oracle reclaim and PAYG wording.
+2. **Pay-As-You-Go is optional.** This setup stays inside the Always Free limits either way. Trade-offs:
+   - Free-only: Oracle cannot bill you at all, but it may reclaim an Always Free VM it deems idle. Idle means that
+     over 7 days *all* of: CPU (95th percentile) under 20%, network under 20%, and (Arm/A1 only) memory under 20%
+     ([Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm)). StockEye keeps
+     memory above that by sizing the VM to the app (step 3.1, then the memory check in step 3.6). Arm capacity may
+     also be scarcer for free-only accounts ("Out of capacity": retry over a few hours or days).
+   - Pay-As-You-Go (Billing > Upgrade): not reclaimed for idleness, and priority for capacity; still $0 inside the
+     free limits, but a mistake outside them would be billed, so add a $1 budget alert (Billing > Budgets).
+   Do not use "keep-alive" CPU burners: size the VM honestly instead.
 3. Create a private Object Storage bucket (Storage > Buckets) named e.g. `stockeye-backups`, default visibility
    **Private**. Note your Object Storage **namespace** (Profile > Tenancy details).
 
 ### 3. The VM
-1. Compute > Instances > Create. Image: Ubuntu 24.04 (aarch64). Shape: `VM.Standard.A1.Flex`, 1 OCPU and 6 GB RAM is
-   plenty (the free limit is 4 OCPU / 24 GB). If you get "Out of capacity", retry later or in another availability
+1. Compute > Instances > Create. Image: Ubuntu 24.04 (aarch64). Shape: `VM.Standard.A1.Flex` with **1 OCPU and
+   6 GB RAM**: plenty for StockEye, and small enough that its normal memory use stays above the 20% idle threshold
+   (the free limit is 4 OCPU / 24 GB; don't max it out on a free-only account). If you get "Out of capacity", retry later or in another availability
    domain. Add your SSH public key.
 2. Networking > Reserved public IPs > Create, then attach it to the instance's VNIC (instance > Attached VNICs >
    IPv4 addresses > Edit > Reserved public IP). This is `<PUBLIC_IP>`. It must not change.
@@ -58,6 +65,11 @@ Naming used below: `<org>` is the repository owner, `nichtg` (lowercase in image
 5. Create the CI deploy key on **your own computer** (never on the VM):
    `ssh-keygen -t ed25519 -f stockeye-deploy -N "" -C github-deploy`. You will paste `stockeye-deploy.pub` into the
    next step and `stockeye-deploy` (the private half) into GitHub in step 6.
+6. **Memory check (free-only accounts), a day after the first deploy:** instance > Metrics > Memory utilization (or
+   `free -m` on the VM). If it sits under ~25%, shrink the shape (instance > Edit > Shape, e.g. 4 GB; needs a reboot)
+   so the app stays clear of the idle threshold. **verify:** the app's real memory use once running (estimate
+   1.5-2 GB). If the VM is ever reclaimed, the daily healthcheck fails within a day; start the instance again (or
+   rebuild it from this runbook and restore the newest backup).
 
 ### 4. Run the VM setup script
 On the VM:
