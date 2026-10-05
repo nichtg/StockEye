@@ -470,7 +470,7 @@ The custom domain, Fly.io and is-a.dev were considered and declined.
 - [x] Backend token auth (refresh families, 30-day cap, refresh rate limit, validated CORS; 935 tests)
 - [x] Frontend token client (Web Locks, compare-and-set, timeouts, frame gate; 207 tests)
 - [x] Auth security reviews approved (backend 2 rounds, frontend 3 rounds); live two-tab test OK
-- [ ] Deploy infrastructure
-- [ ] Deploy security review approved
+- [x] Deploy infrastructure (deploy/, workflows, docs/DEPLOY.md runbook)
+- [x] Deploy security review approved (3 rounds; pins and image digests verified over the network)
 - [ ] PRs open and CI green
 - [ ] User one-time setup, then the go-live probes
