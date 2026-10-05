@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { frameGate } from './frameGate';
+import { describe, expect, it, vi } from 'vitest';
+import { frameGate, startIfTopLevel } from './frameGate';
 
 function fakeWindow(framed: boolean) {
   const topLocation = { href: 'https://top.example/' };
@@ -45,5 +45,25 @@ describe('frameGate', () => {
     frameGate();
     expect(document.documentElement.style.visibility).toBe('visible');
     document.documentElement.style.visibility = '';
+  });
+
+  it('returns whether the page may run', () => {
+    expect(frameGate(fakeWindow(false).win)).toBe(true);
+    expect(frameGate(fakeWindow(true).win)).toBe(false);
+  });
+
+  it('a framed page neither starts (render, session init) nor calls the API', () => {
+    const start = vi.fn();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    expect(startIfTopLevel(start, fakeWindow(true).win)).toBe(false);
+    expect(start).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('a top-level page starts', () => {
+    const start = vi.fn();
+    expect(startIfTopLevel(start, fakeWindow(false).win)).toBe(true);
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });

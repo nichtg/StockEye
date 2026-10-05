@@ -37,8 +37,14 @@ export function createQueryClient(): QueryClient {
  * deleted their account) is remembered so the route guard does not offer to come back to this page.
  * The signed-out mark goes last, so observers never see it without the flag.
  */
-export function clearSession(client: QueryClient, { onPurpose = false } = {}): void {
-  tokenStore.clear();
+export function clearSession(
+  client: QueryClient,
+  { onPurpose = false, localOnly = false } = {},
+): void {
+  // `localOnly` leaves shared storage alone: it may already hold another tab's new login.
+  if (localOnly) tokenStore.forgetLocal();
+  else tokenStore.clear();
+  client.getMutationCache().clear(); // variables can hold a password
   client.removeQueries({ predicate: (q) => q.queryKey[0] !== meKey[0] });
   if (onPurpose) client.setQueryData(signedOutOnPurposeKey, true);
   client.setQueryData(meKey, null);
@@ -51,10 +57,17 @@ export function clearSession(client: QueryClient, { onPurpose = false } = {}): v
  */
 export function installSessionExpiry(client: QueryClient): void {
   api.setSessionExpiredHandler(() => {
-    clearSession(client);
+    clearSession(client, { localOnly: true });
   });
-  tokenStore.onSignedOutElsewhere(() => {
-    clearSession(client);
+  tokenStore.watchOtherTabs({
+    onSignedOut: () => {
+      clearSession(client, { localOnly: true });
+    },
+    onIdentityChange: () => {
+      // Another tab signed in as someone else: drop everything of the old user and reload as them.
+      clearSession(client, { localOnly: true });
+      window.location.reload();
+    },
   });
 }
 

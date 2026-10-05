@@ -29,11 +29,39 @@ describe('session tokens', () => {
     const { result } = renderHook(() => useAuthMutation('login'), { wrapper });
     await act(() => result.current.mutateAsync({ email: 'a@b.co', password: 'x' }));
     expect(tokenStore.getAccess()).toBe('acc');
-    expect(localStorage.getItem(REFRESH_KEY)).toBe('ref');
+    expect(tokenStore.getRefresh()).toBe('ref');
+  });
+
+  it('leaves no token or password in the query or mutation cache after login', async () => {
+    stubFetch(() => ({
+      body: {
+        access_token: 'acc-secret',
+        access_expires_in: 900,
+        refresh_token: 'ref-secret',
+        user: { id: '1', email: 'a@b.co', role: 'user', created_at: '2026-01-01T00:00:00Z' },
+      },
+    }));
+    const { client, wrapper } = setup();
+    const { result, unmount } = renderHook(() => useAuthMutation('login'), { wrapper });
+    await act(() => result.current.mutateAsync({ email: 'a@b.co', password: 'pw-secret' }));
+    unmount();
+    await waitFor(() => {
+      expect(client.getMutationCache().getAll()).toHaveLength(0);
+    });
+    const dump = JSON.stringify(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((q) => q.state),
+    );
+    for (const secret of ['acc-secret', 'ref-secret', 'pw-secret']) {
+      expect(dump).not.toContain(secret);
+    }
+    expect(client.getQueryData(meKey)).toMatchObject({ id: '1' });
   });
 
   it('logout posts the refresh token, then clears storage and the cached user', async () => {
-    tokenStore.set({ access: 'acc', refresh: 'ref' });
+    tokenStore.set({ access: 'acc', refresh: 'ref', userId: '1' });
     const seen = stubFetch((req) => (req.path === '/auth/logout' ? { status: 204 } : undefined));
     const { client, wrapper } = setup();
     client.setQueryData(meKey, { id: '1' });

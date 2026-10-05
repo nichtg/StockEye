@@ -18,6 +18,10 @@ export interface ApiClientOptions {
   locks?: Pick<LockManager, 'request'> | null;
   /** Called when a 401 could not be recovered by refreshing the session. */
   onSessionExpired?: () => void;
+  /** How long the lock holder keeps the lock after storing a rotated token. Default 250 ms. */
+  lockHoldMs?: number;
+  /** How long a refresh waits for the lock before giving up. Default 15 s. */
+  lockWaitMs?: number;
 }
 
 export interface RequestOptions {
@@ -37,6 +41,12 @@ export interface ApiClient {
    * requests wait for this, so the first call does not need a 401 round trip.
    */
   initSession: () => Promise<void>;
+  /**
+   * Signs this tab out at once, then (under the refresh lock, so it sends the newest token and
+   * never interleaves with a rotation) revokes the session server-side and clears storage.
+   * Resolves when that is done; callers need not wait.
+   */
+  logout: () => Promise<void>;
   setSessionExpiredHandler: (handler: (() => void) | undefined) => void;
 }
 
@@ -159,6 +169,46 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     }
   }
 
+  const holdMs = options.lockHoldMs ?? 250;
+  const lockWaitMs = options.lockWaitMs ?? 15_000;
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  /**
+   * Runs `fn` under the cross-tab lock. The caller gets `fn`'s value as soon as it returns; if
+   * `hold` is set the lock is kept a little longer (see refreshLocked). Waiting for the lock is
+   * bounded, so nothing can hang forever on a stuck lock: the caller gets a rejection instead.
+   */
+  function underLock<T>(fn: () => Promise<{ value: T; hold: boolean }>): Promise<T> {
+    const locks = getLocks();
+    if (!locks) return fn().then((r) => r.value);
+    return new Promise<T>((resolve, reject) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error('lock wait timed out'));
+      }, lockWaitMs);
+      locks
+        .request(REFRESH_LOCK, { signal: controller.signal }, async () => {
+          clearTimeout(timer);
+          if (controller.signal.aborted) return;
+          try {
+            const r = await fn();
+            resolve(r.value);
+            // Hold on, so the localStorage write reaches the other tabs before any of them can
+            // acquire the lock and read the token. Without this a tab could read the already
+            // rotated-away token, send it, and get the whole session revoked as reuse.
+            if (r.hold && holdMs > 0) await sleep(holdMs);
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error('refresh failed'));
+          }
+        })
+        .catch((error: unknown) => {
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error('lock failed'));
+        });
+    });
+  }
+
   /**
    * Runs inside the cross-tab lock. The refresh token is re-read here, never taken from the
    * caller: another tab may have rotated it while we waited, and re-sending a rotated token is
@@ -167,32 +217,49 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   async function refreshLocked(
     failedAccess: string | null,
     startedWith: string | null,
-  ): Promise<RefreshOutcome> {
-    const current = tokens.getRefresh();
-    if (!current) {
+  ): Promise<{ value: RefreshOutcome; hold: boolean }> {
+    const rejected = { value: 'rejected' as const, hold: false };
+    const failed = { value: 'failed' as const, hold: false };
+    const refresh = tokens.getRefresh();
+    if (!refresh) {
       tokens.clear(); // signed out (here or in another tab)
-      return 'rejected';
+      return rejected;
     }
-    if (current !== startedWith) {
+    if (refresh !== startedWith) {
       // Another tab rotated the token while we waited. Its new token is valid; the only thing we
       // may still lack is an access token of our own.
       const access = tokens.getAccess();
-      if (access && access !== failedAccess) return 'ok';
+      if (access && access !== failedAccess) return { value: 'ok', hold: false };
     }
+    const epoch = tokens.getEpoch();
     try {
-      const res = await send('POST', '/auth/refresh', { refresh_token: current }, undefined, null);
+      const res = await send(
+        'POST',
+        '/auth/refresh',
+        { refresh_token: refresh },
+        { signal: AbortSignal.timeout(10_000) },
+        null,
+      );
       if (res.ok) {
         const session = (await res.json()) as Session;
-        tokens.set({ access: session.access_token, refresh: session.refresh_token });
-        return 'ok';
+        // Compare-and-set: a sign-out (or another tab's new login) during the fetch wins.
+        const stored = tokens.setIfCurrent(
+          { refresh, epoch },
+          {
+            access: session.access_token,
+            refresh: session.refresh_token,
+            userId: session.user.id,
+          },
+        );
+        return stored ? { value: 'ok', hold: true } : rejected;
       }
       if (res.status === 401) {
-        tokens.clear();
-        return 'rejected';
+        if (tokens.getEpoch() === epoch && tokens.getRefresh() === refresh) tokens.clear();
+        return rejected;
       }
-      return 'failed';
+      return failed;
     } catch {
-      return 'failed';
+      return failed;
     }
   }
 
@@ -200,16 +267,37 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     const startedWith = tokens.getRefresh();
     refreshInFlight ??= (async () => {
       try {
-        const locks = getLocks();
-        const run = () => refreshLocked(failedAccess, startedWith);
-        return locks ? await locks.request(REFRESH_LOCK, run) : await run();
+        return await underLock(() => refreshLocked(failedAccess, startedWith));
       } catch {
-        return 'failed';
+        return 'failed' as const; // lock timeout or abort: keep the session, surface the error
       } finally {
         refreshInFlight = null;
       }
     })();
     return refreshInFlight;
+  }
+
+  async function logout(): Promise<void> {
+    const before = tokens.getRefresh();
+    tokens.forgetLocal();
+    try {
+      await underLock(async () => {
+        const newest = tokens.getRefresh() ?? before;
+        tokens.clear();
+        if (newest) {
+          await send(
+            'POST',
+            '/auth/logout',
+            { refresh_token: newest },
+            { signal: AbortSignal.timeout(10_000) },
+            null,
+          ).catch(() => undefined);
+        }
+        return { value: undefined, hold: false };
+      });
+    } catch {
+      tokens.clear(); // could not get the lock in time: still end the local session
+    }
   }
 
   async function request<T>(
@@ -227,6 +315,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     if (res.status === 401 && !isAuthCall) {
       const outcome = await refreshSession(usedAccess);
       if (outcome === 'ok') res = await send(method, path, body, opts, tokens.getAccess());
+      if (outcome === 'ok' && res.status === 401) tokens.clear();
       if (outcome === 'rejected' || (outcome === 'ok' && res.status === 401)) onSessionExpired?.();
     }
 
@@ -248,6 +337,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         : Promise.resolve();
       return startup;
     },
+    logout,
     setSessionExpiredHandler: (handler) => {
       onSessionExpired = handler;
     },

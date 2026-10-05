@@ -16,8 +16,15 @@ function envelope(status: number, code: string, message: string, details: unknow
 }
 
 function session(access: string, refresh: string) {
-  return { access_token: access, access_expires_in: 900, refresh_token: refresh, user: {} };
+  return {
+    access_token: access,
+    access_expires_in: 900,
+    refresh_token: refresh,
+    user: { id: 'u1' },
+  };
 }
+
+const stored = (t: string, u = 'u1') => JSON.stringify({ t, u });
 
 type Locks = Pick<LockManager, 'request'>;
 
@@ -25,7 +32,7 @@ type Locks = Pick<LockManager, 'request'>;
 function fakeLocks(beforeRun?: () => void): Locks {
   let tail: Promise<unknown> = Promise.resolve();
   return {
-    request: ((_name: string, cb: () => unknown) => {
+    request: ((_name: string, _options: unknown, cb: () => unknown) => {
       const run = tail.then(() => {
         beforeRun?.();
         return cb();
@@ -51,6 +58,7 @@ function setup(
     fetchImpl: fetchImpl as unknown as typeof fetch,
     locks,
     onSessionExpired,
+    lockHoldMs: 0,
   });
   return { client, calls, onSessionExpired };
 }
@@ -63,7 +71,7 @@ describe('api client', () => {
   it('sends no ambient credentials and attaches the bearer token when present', async () => {
     const { client, calls } = setup(() => json({ ok: true }));
     await client.get('/me');
-    tokenStore.set({ access: 'acc-1', refresh: 'ref-1' });
+    tokenStore.set({ access: 'acc-1', refresh: 'ref-1', userId: 'u1' });
     await client.get('/me');
     expect(calls[0]?.init.credentials).toBe('omit');
     expect(calls[0]?.url).toBe('/api/me');
@@ -72,7 +80,7 @@ describe('api client', () => {
   });
 
   it('refreshes once with the stored token, rotates it, and retries the request', async () => {
-    tokenStore.set({ access: 'old', refresh: 'ref-1' });
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     let meCalls = 0;
     const { client, calls } = setup((url) => {
       if (url === '/api/auth/refresh') return json(session('new', 'ref-2'));
@@ -88,7 +96,7 @@ describe('api client', () => {
   });
 
   it('retries exactly once: a 401 after a good refresh ends the session without looping', async () => {
-    tokenStore.set({ access: 'old', refresh: 'ref-1' });
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     const { client, calls, onSessionExpired } = setup((url) =>
       url === '/api/auth/refresh'
         ? json(session('new', 'ref-2'))
@@ -100,7 +108,7 @@ describe('api client', () => {
   });
 
   it('shares one in-flight refresh across concurrent 401s', async () => {
-    tokenStore.set({ access: 'old', refresh: 'ref-1' });
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     const seen = new Set<string>();
     let refreshes = 0;
     let releaseRefresh: () => void = () => undefined;
@@ -130,10 +138,10 @@ describe('api client', () => {
   });
 
   it('never sends a refresh token another tab already rotated', async () => {
-    tokenStore.set({ access: 'old', refresh: 'stale-ref' });
+    tokenStore.set({ access: 'old', refresh: 'stale-ref', userId: 'u1' });
     // The "other tab" rotates the token while this tab waits for the lock.
     const locks = fakeLocks(() => {
-      localStorage.setItem(REFRESH_KEY, 'fresh-ref');
+      localStorage.setItem(REFRESH_KEY, stored('fresh-ref'));
     });
     const { client, calls } = setup(
       (url, init) =>
@@ -153,7 +161,7 @@ describe('api client', () => {
   });
 
   it('treats a token removed by another tab as a sign-out and sends nothing', async () => {
-    tokenStore.set({ access: 'old', refresh: 'ref-1' });
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     const locks = fakeLocks(() => {
       localStorage.removeItem(REFRESH_KEY);
     });
@@ -167,7 +175,7 @@ describe('api client', () => {
   });
 
   it('still refreshes (in-tab dedupe only) when navigator.locks is missing', async () => {
-    tokenStore.set({ access: 'old', refresh: 'ref-1' });
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     let meCalls = 0;
     const { client, calls } = setup((url) => {
       if (url === '/api/auth/refresh') return json(session('new', 'ref-2'));
@@ -179,7 +187,7 @@ describe('api client', () => {
   });
 
   it('clears the tokens and signals expiry when the refresh is rejected', async () => {
-    tokenStore.set({ access: 'old', refresh: 'ref-1' });
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     const { client, onSessionExpired } = setup((url) =>
       url === '/api/auth/refresh'
         ? envelope(401, 'unauthenticated', 'Your session has expired.')
@@ -192,7 +200,7 @@ describe('api client', () => {
   });
 
   it('keeps the session when the refresh fails for a transient reason', async () => {
-    tokenStore.set({ access: 'old', refresh: 'ref-1' });
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     const { client, onSessionExpired } = setup((url) =>
       url === '/api/auth/refresh'
         ? new Response('', { status: 503 })
@@ -204,7 +212,7 @@ describe('api client', () => {
   });
 
   it('does not try to refresh for /auth/* endpoints', async () => {
-    tokenStore.set({ access: 'old', refresh: 'ref-1' });
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     const { client, calls, onSessionExpired } = setup(() =>
       envelope(401, 'unauthenticated', 'Email or password is incorrect.'),
     );
@@ -217,7 +225,7 @@ describe('api client', () => {
 
   describe('initSession', () => {
     it('trades a stored refresh token for an access token before protected calls', async () => {
-      localStorage.setItem(REFRESH_KEY, 'ref-1');
+      localStorage.setItem(REFRESH_KEY, stored('ref-1'));
       const { client, calls } = setup((url) =>
         url === '/api/auth/refresh' ? json(session('acc', 'ref-2')) : json({ id: '1' }),
       );

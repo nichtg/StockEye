@@ -1,5 +1,5 @@
-import { copyFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { Plugin } from 'vite';
 
 /** The origin a `connect-src` needs for this API URL: `'self'` when it is a same-origin path. */
@@ -52,10 +52,12 @@ export function spa404Plugin(): Plugin {
     name: 'stockeye-spa-404',
     apply: 'build',
     configResolved(config) {
-      outDir = join(config.root, config.build.outDir);
+      outDir = resolve(config.root, config.build.outDir);
     },
     closeBundle() {
-      copyFileSync(join(outDir, 'index.html'), join(outDir, '404.html'));
+      // After a failed build there is no index.html; do not mask the real error with ours.
+      const index = resolve(outDir, 'index.html');
+      if (existsSync(index)) copyFileSync(index, resolve(outDir, '404.html'));
     },
   };
 }
