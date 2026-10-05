@@ -1,18 +1,30 @@
 """Application settings, loaded once from env vars (prefix ``STOCKEYE_``) or ``.env``."""
 
+import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
 from limits import RateLimitItem, parse
-from pydantic import BaseModel, BeforeValidator, ConfigDict, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_JWT_SECRET_LENGTH = 32
 # Values people copy from docs and examples; a deployment that still has one is unprotected.
 _PLACEHOLDER_PREFIXES = ("replace-me", "changeme", "change-me", "dev-only-insecure")
 _PLACEHOLDER_SECRETS = frozenset({"secret", "password", "jwt-secret", "your-secret-here"})
+
+
+# scheme://host[:port] and nothing else: what a browser sends in the Origin header.
+_ORIGIN_RE = re.compile(r"^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(:\d{1,5})?$")
 
 
 class ProviderLimits(BaseModel):
@@ -30,7 +42,7 @@ def _parse_rate(value: object) -> object:
 type Rate = Annotated[RateLimitItem, BeforeValidator(_parse_rate)]
 
 
-type Bucket = Literal["search", "stock", "macro", "overview", "watchlist", "auth"]
+type Bucket = Literal["search", "stock", "macro", "overview", "watchlist", "auth", "refresh"]
 
 
 class RateLimits(BaseModel):
@@ -48,6 +60,7 @@ class RateLimits(BaseModel):
     overview: Rate = parse("20/minute")
     watchlist: Rate = parse("30/minute")
     auth: Rate = parse("10/minute")
+    refresh: Rate = parse("60/minute")  # refresh and logout; looser than the password routes
 
     def for_bucket(self, bucket: Bucket) -> Rate:
         return {
@@ -57,6 +70,7 @@ class RateLimits(BaseModel):
             "overview": self.overview,
             "watchlist": self.watchlist,
             "auth": self.auth,
+            "refresh": self.refresh,
         }[bucket]
 
 
@@ -107,6 +121,17 @@ class Settings(BaseSettings):
 
     finbert_model_dir: Path = Path("models/finbert")
     scheduler_enabled: bool = True
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _exact_origins(cls, origins: list[str]) -> list[str]:
+        for origin in origins:
+            if not _ORIGIN_RE.fullmatch(origin):
+                raise ValueError(
+                    f"STOCKEYE_CORS_ORIGINS entry {origin!r} must look like https://host[:port]"
+                    " (http or https, no path, no trailing slash, no wildcard, not null)"
+                )
+        return origins
 
     @model_validator(mode="after")
     def _require_strong_jwt_secret(self) -> "Settings":

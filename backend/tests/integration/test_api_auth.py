@@ -2,9 +2,10 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from limits import parse
 
 from app.auth.tokens import create_access_token
-from app.config import Settings
+from app.config import RateLimits, Settings
 from app.db import Database
 from app.main import create_app
 from tests.integration.conftest import PASSWORD, ClientFactory, bearer, login, register
@@ -301,8 +302,8 @@ async def test_refresh_past_the_absolute_session_cap_returns_401(
 ) -> None:
     token = (await register(client, "alice@example.com")).json()["refresh_token"]
     cap = timedelta(days=settings.refresh_absolute_days)
-    await db.refresh_tokens.update_many(
-        {}, {"$set": {"family_started_at": datetime.now(UTC) - cap - timedelta(minutes=1)}}
+    await db.refresh_families.update_many(
+        {}, {"$set": {"started_at": datetime.now(UTC) - cap - timedelta(minutes=1)}}
     )
 
     assert (await _refresh(client, token)).status_code == 401
@@ -397,3 +398,37 @@ async def test_cors_preflight_allows_authorization_but_not_the_old_csrf_header(
 
     assert ok.status_code == 200
     assert csrf.status_code == 400
+
+
+async def test_cors_preflight_advertises_only_the_configured_methods_and_headers(
+    client: httpx.AsyncClient, settings: Settings
+) -> None:
+    resp = await client.options(
+        "/api/me",
+        headers={
+            "Origin": settings.cors_origins[0],
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+
+    methods = {m.strip() for m in resp.headers["access-control-allow-methods"].split(",")}
+    headers = {h.strip().lower() for h in resp.headers["access-control-allow-headers"].split(",")}
+    assert methods == {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+    safelisted = {"accept", "accept-language", "content-language", "content-type"}  # always added
+    assert headers == safelisted | {"authorization", "x-request-id"}
+    assert "x-csrf-token" not in headers
+
+
+@pytest.mark.parametrize("path", ["/api/auth/refresh", "/api/auth/logout"])
+async def test_refresh_and_logout_are_rate_limited_per_ip_in_their_own_bucket(
+    client: httpx.AsyncClient, settings: Settings, path: str
+) -> None:
+    settings.rate_limits = RateLimits(refresh=parse("3/minute"))
+    body = {"refresh_token": "junk"}
+
+    statuses = [(await client.post(path, json=body)).status_code for _ in range(4)]
+
+    assert statuses[-1] == 429
+    assert 429 not in statuses[:3]
+    assert (await register(client, "alice@example.com")).status_code == 201  # auth bucket apart

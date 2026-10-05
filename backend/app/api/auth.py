@@ -10,10 +10,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.api.deps import AccountsDep, SettingsDep
-from app.api.limits import AUTH, limited_by_ip
+from app.api.deps import AccountsDep
+from app.api.limits import AUTH, REFRESH, limited_by_ip
 from app.auth.principal import Principal
-from app.config import Settings
 from app.repositories.users import Role, UserRecord
 from app.services.accounts import SessionTokens
 
@@ -59,34 +58,34 @@ class SessionOut(BaseModel):
     user: UserOut
 
 
-def _session(settings: Settings, tokens: SessionTokens, user: UserRecord) -> SessionOut:
+def _session(tokens: SessionTokens, user: UserRecord) -> SessionOut:
     return SessionOut(
         access_token=tokens.access,
-        access_expires_in=settings.access_token_ttl_minutes * 60,
+        access_expires_in=tokens.access_expires_in,
         refresh_token=tokens.refresh,
         user=UserOut.of(user),
     )
 
 
 @router.post("/register", status_code=201, dependencies=[Depends(limited_by_ip(AUTH))])
-async def register(body: RegisterIn, accounts: AccountsDep, settings: SettingsDep) -> SessionOut:
+async def register(body: RegisterIn, accounts: AccountsDep) -> SessionOut:
     user = await accounts.register(body.email, body.password)
-    return _session(settings, await accounts.start_session(user), user)
+    return _session(await accounts.start_session(user), user)
 
 
 @router.post("/login", dependencies=[Depends(limited_by_ip(AUTH))])
-async def login(body: Credentials, accounts: AccountsDep, settings: SettingsDep) -> SessionOut:
+async def login(body: Credentials, accounts: AccountsDep) -> SessionOut:
     user = await accounts.authenticate(body.email, body.password)
-    return _session(settings, await accounts.start_session(user), user)
+    return _session(await accounts.start_session(user), user)
 
 
-@router.post("/refresh")
-async def refresh(body: RefreshIn, accounts: AccountsDep, settings: SettingsDep) -> SessionOut:
+@router.post("/refresh", dependencies=[Depends(limited_by_ip(REFRESH))])
+async def refresh(body: RefreshIn, accounts: AccountsDep) -> SessionOut:
     tokens, user = await accounts.rotate(body.refresh_token)
-    return _session(settings, tokens, user)
+    return _session(tokens, user)
 
 
-@router.post("/logout", status_code=204)
+@router.post("/logout", status_code=204, dependencies=[Depends(limited_by_ip(REFRESH))])
 async def logout(body: RefreshIn, accounts: AccountsDep) -> Response:
     await accounts.end_session(body.refresh_token)
     return Response(status_code=204)
