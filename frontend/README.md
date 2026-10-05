@@ -64,7 +64,7 @@ VITE_API_BASE_URL=https://api.example.com/api VITE_BASE_PATH=/StockEye/ npm run 
 The build emits no source maps, copies `index.html` to `404.html` (so deep links work on Pages), and writes a
 `<meta>` Content-Security-Policy whose `connect-src` is the API origin (`'self'` for a relative URL). Pages cannot
 send `frame-ancestors`, so `index.html` hides the page until the bundle confirms it is the top-level window
-(`src/lib/frameGate.ts`); a framed copy neither renders nor calls the API. `localStorage` is per origin, so the organisation's `github.io` origin must host no other site. `VITE_API_BASE_URL` is validated at build time: a path starting with `/`, or an absolute `https:` URL without credentials, query or fragment (`http:` only for localhost or 127.0.0.1). The plugins live in `build-tools/plugins.ts`.
+(`src/lib/frameGate.ts`); a framed copy neither renders nor calls the API. `localStorage` is per origin, so the `github.io` origin (`https://nichtg.github.io`) must host no other Pages site: never enable Pages on another repository of that account. `VITE_API_BASE_URL` is validated at build time: a path starting with `/`, or an absolute `https:` URL without credentials, query or fragment (`http:` only for localhost or 127.0.0.1). The plugins live in `build-tools/plugins.ts`.
 
 ## Analysis UI
 

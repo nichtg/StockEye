@@ -4,7 +4,7 @@ The frontend is a static site on GitHub Pages. The backend (Caddy, the API and M
 Oracle Cloud Always Free Arm VM. GitHub Actions builds the API image and deploys it over SSH.
 
 ```
-browser --https--> GitHub Pages (static SPA, <org>.github.io)
+browser --https--> GitHub Pages (static SPA, nichtg.github.io/StockEye)
    |
    +--https, bearer token--> https://<PUBLIC_IP>/api  --> Caddy (80/443) --> api:8000 --> mongo (internal only)
 ```
@@ -12,14 +12,17 @@ browser --https--> GitHub Pages (static SPA, <org>.github.io)
 Things marked **verify:** were written from documentation and could not be tested without an Oracle account. Check
 them the first time and fix this file if they differ.
 
-Naming used below: `<org>` is your GitHub organization, `<PUBLIC_IP>` the VM's reserved public IP.
+Naming used below: `<org>` is the repository owner, `nichtg` (lowercase in image names), `<PUBLIC_IP>` the VM's reserved public IP.
 
 ## One-time setup (in this order)
 
-### 1. GitHub organization and repository
-1. Create a free GitHub organization (github.com > your avatar > Your organizations > New). A dedicated origin
-   (`<org>.github.io`) means no other Pages site shares the browser storage or origin of the app.
-2. Transfer the repository to the organization (repo Settings > General > Danger Zone > Transfer).
+### 1. Repository and the Pages origin
+1. **One Pages site per account (binding).** The app is published from your personal account, at
+   `https://nichtg.github.io/StockEye/`. Every Pages site under `nichtg` shares the origin `https://nichtg.github.io`,
+   and with it the browser storage that holds the refresh token and the API's CORS trust. So never enable Pages on any
+   other repository of this account, and never create a `nichtg.github.io` user-site repository. Need another site?
+   Publish it from a separate account or organization. (Checked 2026-10-05: StockEye is the only repo with Pages.)
+2. *(Step removed: no organization or transfer; the owner stays `nichtg`.)*
 3. **Scan before going public.** Actions > `gitleaks` > Run workflow. It scans the full git history. Do not continue
    until it is green. If it finds something, rotate that credential first, then clean the history.
 4. Make the repository public (Settings > General > Danger Zone).
@@ -60,7 +63,7 @@ Naming used below: `<org>` is your GitHub organization, `<PUBLIC_IP>` the VM's r
 On the VM:
 ```bash
 sudo apt-get update && sudo apt-get install -y git
-git clone https://github.com/<org>/StockEye.git && cd StockEye
+git clone https://github.com/nichtg/StockEye.git && cd StockEye
 less deploy/setup-vm.sh          # read it; it changes sshd, firewall and sudo rules
 sudo ADMIN_PUBKEY='ssh-ed25519 AAAA... you@laptop' \
      DEPLOY_PUBKEY='ssh-ed25519 AAAA... github-deploy' \
@@ -101,8 +104,8 @@ Then fill in the secrets file:
 sudo -e /etc/stockeye/stockeye.env
 ```
 Each line has a comment saying how to generate it (`openssl rand -hex 24` for the Mongo passwords, `openssl rand -hex 32`
-for the JWT secret). Set `PUBLIC_IP`, `GHCR_IMAGE=ghcr.io/<org lowercase>/stockeye-api`, the CORS origin
-`'["https://<org>.github.io"]'`, the optional market-data keys, and the backup `OCI_NAMESPACE` / `OCI_BACKUP_BUCKET`.
+for the JWT secret). Set `PUBLIC_IP`, `GHCR_IMAGE=ghcr.io/nichtg/stockeye-api`, the CORS origin
+`'["https://nichtg.github.io"]'` (the origin only: no `/StockEye` path), the optional market-data keys, and the backup `OCI_NAMESPACE` / `OCI_BACKUP_BUCKET`.
 The file is `root:root 0600`; the deploy script refuses to run while any `CHANGE_ME` is left.
 
 ### 5. Backup permissions in Oracle (instance principal)
@@ -130,7 +133,7 @@ Repository **variables** (public config, not secrets):
 |---|---|
 | `API_HOST` | `<PUBLIC_IP>` |
 | `API_ORIGIN` | `https://<PUBLIC_IP>` (no trailing slash; the build appends `/api`) |
-| `PAGES_BASE_PATH` | `/StockEye/` for a project site (`https://<org>.github.io/StockEye/`), or `/` |
+| `PAGES_BASE_PATH` | `/StockEye/` (the site is `https://nichtg.github.io/StockEye/`) |
 | `DEPLOY_KNOWN_HOSTS` | the `known_hosts` line the setup script printed: `<PUBLIC_IP> ssh-ed25519 AAAA...` |
 
 Environment `production` > **secret** `DEPLOY_SSH_KEY`: the full contents of the private file `stockeye-deploy`.
@@ -141,8 +144,8 @@ Never fill it with `ssh-keyscan` output you did not verify: an unverified key de
 
 ### 7. First deploy, GHCR visibility and Pages
 1. Actions > `backend-image` > Run workflow on `main` (approve the `production` deployment). It tests, builds the
-   arm64 image, pushes `ghcr.io/<org>/stockeye-api`, and deploys the digest over SSH.
-2. The first push creates the package as private. Organization page > Packages > `stockeye-api` > Package settings >
+   arm64 image, pushes `ghcr.io/nichtg/stockeye-api`, and deploys the digest over SSH.
+2. The first push creates the package as private. Your profile > Packages > `stockeye-api` > Package settings >
    Change visibility > **Public**, so the VM can pull without credentials. (The image holds no secrets: they come
    only from the env file.) Re-run the workflow's `deploy` job (or the whole workflow) afterwards.
 3. Settings > Pages > Source: **GitHub Actions**. Then run Actions > `pages` > Run workflow.
@@ -221,7 +224,7 @@ Run these from your own computer after the first full deploy. All should pass.
    fails.
 5. **CORS.** `curl -si -H 'Origin: https://evil.example' https://<PUBLIC_IP>/api/health` and the same with
    `-H 'Origin: null'` must not return `access-control-allow-origin`. The same request with
-   `Origin: https://<org>.github.io` must.
+   `Origin: https://nichtg.github.io` must.
 6. **Framing is hidden.** Embed the site in an `<iframe>` on any test page (e.g. a local HTML file): the app should show
    nothing, not the login form.
 7. **TLS and headers.** Run `curl -sI https://<PUBLIC_IP>/api/health`: expect `x-content-type-options: nosniff`, the

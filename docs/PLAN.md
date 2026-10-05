@@ -389,8 +389,9 @@ A senior-pentester review (Opus, 3 rounds) signed it off with changes, which are
 The custom domain, Fly.io and is-a.dev were considered and declined.
 
 ### Architecture
-- Frontend: GitHub Pages, published from a free GitHub organization (a dedicated origin, so no other Pages site
-  shares its localStorage or `'self'`). The repo is made public, after a full-history gitleaks scan.
+- Frontend: GitHub Pages at `https://nichtg.github.io/StockEye/` (user's choice, 2026-10-05, over a dedicated org).
+  Binding rule: no other repo of `nichtg` may enable Pages, since every such site would share this origin's
+  localStorage and the API's CORS trust. The repo is public after a full-history gitleaks scan.
 - Backend: an Oracle Cloud Always Free Arm VM on a reserved public IP. Docker compose runs Caddy (the only published
   ports, 80/443), the API and MongoDB (internal network only, auth on). HTTPS is a Let's Encrypt IP-address certificate
   (`shortlived` profile, auto-renewed by Caddy) plus HSTS. If a reserved IP isn't free, the fallback is an is-a.dev
@@ -445,7 +446,7 @@ The custom domain, Fly.io and is-a.dev were considered and declined.
   - Dependabot.
   - A daily health and certificate-expiry check that fails loudly.
 - **Runbook (`docs/DEPLOY.md`):**
-  - The user's one-time steps (Oracle account upgraded to Pay-As-You-Go to avoid idle reclaim, the org, a reserved
+  - The user's one-time steps (Oracle account upgraded to Pay-As-You-Go to avoid idle reclaim, a reserved
     IP, the admin over getpass).
   - Rotation of each secret.
   - Teardown order: delete DNS records and config before releasing the IP or deleting the site.
