@@ -24,7 +24,17 @@ updates:
     directory: /deploy
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
+    # MongoDB 8.x refuses to start on the production VM's kernel (see deploy/compose.yml and
+    # docs/DEPLOY.md, "Maintenance"); stay on 7.0 until that is resolved.
+    ignore:
+      - dependency-name: mongo
+        versions: [">= 8.0"]
   - package-ecosystem: docker-compose
     directory: /
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
+    # MongoDB 8.x refuses to start on the production VM's kernel (see deploy/compose.yml and
+    # docs/DEPLOY.md, "Maintenance"); stay on 7.0 until that is resolved.
+    ignore:
+      - dependency-name: mongo
+        versions: [">= 8.0"]
