@@ -2,8 +2,9 @@ name: deploy-smoke
 
 # Proves the production compose file really works: it validates, Mongo creates the app user on
 # first start, the API connects with that user and reports database ok, and the metadata-service
-# block rule stops containers reaching 169.254.169.254. Caddy is not started (it needs a public
-# IP and Let's Encrypt). No `paths:` filter, so this reports on every PR.
+# block rule stops containers reaching 169.254.169.254. Caddy is started too (its config must load and it must
+# get its fixed address), but it cannot obtain a certificate here: that needs the real public IP.
+# No `paths:` filter, so this reports on every PR.
 on:
   pull_request:
   workflow_dispatch:
@@ -58,6 +59,18 @@ jobs:
           echo "::error::api did not become healthy (healthy = HTTP 200 and database ok)"
           docker compose logs --no-color api mongo | tail -n 80
           exit 1
+
+      - name: Caddy starts on its fixed address, which the API never takes
+        run: |
+          docker compose up -d caddy
+          sleep 5
+          caddy_id="$(docker compose ps -q caddy)"
+          [[ "$(docker inspect -f '{{.State.Running}}' "$caddy_id")" == true ]]             || { echo "::error::caddy is not running"; docker compose logs --no-color caddy | tail -n 40; exit 1; }
+          ip_of() { docker inspect -f '{{(index .NetworkSettings.Networks "smoke_edge").IPAddress}}' "$1"; }
+          caddy_ip="$(ip_of "$caddy_id")"; api_ip="$(ip_of "$(docker compose ps -q api)")"
+          echo "caddy=$caddy_ip api=$api_ip"
+          [[ "$caddy_ip" == 172.29.0.2 ]] || { echo "::error::caddy is not on 172.29.0.2 (uvicorn trusts only that)"; exit 1; }
+          [[ "$api_ip" != 172.29.0.2 ]] || { echo "::error::the api took caddy's address"; exit 1; }
 
       - name: App user exists with the right scope; anonymous access is refused
         run: |

@@ -111,6 +111,9 @@ networks:
     ipam:
       config:
         - subnet: 172.29.0.0/24
+          # Automatic addresses come only from .128-.254, so the API (which starts first) can never take
+          # Caddy's fixed 172.29.0.2, the one address uvicorn trusts for X-Forwarded-For.
+          ip_range: 172.29.0.128/25
   # data: API and MongoDB only, with no route off the host.
   data:
     internal: true
