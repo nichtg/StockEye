@@ -14,5 +14,5 @@
     "strict": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "build-tools", "src/lib/config.ts"]
 }

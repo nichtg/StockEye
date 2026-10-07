@@ -1,4 +1,4 @@
-"""Request context (id, access log, security headers, 500 safety net) and CSRF enforcement."""
+"""Request context: id, access log, security headers and the 500 safety net."""
 
 import re
 import time
@@ -10,8 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.api.errors import error_response, unhandled_response
-from app.auth.csrf import CSRF_COOKIE, CSRF_HEADER, UNSAFE_METHODS, csrf_valid
+from app.api.errors import unhandled_response
 from app.logging_setup import get_logger
 
 log = get_logger("app.access")
@@ -50,18 +49,3 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             response.headers["Cache-Control"] = "no-store"
         structlog.contextvars.clear_contextvars()
         return response
-
-
-class CsrfMiddleware(BaseHTTPMiddleware):
-    """Double-submit CSRF check for every unsafe /api request.
-
-    Middleware rather than a router dependency so that routers added later (stocks, ...) are
-    protected by default: forgetting to attach a dependency cannot open a hole.
-    """
-
-    async def dispatch(self, request: Request, call_next: CallNext) -> Response:
-        if request.method in UNSAFE_METHODS and request.url.path.startswith("/api"):
-            cookie = request.cookies.get(CSRF_COOKIE)
-            if not csrf_valid(cookie, request.headers.get(CSRF_HEADER)):
-                return error_response(request, 403, "csrf_failed", "Missing or invalid CSRF token.")
-        return await call_next(request)

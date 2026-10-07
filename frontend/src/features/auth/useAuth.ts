@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { isApiError } from '../../api/errors';
 import { meKey } from '../../api/keys';
+import { tokenStore } from '../../api/tokens';
 import type { Session, User } from '../../api/types';
 import { useNotice } from '../../components/useNotice';
 import { clearSession } from '../../queryClient';
@@ -31,9 +32,20 @@ export function useMe() {
 export function useAuthMutation(mode: 'login' | 'register') {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (c: Credentials) => api.post<Session>(`/auth/${mode}`, c),
-    onSuccess: (session) => {
-      client.setQueryData(meKey, session.user);
+    // Tokens go straight to the token store and only the user is returned, so no token ever sits
+    // in the query or mutation cache. gcTime 0 drops the mutation (and its password) on unmount.
+    mutationFn: async (c: Credentials): Promise<User> => {
+      const session = await api.post<Session>(`/auth/${mode}`, c);
+      tokenStore.set({
+        access: session.access_token,
+        refresh: session.refresh_token,
+        userId: session.user.id,
+      });
+      return session.user;
+    },
+    gcTime: 0,
+    onSuccess: (user) => {
+      client.setQueryData(meKey, user);
     },
   });
 }
@@ -41,10 +53,14 @@ export function useAuthMutation(mode: 'login' | 'register') {
 export function useLogout() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<undefined>('/auth/logout'),
+    // Fire and forget: the client signs this tab out at once and revokes server-side under the
+    // refresh lock, so it sends the newest token. Storage is cleared there, not here.
+    mutationFn: () => {
+      void api.logout();
+      return Promise.resolve();
+    },
     onSettled: () => {
-      // Even if the call failed we drop local state; the cookies expire server-side regardless.
-      clearSession(client);
+      clearSession(client, { localOnly: true });
     },
   });
 }
@@ -57,6 +73,7 @@ export function useDeleteAccount() {
   const notice = useNotice();
   return useMutation({
     mutationFn: (password: string) => api.delete('/me', { body: { password } }),
+    gcTime: 0,
     onSuccess: () => {
       // The toast lives above the routes, so it survives the redirect to the login page.
       notice(ACCOUNT_DELETED_NOTICE);

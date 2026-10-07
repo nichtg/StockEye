@@ -1,1 +1,1 @@
-"""Authentication primitives: passwords, tokens, cookies, CSRF."""
+"""Authentication primitives: passwords and tokens."""

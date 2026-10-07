@@ -14,7 +14,6 @@ function setup() {
     'fetch',
     vi.fn(() => new Promise<Response>(() => undefined)),
   );
-  document.cookie = 'se_csrf=test; path=/';
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(chartKey('AAPL', '6M'), bars('AAPL', '6M'));
   const wrapper = ({ children }: { children: ReactNode }) => (

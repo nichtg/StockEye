@@ -26,27 +26,6 @@
         }
       }
     },
-    "/api/auth/csrf": {
-      "get": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Csrf",
-        "operationId": "csrf_api_auth_csrf_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CsrfOut"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/auth/register": {
       "post": {
         "tags": [
@@ -136,24 +115,16 @@
         ],
         "summary": "Refresh",
         "operationId": "refresh_api_auth_refresh_post",
-        "parameters": [
-          {
-            "name": "se_refresh",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Se Refresh"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshIn"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -185,24 +156,16 @@
         ],
         "summary": "Logout",
         "operationId": "logout_api_auth_logout_post",
-        "parameters": [
-          {
-            "name": "se_refresh",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Se Refresh"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshIn"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -1255,19 +1218,6 @@
           "password"
         ],
         "title": "Credentials"
-      },
-      "CsrfOut": {
-        "properties": {
-          "csrf_token": {
-            "type": "string",
-            "title": "Csrf Token"
-          }
-        },
-        "type": "object",
-        "required": [
-          "csrf_token"
-        ],
-        "title": "CsrfOut"
       },
       "DataStatus": {
         "properties": {
@@ -2429,6 +2379,20 @@
         ],
         "title": "RecentPattern"
       },
+      "RefreshIn": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "maxLength": 512,
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshIn"
+      },
       "RegimeOut": {
         "properties": {
           "recent_mean": {
@@ -2521,15 +2485,32 @@
       },
       "SessionOut": {
         "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "access_expires_in": {
+            "type": "integer",
+            "title": "Access Expires In",
+            "description": "Seconds until the access token expires."
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          },
           "user": {
             "$ref": "#/components/schemas/UserOut"
           }
         },
         "type": "object",
         "required": [
+          "access_token",
+          "access_expires_in",
+          "refresh_token",
           "user"
         ],
-        "title": "SessionOut"
+        "title": "SessionOut",
+        "description": "A fresh token pair. The refresh token is single-use: store the one from the latest reply."
       },
       "SettableStatus": {
         "type": "string",

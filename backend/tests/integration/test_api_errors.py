@@ -92,13 +92,13 @@ async def test_health_returns_200_when_database_is_down(
     assert resp.json() == {"status": "ok", "database": "unavailable"}
 
 
-async def test_cors_allows_configured_origin_with_credentials(
+async def test_cors_allows_configured_origin_without_credentials(
     client: httpx.AsyncClient,
 ) -> None:
     resp = await client.get("/api/health", headers={"Origin": "http://localhost:5173"})
 
     assert resp.headers["access-control-allow-origin"] == "http://localhost:5173"
-    assert resp.headers["access-control-allow-credentials"] == "true"
+    assert "access-control-allow-credentials" not in resp.headers
 
 
 async def test_cors_does_not_allow_unknown_origin(client: httpx.AsyncClient) -> None:

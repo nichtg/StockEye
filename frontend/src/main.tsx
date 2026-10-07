@@ -7,27 +7,33 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 import { api } from './api/client';
 import { App } from './App';
+import { ROUTER_BASENAME } from './config';
+import { startIfTopLevel } from './lib/frameGate';
 import { NoticeProvider } from './components/NoticeProvider';
 import { installSessionExpiry, queryClient } from './queryClient';
 import { ColorModeProvider } from './theme/ColorModeProvider';
 
-installSessionExpiry(queryClient);
-// Prime the CSRF cookie. If the API is down this fails quietly; unsafe requests retry it.
-api.initCsrf().catch(() => undefined);
-
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root element');
 
-createRoot(root).render(
-  <StrictMode>
-    <ColorModeProvider>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <NoticeProvider>
-            <App />
-          </NoticeProvider>
-        </BrowserRouter>
-      </QueryClientProvider>
-    </ColorModeProvider>
-  </StrictMode>,
-);
+// A framed copy (clickjacking) stays hidden and neither calls the API nor renders.
+startIfTopLevel(() => {
+  installSessionExpiry(queryClient);
+  // With a stored refresh token, get an access token before the first protected call. Failures
+  // are handled by the request path (a 401 then signs the user out), so none are surfaced here.
+  void api.initSession();
+
+  createRoot(root).render(
+    <StrictMode>
+      <ColorModeProvider>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter basename={ROUTER_BASENAME}>
+            <NoticeProvider>
+              <App />
+            </NoticeProvider>
+          </BrowserRouter>
+        </QueryClientProvider>
+      </ColorModeProvider>
+    </StrictMode>,
+  );
+});

@@ -26,6 +26,7 @@ MACRO: Bucket = "macro"
 OVERVIEW: Bucket = "overview"
 WATCHLIST: Bucket = "watchlist"
 AUTH: Bucket = "auth"
+REFRESH: Bucket = "refresh"
 
 
 class RateLimiter:

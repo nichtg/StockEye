@@ -148,10 +148,37 @@ async def test_rotate_reusing_a_token_revokes_the_whole_family(accounts: Account
     assert replay.status == newest.status == 401
 
 
-async def test_rotate_without_a_token_raises_401(accounts: AccountService) -> None:
-    error = await _raises(accounts.rotate(None))
+async def test_rotate_legacy_token_without_a_family_record_raises_401(
+    accounts: AccountService, db: Database
+) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    legacy = await accounts.start_session(user)
+    await db.refresh_families.delete_many({})  # what every pre-migration token looks like
+
+    error = await _raises(accounts.rotate(legacy.refresh))
 
     assert (error.status, error.code) == (401, "unauthenticated")
+    assert (await _raises(accounts.rotate(legacy.refresh))).status == 401
+
+
+async def test_rotate_two_simultaneous_refreshes_of_one_token_leave_no_usable_token(
+    accounts: AccountService, db: Database
+) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    tokens = await accounts.start_session(user)
+
+    results = await asyncio.gather(
+        accounts.rotate(tokens.refresh), accounts.rotate(tokens.refresh), return_exceptions=True
+    )
+
+    wins = [r for r in results if not isinstance(r, BaseException)]
+    losses = [r for r in results if isinstance(r, AppError)]
+    assert len(wins) == 1
+    assert len(losses) == 1
+    assert losses[0].status == 401
+    # The loser's reuse alarm revoked the family, so the winner's new token is dead too.
+    assert (await _raises(accounts.rotate(wins[0][0].refresh))).status == 401
+    assert await db.refresh_families.count_documents({"revoked_at": None}) == 0
 
 
 async def test_rotate_for_disabled_user_raises_401_and_revokes_the_family(
@@ -164,16 +191,72 @@ async def test_rotate_for_disabled_user_raises_401_and_revokes_the_family(
     error = await _raises(accounts.rotate(tokens.refresh))
 
     assert error.status == 401
-    assert await db.refresh_tokens.count_documents({"revoked_at": None}) == 0
+    assert await db.refresh_families.count_documents({"revoked_at": None}) == 0
 
 
-async def test_end_session_revokes_the_family_and_tolerates_no_token(
+async def _age_family(db: Database, age: timedelta) -> None:
+    await db.refresh_families.update_many({}, {"$set": {"started_at": datetime.now(UTC) - age}})
+
+
+async def test_rotate_within_the_absolute_cap_succeeds(
+    accounts: AccountService, db: Database, settings: Settings
+) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    tokens = await accounts.start_session(user)
+    await _age_family(db, timedelta(days=settings.refresh_absolute_days) - timedelta(minutes=5))
+
+    rotated, _ = await accounts.rotate(tokens.refresh)
+
+    assert rotated.refresh
+
+
+async def test_rotate_past_the_absolute_cap_raises_401_and_revokes_the_family(
+    accounts: AccountService, db: Database, settings: Settings
+) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    tokens = await accounts.start_session(user)
+    await _age_family(db, timedelta(days=settings.refresh_absolute_days) + timedelta(minutes=5))
+
+    error = await _raises(accounts.rotate(tokens.refresh))
+
+    assert (error.status, error.code) == (401, "unauthenticated")
+    assert await db.refresh_families.count_documents({"revoked_at": None}) == 0
+
+
+async def test_rotate_keeps_the_original_family_start_so_the_cap_cannot_be_extended(
+    accounts: AccountService, db: Database
+) -> None:
+    user = await accounts.register("alice@example.com", PASSWORD)
+    first = await accounts.start_session(user)
+    started = (await db.refresh_families.find_one({}))["started_at"]  # type: ignore[index]
+
+    await accounts.rotate(first.refresh)
+
+    stamps = {d["started_at"] async for d in db.refresh_families.find({})}
+    assert stamps == {started}
+    assert await db.refresh_tokens.count_documents({}) == 2
+
+
+async def test_update_user_disabling_revokes_all_of_their_refresh_families(
+    accounts: AccountService, db: Database
+) -> None:
+    admin, _ = await accounts.create_or_promote_admin("root@example.com", PASSWORD)
+    user = await accounts.register("alice@example.com", PASSWORD)
+    await accounts.start_session(user)  # two devices, two families
+    await accounts.start_session(user)
+
+    await accounts.update_user(admin.id, user.id, "disabled", None)
+
+    assert await db.refresh_families.count_documents({"user_id": user.id, "revoked_at": None}) == 0
+
+
+async def test_end_session_revokes_the_family_and_tolerates_an_unknown_token(
     accounts: AccountService,
 ) -> None:
     user = await accounts.register("alice@example.com", PASSWORD)
     tokens = await accounts.start_session(user)
 
-    await accounts.end_session(None)
+    await accounts.end_session("unknown")
     await accounts.end_session(tokens.refresh)
 
     assert (await _raises(accounts.rotate(tokens.refresh))).status == 401
@@ -214,6 +297,7 @@ async def test_delete_user_removes_user_and_refresh_tokens(
 
     assert await UsersRepository(db).get_by_id(victim.id) is None
     assert await db.refresh_tokens.count_documents({"user_id": victim.id}) == 0
+    assert await db.refresh_families.count_documents({"user_id": victim.id}) == 0
 
 
 async def test_delete_user_unknown_id_raises_404(accounts: AccountService) -> None:

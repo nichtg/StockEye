@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createApiClient } from './client';
+import { REFRESH_KEY, tokenStore } from './tokens';
 import { shouldRetry } from '../queryClient';
 import { ApiError } from './errors';
 
@@ -14,72 +15,100 @@ function envelope(status: number, code: string, message: string, details: unknow
   return json({ error: { code, message, request_id: 'req-1', details } }, status);
 }
 
-function setup(handler: (url: string, init: RequestInit) => Response | Promise<Response>) {
+function session(access: string, refresh: string) {
+  return {
+    access_token: access,
+    access_expires_in: 900,
+    refresh_token: refresh,
+    user: { id: 'u1' },
+  };
+}
+
+const stored = (t: string, u = 'u1') => JSON.stringify({ t, u });
+
+type Locks = Pick<LockManager, 'request'>;
+
+/** A single-process lock: callers queue, like Web Locks do across tabs. */
+function fakeLocks(beforeRun?: () => void): Locks {
+  let tail: Promise<unknown> = Promise.resolve();
+  return {
+    request: ((_name: string, _options: unknown, cb: () => unknown) => {
+      const run = tail.then(() => {
+        beforeRun?.();
+        return cb();
+      });
+      tail = run.catch(() => undefined);
+      return run;
+    }) as unknown as LockManager['request'],
+  };
+}
+
+function setup(
+  handler: (url: string, init: RequestInit) => Response | Promise<Response>,
+  locks: Locks | null = fakeLocks(),
+) {
   const calls: { url: string; init: RequestInit }[] = [];
   const fetchImpl = vi.fn((input: string, init?: RequestInit) => {
     const call = { url: input, init: init ?? {} };
     calls.push(call);
     return Promise.resolve(handler(call.url, call.init));
   });
-  const cookies: Record<string, string> = { se_csrf: 'tok-123' };
   const onSessionExpired = vi.fn();
   const client = createApiClient({
     fetchImpl: fetchImpl as unknown as typeof fetch,
-    readCookie: (name) => cookies[name],
+    locks,
     onSessionExpired,
+    lockHoldMs: 0,
   });
-  return { client, calls, cookies, onSessionExpired };
+  return { client, calls, onSessionExpired };
 }
 
+const authHeader = (c?: { init: RequestInit }) =>
+  (c?.init.headers as Record<string, string> | undefined)?.Authorization;
+const bodyOf = (c?: { init: RequestInit }) => JSON.parse(c?.init.body as string) as unknown;
+
 describe('api client', () => {
-  it('sends credentials on every request', async () => {
+  it('sends no ambient credentials and attaches the bearer token when present', async () => {
     const { client, calls } = setup(() => json({ ok: true }));
     await client.get('/me');
-    expect(calls[0]?.init.credentials).toBe('include');
-    expect(calls[0]?.url).toBe('/api/me');
-  });
-
-  it('adds the CSRF header to unsafe methods but not to GET', async () => {
-    const { client, calls } = setup(() => json({}));
+    tokenStore.set({ access: 'acc-1', refresh: 'ref-1', userId: 'u1' });
     await client.get('/me');
-    await client.post('/auth/logout');
-    await client.patch('/admin/users/1', { role: 'admin' });
-    await client.delete('/admin/users/1');
-
-    const header = (i: number) =>
-      (calls[i]?.init.headers as Record<string, string>)['X-CSRF-Token'];
-    expect(header(0)).toBeUndefined();
-    expect(header(1)).toBe('tok-123');
-    expect(header(2)).toBe('tok-123');
-    expect(header(3)).toBe('tok-123');
+    expect(calls[0]?.init.credentials).toBe('omit');
+    expect(calls[0]?.url).toBe('/api/me');
+    expect(authHeader(calls[0])).toBeUndefined();
+    expect(authHeader(calls[1])).toBe('Bearer acc-1');
   });
 
-  it('fetches the CSRF cookie first when it is missing', async () => {
-    const { client, calls, cookies } = setup((url) => {
-      if (url === '/api/auth/csrf') {
-        cookies.se_csrf = 'fresh';
-        return json({ csrf_token: 'fresh' });
-      }
-      return json({});
-    });
-    delete cookies.se_csrf;
-    await client.post('/auth/login', { email: 'a@b.co', password: 'x' });
-    expect(calls.map((c) => c.url)).toEqual(['/api/auth/csrf', '/api/auth/login']);
-    expect((calls[1]?.init.headers as Record<string, string>)['X-CSRF-Token']).toBe('fresh');
-  });
-
-  it('refreshes once and retries the original request after a 401', async () => {
+  it('refreshes once with the stored token, rotates it, and retries the request', async () => {
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     let meCalls = 0;
     const { client, calls } = setup((url) => {
-      if (url === '/api/auth/refresh') return json({ user: {} });
+      if (url === '/api/auth/refresh') return json(session('new', 'ref-2'));
       meCalls += 1;
       return meCalls === 1 ? envelope(401, 'unauthenticated', 'Expired') : json({ id: '1' });
     });
     await expect(client.get('/me')).resolves.toEqual({ id: '1' });
     expect(calls.map((c) => c.url)).toEqual(['/api/me', '/api/auth/refresh', '/api/me']);
+    expect(bodyOf(calls[1])).toEqual({ refresh_token: 'ref-1' });
+    expect(authHeader(calls[1])).toBeUndefined();
+    expect(authHeader(calls[2])).toBe('Bearer new');
+    expect(tokenStore.getRefresh()).toBe('ref-2');
+  });
+
+  it('retries exactly once: a 401 after a good refresh ends the session without looping', async () => {
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
+    const { client, calls, onSessionExpired } = setup((url) =>
+      url === '/api/auth/refresh'
+        ? json(session('new', 'ref-2'))
+        : envelope(401, 'unauthenticated', 'Expired'),
+    );
+    await expect(client.get('/me')).rejects.toMatchObject({ status: 401 });
+    expect(calls.map((c) => c.url)).toEqual(['/api/me', '/api/auth/refresh', '/api/me']);
+    expect(onSessionExpired).toHaveBeenCalledTimes(1);
   });
 
   it('shares one in-flight refresh across concurrent 401s', async () => {
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     const seen = new Set<string>();
     let refreshes = 0;
     let releaseRefresh: () => void = () => undefined;
@@ -90,7 +119,7 @@ describe('api client', () => {
       if (url === '/api/auth/refresh') {
         refreshes += 1;
         await gate;
-        return json({ user: {} });
+        return json(session('new', 'ref-2'));
       }
       if (!seen.has(url)) {
         seen.add(url);
@@ -108,7 +137,57 @@ describe('api client', () => {
     expect(refreshes).toBe(1);
   });
 
-  it('signals session expiry and throws when the refresh fails', async () => {
+  it('never sends a refresh token another tab already rotated', async () => {
+    tokenStore.set({ access: 'old', refresh: 'stale-ref', userId: 'u1' });
+    // The "other tab" rotates the token while this tab waits for the lock.
+    const locks = fakeLocks(() => {
+      localStorage.setItem(REFRESH_KEY, stored('fresh-ref'));
+    });
+    const { client, calls } = setup(
+      (url, init) =>
+        url === '/api/auth/refresh'
+          ? json(session('new', 'fresh-ref-2'))
+          : (init.headers as Record<string, string>).Authorization === 'Bearer old'
+            ? envelope(401, 'unauthenticated', 'Expired')
+            : json({ ok: true }),
+      locks,
+    );
+    await expect(client.get('/me')).resolves.toEqual({ ok: true });
+    const refreshes = calls.filter((c) => c.url === '/api/auth/refresh');
+    expect(refreshes).toHaveLength(1);
+    expect(bodyOf(refreshes[0])).toEqual({ refresh_token: 'fresh-ref' });
+    expect(calls.some((c) => JSON.stringify(c.init.body ?? '').includes('stale-ref'))).toBe(false);
+    expect(tokenStore.getRefresh()).toBe('fresh-ref-2');
+  });
+
+  it('treats a token removed by another tab as a sign-out and sends nothing', async () => {
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
+    const locks = fakeLocks(() => {
+      localStorage.removeItem(REFRESH_KEY);
+    });
+    const { client, calls, onSessionExpired } = setup(
+      () => envelope(401, 'unauthenticated', 'Expired'),
+      locks,
+    );
+    await expect(client.get('/me')).rejects.toMatchObject({ status: 401 });
+    expect(calls.some((c) => c.url === '/api/auth/refresh')).toBe(false);
+    expect(onSessionExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('still refreshes (in-tab dedupe only) when navigator.locks is missing', async () => {
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
+    let meCalls = 0;
+    const { client, calls } = setup((url) => {
+      if (url === '/api/auth/refresh') return json(session('new', 'ref-2'));
+      meCalls += 1;
+      return meCalls === 1 ? envelope(401, 'unauthenticated', 'Expired') : json({});
+    }, null);
+    await client.get('/me');
+    expect(calls.filter((c) => c.url === '/api/auth/refresh')).toHaveLength(1);
+  });
+
+  it('clears the tokens and signals expiry when the refresh is rejected', async () => {
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     const { client, onSessionExpired } = setup((url) =>
       url === '/api/auth/refresh'
         ? envelope(401, 'unauthenticated', 'Your session has expired.')
@@ -116,17 +195,52 @@ describe('api client', () => {
     );
     await expect(client.get('/me')).rejects.toMatchObject({ status: 401 });
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
+    expect(tokenStore.getRefresh()).toBeNull();
+    expect(tokenStore.getAccess()).toBeNull();
+  });
+
+  it('keeps the session when the refresh fails for a transient reason', async () => {
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
+    const { client, onSessionExpired } = setup((url) =>
+      url === '/api/auth/refresh'
+        ? new Response('', { status: 503 })
+        : envelope(401, 'unauthenticated', 'Expired'),
+    );
+    await expect(client.get('/me')).rejects.toMatchObject({ status: 401 });
+    expect(onSessionExpired).not.toHaveBeenCalled();
+    expect(tokenStore.getRefresh()).toBe('ref-1');
   });
 
   it('does not try to refresh for /auth/* endpoints', async () => {
+    tokenStore.set({ access: 'old', refresh: 'ref-1', userId: 'u1' });
     const { client, calls, onSessionExpired } = setup(() =>
       envelope(401, 'unauthenticated', 'Email or password is incorrect.'),
     );
     await expect(
       client.post('/auth/login', { email: 'a@b.co', password: 'x' }),
     ).rejects.toBeInstanceOf(ApiError);
-    expect(calls.some((c) => c.url.endsWith('/auth/refresh'))).toBe(false);
+    expect(calls).toHaveLength(1);
     expect(onSessionExpired).not.toHaveBeenCalled();
+  });
+
+  describe('initSession', () => {
+    it('trades a stored refresh token for an access token before protected calls', async () => {
+      localStorage.setItem(REFRESH_KEY, stored('ref-1'));
+      const { client, calls } = setup((url) =>
+        url === '/api/auth/refresh' ? json(session('acc', 'ref-2')) : json({ id: '1' }),
+      );
+      void client.initSession();
+      await client.get('/me');
+      expect(calls.map((c) => c.url)).toEqual(['/api/auth/refresh', '/api/me']);
+      expect(authHeader(calls[1])).toBe('Bearer acc');
+      expect(tokenStore.getRefresh()).toBe('ref-2');
+    });
+
+    it('does nothing without a stored refresh token', async () => {
+      const { client, calls } = setup(() => json({}));
+      await client.initSession();
+      expect(calls).toHaveLength(0);
+    });
   });
 
   it('parses the error envelope into an ApiError', async () => {
@@ -155,7 +269,6 @@ describe('api client', () => {
     const client = createApiClient({
       fetchImpl: (() =>
         Promise.reject(new TypeError('Failed to fetch'))) as unknown as typeof fetch,
-      readCookie: () => 'x',
     });
     const error = await client.get('/me').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);

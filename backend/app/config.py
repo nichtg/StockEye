@@ -1,18 +1,30 @@
 """Application settings, loaded once from env vars (prefix ``STOCKEYE_``) or ``.env``."""
 
+import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
 from limits import RateLimitItem, parse
-from pydantic import BaseModel, BeforeValidator, ConfigDict, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_JWT_SECRET_LENGTH = 32
 # Values people copy from docs and examples; a deployment that still has one is unprotected.
 _PLACEHOLDER_PREFIXES = ("replace-me", "changeme", "change-me", "dev-only-insecure")
 _PLACEHOLDER_SECRETS = frozenset({"secret", "password", "jwt-secret", "your-secret-here"})
+
+
+# scheme://host[:port] and nothing else: what a browser sends in the Origin header.
+_ORIGIN_RE = re.compile(r"^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(:\d{1,5})?$")
 
 
 class ProviderLimits(BaseModel):
@@ -30,7 +42,7 @@ def _parse_rate(value: object) -> object:
 type Rate = Annotated[RateLimitItem, BeforeValidator(_parse_rate)]
 
 
-type Bucket = Literal["search", "stock", "macro", "overview", "watchlist", "auth"]
+type Bucket = Literal["search", "stock", "macro", "overview", "watchlist", "auth", "refresh"]
 
 
 class RateLimits(BaseModel):
@@ -48,6 +60,7 @@ class RateLimits(BaseModel):
     overview: Rate = parse("20/minute")
     watchlist: Rate = parse("30/minute")
     auth: Rate = parse("10/minute")
+    refresh: Rate = parse("60/minute")  # refresh and logout; looser than the password routes
 
     def for_bucket(self, bucket: Bucket) -> Rate:
         return {
@@ -57,6 +70,7 @@ class RateLimits(BaseModel):
             "overview": self.overview,
             "watchlist": self.watchlist,
             "auth": self.auth,
+            "refresh": self.refresh,
         }[bucket]
 
 
@@ -71,14 +85,18 @@ class Settings(BaseSettings):
     environment: Literal["dev", "test", "prod"] = "dev"
     log_level: str = "INFO"
 
-    mongodb_uri: str = "mongodb://127.0.0.1:27017"
+    # SecretStr: Atlas URIs embed the password, so it must never reach a log line or a repr.
+    mongodb_uri: SecretStr = SecretStr("mongodb://127.0.0.1:27017")
     mongodb_db: str = "stockeye"
 
     # No default: an unset secret is a startup error everywhere except the ``test`` environment.
     jwt_secret: SecretStr = SecretStr("")
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 14
-    cookie_secure: bool = True
+    # Hard ceiling on a session: rotation stops this many days after login however active the
+    # user is, so a stolen refresh token cannot be kept alive forever by rotating it.
+    refresh_absolute_days: int = 30
+    # Exact origins (scheme://host[:port], no wildcard, no path) allowed to call the API.
     cors_origins: list[str] = ["http://localhost:5173"]
     login_max_failures: int = 5
     login_lockout_minutes: int = 15
@@ -103,6 +121,18 @@ class Settings(BaseSettings):
 
     finbert_model_dir: Path = Path("models/finbert")
     scheduler_enabled: bool = True
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _exact_origins(cls, origins: list[str]) -> list[str]:
+        for origin in origins:
+            if not _ORIGIN_RE.fullmatch(origin):
+                raise ValueError(
+                    f"STOCKEYE_CORS_ORIGINS entry {origin!r} must look like https://host[:port]"
+                    " (http or https, no path, no trailing slash, no wildcard, not null)"
+                )
+        # Browsers send the Origin host in lowercase; a mixed-case entry would silently never match.
+        return [origin.lower() for origin in origins]
 
     @model_validator(mode="after")
     def _require_strong_jwt_secret(self) -> "Settings":

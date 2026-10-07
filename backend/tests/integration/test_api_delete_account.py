@@ -15,7 +15,14 @@ from app.db import Database
 from app.repositories.ingest_budget import IngestBudget
 from app.repositories.users import UserRecord, UsersRepository
 from app.services.accounts import AccountService, AppError
-from tests.integration.conftest import PASSWORD, ClientFactory, login, make_admin, register
+from tests.integration.conftest import (
+    PASSWORD,
+    ClientFactory,
+    bearer,
+    login,
+    make_admin,
+    register,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -37,23 +44,20 @@ async def test_delete_me_success_removes_everything_and_ends_session(
     uid = ObjectId((await register(alice, "alice@example.com")).json()["user"]["id"])
     assert (await alice.put("/api/watchlist/AAPL")).status_code == 200
     assert await db.watchlists.find_one({"owner_id": uid}) is not None
-    refresh = alice.cookies.get("se_refresh", path="/api/auth")
-    access = alice.cookies.get("se_access", path="/api")
-    assert refresh and access
+    signed_in = (await login(await new_client(), "alice@example.com")).json()
+    refresh, access = signed_in["refresh_token"], signed_in["access_token"]
 
     resp = await _delete(alice)
 
     assert resp.status_code == 204
-    set_cookies = " ".join(resp.headers.get_list("set-cookie"))
-    assert "se_access=" in set_cookies and "se_refresh=" in set_cookies
     assert await db.users.find_one({"_id": uid}) is None
     assert await db.refresh_tokens.count_documents({"user_id": uid}) == 0
     assert await db.watchlists.find_one({"owner_id": uid}) is None
     replay = await new_client()
-    replay.cookies.set("se_refresh", refresh, domain="testserver.local", path="/api/auth")
-    replay.cookies.set("se_access", access, domain="testserver.local", path="/api")
-    assert (await replay.post("/api/auth/refresh")).status_code == 401
-    assert (await replay.get("/api/me")).status_code == 401
+    assert (
+        await replay.post("/api/auth/refresh", json={"refresh_token": refresh})
+    ).status_code == 401
+    assert (await replay.get("/api/me", headers=bearer(access))).status_code == 401
 
 
 async def test_delete_me_wrong_password_returns_403_and_deletes_nothing(
@@ -100,18 +104,6 @@ async def test_delete_me_admin_with_another_admin_can_delete_themselves(
     assert await db.users.count_documents({"email": "second@example.com"}) == 1
 
 
-async def test_delete_me_without_csrf_header_returns_403(
-    client: httpx.AsyncClient, db: Database
-) -> None:
-    await register(client, "alice@example.com")
-    del client.headers["X-CSRF-Token"]
-
-    resp = await _delete(client)
-
-    assert resp.status_code == 403
-    assert await db.users.count_documents({"email": "alice@example.com"}) == 1
-
-
 async def test_delete_me_unauthenticated_returns_401(client: httpx.AsyncClient) -> None:
     assert (await _delete(client)).status_code == 401
 
@@ -134,7 +126,6 @@ async def test_delete_me_per_account_limit_holds_when_the_ip_rotates(
         async with httpx.AsyncClient(
             transport=transport,
             base_url="http://testserver",
-            cookies=client.cookies,
             headers=dict(client.headers),
         ) as rotated:
             statuses.append((await _delete(rotated, "wrong password 123")).status_code)

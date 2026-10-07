@@ -9,6 +9,11 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>StockEye</title>
     <style>
+      /* Clickjacking guard for hosts that cannot send frame-ancestors: the bundle (frameGate.ts)
+         reveals the page only when it is the top-level window. */
+      html {
+        visibility: hidden;
+      }
       /* Paint the right background before the JS bundle loads, so dark mode never flashes white. */
       html {
         background: #fff;

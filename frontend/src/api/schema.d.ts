@@ -21,23 +21,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/auth/csrf': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Csrf */
-    get: operations['csrf_api_auth_csrf_get'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/auth/register': {
     parameters: {
       query?: never;
@@ -463,11 +446,6 @@ export interface components {
       /** Password */
       password: string;
     };
-    /** CsrfOut */
-    CsrfOut: {
-      /** Csrf Token */
-      csrf_token: string;
-    };
     /** DataStatus */
     DataStatus: {
       /**
@@ -827,6 +805,11 @@ export interface components {
       date: string;
       stats: components['schemas']['PatternStatsOut'] | null;
     };
+    /** RefreshIn */
+    RefreshIn: {
+      /** Refresh Token */
+      refresh_token: string;
+    };
     /** RegimeOut */
     RegimeOut: {
       /** Recent Mean */
@@ -862,8 +845,20 @@ export interface components {
       /** Value */
       value: number;
     };
-    /** SessionOut */
+    /**
+     * SessionOut
+     * @description A fresh token pair. The refresh token is single-use: store the one from the latest reply.
+     */
     SessionOut: {
+      /** Access Token */
+      access_token: string;
+      /**
+       * Access Expires In
+       * @description Seconds until the access token expires.
+       */
+      access_expires_in: number;
+      /** Refresh Token */
+      refresh_token: string;
       user: components['schemas']['UserOut'];
     };
     /** @enum {string} */
@@ -1031,26 +1026,6 @@ export interface operations {
       };
     };
   };
-  csrf_api_auth_csrf_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['CsrfOut'];
-        };
-      };
-    };
-  };
   register_api_auth_register_post: {
     parameters: {
       query?: never;
@@ -1122,11 +1097,13 @@ export interface operations {
       query?: never;
       header?: never;
       path?: never;
-      cookie?: {
-        se_refresh?: string | null;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RefreshIn'];
       };
     };
-    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -1153,11 +1130,13 @@ export interface operations {
       query?: never;
       header?: never;
       path?: never;
-      cookie?: {
-        se_refresh?: string | null;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RefreshIn'];
       };
     };
-    requestBody?: never;
     responses: {
       /** @description Successful Response */
       204: {

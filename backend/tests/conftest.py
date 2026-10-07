@@ -19,7 +19,6 @@ def settings() -> Settings:
         environment="test",
         mongodb_uri=MONGODB_URI,
         mongodb_db=f"stockeye_test_{uuid.uuid4().hex[:12]}",
-        cookie_secure=False,
         scheduler_enabled=False,
     )
 

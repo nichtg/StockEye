@@ -68,12 +68,12 @@ describe('delete account', () => {
     });
   });
 
-  it('sends any other 403, such as a CSRF failure, to the alert and not the field', async () => {
+  it('sends any other 403, such as a policy refusal, to the alert and not the field', async () => {
     const { user } = await openDialog((req) =>
       req.method === 'DELETE'
         ? {
             status: 403,
-            body: { error: { code: 'csrf_failed', message: 'Security check failed.' } },
+            body: { error: { code: 'forbidden', message: 'Security check failed.' } },
           }
         : undefined,
     );
