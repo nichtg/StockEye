@@ -24,13 +24,15 @@ jobs:
     defaults:
       run:
         working-directory: frontend
-    env:
-      VITE_API_BASE_URL: ${{ vars.API_ORIGIN }}/api
-      VITE_BASE_PATH: ${{ vars.PAGES_BASE_PATH }}
+    # The Pages settings go only to the steps that need them: lint, typecheck and tests run with the
+    # defaults (base path /, API /api), exactly as in the frontend CI workflow. A job-wide base path
+    # of /StockEye/ made the router tests render nothing.
     steps:
       - name: Require an https API origin
         # Runs before checkout, when frontend/ (the job's default directory) doesn't exist yet.
         working-directory: .
+        env:
+          VITE_API_BASE_URL: ${{ vars.API_ORIGIN }}/api
         run: |
           if ! [[ "$VITE_API_BASE_URL" =~ ^https://[^/]+/api$ ]]; then
             echo "::error::repository variable API_ORIGIN must be https://<host> (got an unset or non-https value)"
@@ -50,7 +52,11 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test -- --run
-      - run: npm run build
+      - name: Build for Pages
+        env:
+          VITE_API_BASE_URL: ${{ vars.API_ORIGIN }}/api
+          VITE_BASE_PATH: ${{ vars.PAGES_BASE_PATH }}
+        run: npm run build
       - name: Fail if dist/ contains secret-looking strings
         run: |
           set -u
