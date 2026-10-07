@@ -473,5 +473,11 @@ The custom domain, Fly.io and is-a.dev were considered and declined.
 - [x] Auth security reviews approved (backend 2 rounds, frontend 3 rounds); live two-tab test OK
 - [x] Deploy infrastructure (deploy/, workflows, docs/DEPLOY.md runbook)
 - [x] Deploy security review approved (3 rounds; pins and image digests verified over the network)
-- [ ] PRs open and CI green
-- [ ] User one-time setup, then the go-live probes
+- [x] PRs open and CI green; merged (#10, #11)
+- [x] User one-time setup; live since 2026-10-07 (API https://168.107.88.248, site https://nichtg.github.io/StockEye/)
+  - Fixes found on the real VM: Ubuntu's `admin` group (#20), MongoDB 8 vs the 7.0 kernel, so MongoDB 7.0 (#21, #23),
+    Caddy's fixed IP taken by the API (#22, plus a flaky race test), Pages tests getting the base path (#24).
+  - External probes passed: valid IP certificate, HTTP to HTTPS, 404 outside /api, docs hidden, CORS exact
+    (foreign and null origins refused), only 22/80/443 open, a spoofed X-Forwarded-For can't dodge the login limit
+    (429 after 10), backup upload via instance principal, container DNS.
+- [ ] Admin account created; a day later the memory check (DEPLOY.md step 3.6); lifecycle rule confirmed
