@@ -10,7 +10,9 @@ browser --https--> GitHub Pages (static SPA, nichtg.github.io/StockEye)
 ```
 
 Things marked **verify:** were written from documentation and could not be tested without an Oracle account. Check
-them the first time and fix this file if they differ.
+them the first time and fix this file if they differ. **Verified on the live VM (2026-10-07)** are marked so: the
+Let's Encrypt IP certificate, the instance-principal backup upload and its policy, and container DNS past the
+metadata block.
 
 Naming used below: `<org>` is the repository owner, `nichtg` (lowercase in image names), `<PUBLIC_IP>` the VM's reserved public IP.
 
@@ -124,17 +126,22 @@ The file is `root:root 0600`; the deploy script refuses to run while any `CHANGE
 The VM uploads backups as itself, so there is no API key on it.
 1. Identity > Domains > (your domain) > Dynamic groups > Create `stockeye-vm` with the rule
    `ANY {instance.id = '<the instance OCID>'}`.
-2. Identity > Policies > Create, in the compartment holding the bucket (**verify:** exact syntax):
+2. Identity > Policies > Create, in the root compartment (verified 2026-10-07 with the bucket in root and the
+   dynamic group in the Default domain):
    ```
-   Allow dynamic-group stockeye-vm to manage objects in compartment <compartment> where all {target.bucket.name='stockeye-backups', any {request.permission='OBJECT_CREATE', request.permission='OBJECT_INSPECT'}}
+   Allow dynamic-group stockeye-vm to manage objects in tenancy where all {target.bucket.name='stockeye-backups', any {request.permission='OBJECT_CREATE', request.permission='OBJECT_INSPECT'}}
    ```
    (Upload only; the VM cannot read or delete old backups, so a compromised VM cannot destroy them.)
 3. **Retention:** bucket > Lifecycle policy rules > Create rule: action *Delete*, target *Objects*, *30 days* after
    creation. That is the cleanup of old copies (the VM itself keeps the last 7 locally). Optionally add a Retention
    rule (bucket > Retention rules, 14 days) so nobody can delete a fresh backup early; it cannot be shortened once
    locked.
-4. Test: `sudo systemctl start stockeye-backup.service` after the first deploy, then `journalctl -u stockeye-backup`
-   and check the object appears in the bucket. **verify:** the `oci` upload works with instance principal.
+   Oracle's console may say the lifecycle rule needs `Allow service objectstorage-<region> to manage object-family
+   in tenancy` (Oracle's own storage service doing the deletes); let the console add it, in the root compartment.
+   Give a new policy a minute or two to apply before retrying.
+4. Test: `sudo systemctl start stockeye-backup.service` after the first deploy, then
+   `sudo journalctl -u stockeye-backup -n 25 --no-pager` (journal reads need `sudo` for the admin user) and check
+   the object appears in the bucket. Verified 2026-10-07: the upload works with instance principal.
 
 ### 6. GitHub settings for deployment
 Settings > Secrets and variables > Actions.
@@ -163,9 +170,8 @@ Never fill it with `ssh-keyscan` output you did not verify: an unverified key de
 3. Settings > Pages > Source: **GitHub Actions**. Then run Actions > `pages` > Run workflow.
 4. On the VM check `sudo stockeye-compose ps`. All three services should be `healthy`. Caddy gets the certificate on
    its first start; `sudo stockeye-compose logs caddy` should show it obtained one for `<PUBLIC_IP>`.
-   **verify:** that Let's Encrypt issues IP-address certificates with the `shortlived` profile for your Caddy
-   version (needs Caddy 2.10 or later; the compose file pins 2.11) and that the no-SNI handshake from a browser
-   gets the certificate (`default_sni` in `deploy/Caddyfile`).
+   Verified 2026-10-07: Let's Encrypt issued a `shortlived` IP-address certificate (about 6.7 days, SAN
+   `IP Address:<PUBLIC_IP>`) to Caddy 2.11, and `curl https://<PUBLIC_IP>/api/health` verifies it normally.
 
 ### 8. Create the admin user
 No password is ever put in a file or environment variable: the command asks for it with a hidden prompt.
@@ -183,7 +189,7 @@ command). The `deploy` user's key is locked by `authorized_keys` to
 `command="/usr/bin/sudo /usr/local/sbin/stockeye-deploy",restrict`: no shell, no forwarding, no pty. The script
 accepts only `sha256:` plus 64 hex characters, pulls that digest, records it in `/etc/stockeye/state.env`, runs
 `docker compose up -d`, waits up to 3 minutes for the API to be healthy (the image's HEALTHCHECK: HTTP 200 *and* the API can reach MongoDB) and otherwise restores the previous digest. Afterwards it deletes older `stockeye-api` images.
-It logs to syslog (`journalctl -t stockeye-deploy`).
+It logs to syslog (`sudo journalctl -t stockeye-deploy`).
 
 The sudo rule allows exactly that one script with no arguments and keeps only `SSH_ORIGINAL_COMMAND`. A group
 instead (for example the `docker` group) would give the CI key root on the VM, so the one-script rule is narrower.
@@ -260,10 +266,10 @@ The healthcheck only sees the public API. It cannot tell that the nightly backup
 ```bash
 systemctl list-timers stockeye-backup.timer     # NEXT and LAST look sane
 ls /var/lib/stockeye/BACKUP_FAILED 2>&1          # must say "No such file"
-journalctl -u stockeye-backup --since "8 days ago" | tail
+sudo journalctl -u stockeye-backup --since "8 days ago" | tail
 ```
 and in the Oracle console check that the newest object in the bucket is from last night. A failed backup also logs
-`BACKUP FAILED` at crit level (`journalctl -p crit -t stockeye-backup`) and leaves the marker file until the next
+`BACKUP FAILED` at crit level (`sudo journalctl -p crit -t stockeye-backup`) and leaves the marker file until the next
 good backup.
 
 ### Disk
