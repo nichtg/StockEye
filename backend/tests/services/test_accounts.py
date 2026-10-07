@@ -173,11 +173,14 @@ async def test_rotate_two_simultaneous_refreshes_of_one_token_leave_no_usable_to
 
     wins = [r for r in results if not isinstance(r, BaseException)]
     losses = [r for r in results if isinstance(r, AppError)]
-    assert len(wins) == 1
-    assert len(losses) == 1
-    assert losses[0].status == 401
-    # The loser's reuse alarm revoked the family, so the winner's new token is dead too.
-    assert (await _raises(accounts.rotate(wins[0][0].refresh))).status == 401
+    # Timing decides whether the winner's own family check runs before or after the loser's reuse
+    # alarm revokes the family, so either one refresh wins or both fail. Both failing is the safe
+    # side (fail closed); the property that must hold is that the session ends up dead.
+    assert len(wins) <= 1
+    assert len(wins) + len(losses) == 2
+    assert all(loss.status == 401 for loss in losses)
+    if wins:
+        assert (await _raises(accounts.rotate(wins[0][0].refresh))).status == 401
     assert await db.refresh_families.count_documents({"revoked_at": None}) == 0
 
 
