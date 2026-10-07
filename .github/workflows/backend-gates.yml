@@ -1,0 +1,41 @@
+name: backend-gates
+
+# Reusable: the backend quality gates, shared by backend.yml (PRs) and backend-image.yml (main).
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      mongo:
+        image: mongo:8.0@sha256:d0d926f94df099bff534b7ee5b5986458131a22489dfff8664509af0c1e2ca9c
+        ports:
+          - 27017:27017
+    env:
+      STOCKEYE_MONGODB_URI: mongodb://127.0.0.1:27017
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --locked
+      - run: uv run ruff check app tests
+      - run: uv run ruff format --check app tests
+      - run: uv run mypy app
+      - run: uv run lint-imports
+      - run: uv run pytest --cov --cov-report=term-missing
+      # Known-vulnerability scan of the locked runtime dependencies (not the dev tools).
+      - run: uv export --locked --no-dev --no-emit-project --no-hashes -o ${{ runner.temp }}/requirements.txt
+      - run: uvx pip-audit==2.10.1 --requirement ${{ runner.temp }}/requirements.txt --no-deps --disable-pip

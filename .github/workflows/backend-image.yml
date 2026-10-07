@@ -1,0 +1,86 @@
+name: backend-image
+
+# Push to main -> test -> build the linux/arm64 image on a native Arm runner -> push to GHCR ->
+# deploy that exact digest over SSH (forced command, see deploy/deploy.sh).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-image.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: backend-image
+  cancel-in-progress: false
+
+jobs:
+  test:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/backend-gates.yml
+
+  image:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lowercase image name (GHCR requires it)
+        id: name
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "image=ghcr.io/${OWNER,,}/stockeye-api" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: backend
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.name.outputs.image }}:latest
+            ${{ steps.name.outputs.image }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # The production environment holds DEPLOY_SSH_KEY and can require a manual approval.
+    environment: production
+    permissions: {}
+    steps:
+      - name: Deploy digest over SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+          API_HOST: ${{ vars.API_HOST }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bad digest"; exit 1; }
+          [[ "$API_HOST" =~ ^[0-9A-Za-z][0-9A-Za-z.:-]*$ ]] || { echo "bad API_HOST"; exit 1; }
+          [[ -n "$KNOWN_HOSTS" ]] || { echo "DEPLOY_KNOWN_HOSTS is empty"; exit 1; }
+          dir="$RUNNER_TEMP/deploy-ssh"
+          trap 'rm -rf "$dir"' EXIT
+          install -d -m 700 "$dir"
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$dir/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$dir/known_hosts"
+          ssh -i "$dir/key" -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile="$dir/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "deploy@$API_HOST" "$DIGEST"

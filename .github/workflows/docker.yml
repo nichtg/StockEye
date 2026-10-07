@@ -1,26 +1,29 @@
 name: docker
 
+# No `paths:` filter, so the required checks report on every PR (see backend.yml).
 on:
   pull_request:
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "docker-compose.yml"
-      - ".github/workflows/docker.yml"
   push:
     branches: [main]
 
+permissions: {}
+
 jobs:
   build:
+    name: docker-build (${{ matrix.service }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
         service: [backend, frontend]
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build ${{ matrix.service }} image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.service }}
           push: false

@@ -1,0 +1,101 @@
+name: pages
+
+# Build the static frontend and publish it to GitHub Pages (OIDC deploy, no long-lived token).
+# Repository variables (public config, not secrets): API_ORIGIN (https://<ip>), PAGES_BASE_PATH.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      VITE_API_BASE_URL: ${{ vars.API_ORIGIN }}/api
+      VITE_BASE_PATH: ${{ vars.PAGES_BASE_PATH }}
+    steps:
+      - name: Require an https API origin
+        # Runs before checkout, when frontend/ (the job's default directory) doesn't exist yet.
+        working-directory: .
+        run: |
+          if ! [[ "$VITE_API_BASE_URL" =~ ^https://[^/]+/api$ ]]; then
+            echo "::error::repository variable API_ORIGIN must be https://<host> (got an unset or non-https value)"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # --ignore-scripts: no dependency install script runs in a job that builds a published site.
+      # If a dependency ever needs its postinstall to build, drop the flag and note why here.
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test -- --run
+      - run: npm run build
+      - name: Fail if dist/ contains secret-looking strings
+        run: |
+          set -u
+          # "id|regex". Only the pattern id and file name are printed, never the matched text,
+          # so a real leaked secret does not end up in a (public) build log.
+          patterns=(
+            'private-key|-----BEGIN'
+            'mongodb-uri|mongodb(\+srv)?://'
+            'backend-env-name|STOCKEYE_'
+            'jwt|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+            'aws-key|AKIA[0-9A-Z]{16}'
+            'github-token|(ghp|gho|ghs|ghu)_[A-Za-z0-9]{30,}'
+            'github-pat|github_pat_[A-Za-z0-9_]{30,}'
+            'sk-key|sk-[A-Za-z0-9_-]{32,}'
+            'google-key|AIza[0-9A-Za-z_-]{35}'
+            'provider-key|(finnhub|marketaux|alphavantage)[A-Za-z_]*[=:]["'"'"' ]*[A-Za-z0-9]{16,}'
+          )
+          fail=0
+          for entry in "${patterns[@]}"; do
+            id="${entry%%|*}"
+            re="${entry#*|}"
+            files="$(grep -rIlE -e "$re" dist || true)"
+            if [[ -n "$files" ]]; then
+              while read -r f; do echo "::error file=frontend/$f::pattern '$id' matched"; done <<<"$files"
+              fail=1
+            fi
+          done
+          if find dist -name '*.map' | grep -q .; then
+            echo "::error::dist/ contains source maps"
+            fail=1
+          fi
+          exit "$fail"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

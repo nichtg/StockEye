@@ -1,0 +1,36 @@
+name: healthcheck
+
+# Daily probe of the production API. A failure emails the repository owner: that is the alarm.
+# Note: GitHub disables scheduled workflows after 60 days without repository activity;
+# re-enable it from the Actions tab if that happens.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      API_HOST: ${{ vars.API_HOST }}
+    steps:
+      - name: API answers ok (normal certificate verification)
+        run: |
+          set -euo pipefail
+          [[ "$API_HOST" =~ ^[0-9A-Za-z][0-9A-Za-z.:-]*$ ]] || { echo "::error::API_HOST variable missing or malformed"; exit 1; }
+          body="$(curl -fsS --proto '=https' --tlsv1.2 --max-time 20 "https://${API_HOST}/api/health")"
+          echo "$body"
+          echo "$body" | jq -e '.status == "ok" and .database == "ok"' >/dev/null
+      - name: Certificate is not about to expire
+        run: |
+          set -euo pipefail
+          # Caddy renews a ~6-day shortlived certificate with ~2 days left. Alert at under 36 hours:
+          # renewal has then been failing for about a day, with time left to fix it.
+          echo | openssl s_client -connect "${API_HOST}:443" -verify_return_error -verify_ip "${API_HOST}" 2>/dev/null \
+            | openssl x509 -outform PEM >"$RUNNER_TEMP/cert.pem"
+          openssl x509 -in "$RUNNER_TEMP/cert.pem" -noout -enddate
+          openssl x509 -in "$RUNNER_TEMP/cert.pem" -noout -checkend 129600 \
+            || { echo "::error::certificate expires within 36 hours"; exit 1; }
