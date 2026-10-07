@@ -270,6 +270,15 @@ good backup.
 Log files rotate (compose `local` driver, 10 MB x 3 per service). After each successful deploy the script removes
 every `stockeye-api` image except the new one and the previous one. Check `df -h /` occasionally.
 
+## Maintenance
+- **MongoDB stays on 7.0 for now.** MongoDB 8.0+ refuses to start on Linux kernels 6.19 to 7.0.13
+  ([SERVER-121912](https://jira.mongodb.org/browse/SERVER-121912)); 8.0.30+ accepts 7.0.14 and newer
+  ([SERVER-125742](https://jira.mongodb.org/browse/SERVER-125742)), but Ubuntu's Oracle kernel reports itself as
+  `7.0.0-*`, so 8.x still won't start on this VM. MongoDB 7.0 is unaffected and gets security fixes until
+  **August 2027**. Before then, either move to an 8.x release that runs on this kernel (check `uname -r` on the VM
+  against the release notes) or switch the VM to Ubuntu 24.04's GA kernel (6.8). Moving 7.0 to 8.0 is an in-place
+  upgrade after setting `featureCompatibilityVersion` to `"7.0"`; take a backup first.
+
 ## Accepted risks
 - A stolen `DEPLOY_SSH_KEY` can only deploy an image digest that exists in the public GHCR package, but anyone with
   push access to `main` (or the `production` approval) can ship arbitrary code. Keep branch protection and the

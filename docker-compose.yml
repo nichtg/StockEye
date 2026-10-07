@@ -11,7 +11,7 @@
 #                            change them inside Mongo or delete the mongo-data volume.
 services:
   mongo:
-    image: mongo:8
+    image: mongo:7.0  # matches production; see deploy/compose.yml for why not 8.x
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?set MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD}

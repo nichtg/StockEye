@@ -16,7 +16,7 @@ jobs:
         working-directory: backend
     services:
       mongo:
-        image: mongo:8.0@sha256:d0d926f94df099bff534b7ee5b5986458131a22489dfff8664509af0c1e2ca9c
+        image: mongo:7.0@sha256:1f995ad6fdb93244a1addab1b58f934a0bc2f5643c38e02f5e9d7f0c7d227a7b  # same major as production (deploy/compose.yml)
         ports:
           - 27017:27017
     env:
