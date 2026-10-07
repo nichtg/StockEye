@@ -37,7 +37,7 @@ This report covers what StockEye is built with, what each piece is for, how the 
 
 ### Delivery
 - **GitHub Actions**:
-  - `backend.yml`: ruff, mypy, import-linter and pytest against a MongoDB 8 service container.
+  - `backend.yml`: ruff, mypy, import-linter and pytest against a MongoDB 7.0 service container (production's version).
   - `frontend.yml`: lint, typecheck, tests and build.
 
 ## 2. How the analysis works

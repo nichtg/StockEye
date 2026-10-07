@@ -23,7 +23,7 @@ The FinBERT sentiment model is not committed. Fetch it once with `uv run python 
 Local, for example with Docker:
 
 ```bash
-docker run -d --name stockeye-mongo -p 27017:27017 mongo:8
+docker run -d --name stockeye-mongo -p 27017:27017 mongo:7.0
 ```
 
 The default `STOCKEYE_MONGODB_URI=mongodb://127.0.0.1:27017` then works. To use Atlas instead, set `STOCKEYE_MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>/` and allow your IP in Atlas. Indexes are created automatically at startup.
