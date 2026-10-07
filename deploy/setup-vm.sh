@@ -48,7 +48,15 @@ Unattended-Upgrade::Remove-Unused-Dependencies "true";
 CONF
 
 step "Users: admin (your key, sudo) and deploy (forced command only)"
-id admin >/dev/null 2>&1 || useradd --create-home --shell /bin/bash admin
+# Ubuntu ships a legacy `admin` group, so a plain `useradd admin` fails with "group admin exists"; reuse it as the
+# user's primary group then (sudo comes from the explicit NOPASSWD rule below, not from that group).
+if ! id admin >/dev/null 2>&1; then
+  if getent group admin >/dev/null; then
+    useradd --create-home --shell /bin/bash --gid admin admin
+  else
+    useradd --create-home --shell /bin/bash admin
+  fi
+fi
 install -d -m 700 -o admin -g admin /home/admin/.ssh
 printf '%s\n' "$ADMIN_PUBKEY" >/home/admin/.ssh/authorized_keys
 chown admin:admin /home/admin/.ssh/authorized_keys
