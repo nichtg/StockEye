@@ -75,7 +75,7 @@ services:
     # MongoDB 7.0, not 8.x: 8.0+ refuses to start on Linux kernels 6.19-7.0.13 (SERVER-121912). Ubuntu's Oracle
     # kernel reports itself as 7.0.0-*, so even 8.0.30+ (which allows 7.0.14+) won't start. 7.0 is unaffected.
     # 7.0 security support ends August 2027: revisit then (docs/DEPLOY.md, "Maintenance").
-    image: mongo:7.0@sha256:1f995ad6fdb93244a1addab1b58f934a0bc2f5643c38e02f5e9d7f0c7d227a7b
+    image: mongo:8.2@sha256:e0ce8c35124d4a9f9785532d1f268f39e9728ffa1cb38f46fa482436424c4bd3
     restart: unless-stopped
     logging: *logging
     # No `ports:`. Auth is on because MONGO_INITDB_ROOT_* makes the image start with --auth.
