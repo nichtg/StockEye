@@ -2,6 +2,7 @@ import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes, useLocation } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
+import { REFRESH_KEY } from '../../api/tokens';
 import type { User } from '../../api/types';
 import { AccountMenu } from '../../components/AccountMenu';
 import { stubFetch, type MockHandler } from '../../test/mockApi';
@@ -117,6 +118,8 @@ describe('delete account through the real route guards', () => {
   });
 
   it('lands on /login with a toast that hides itself, and without a ?next= redirect', async () => {
+    // A stored session is what makes `/` ask the API who is signed in.
+    localStorage.setItem(REFRESH_KEY, JSON.stringify({ t: 'refresh', u: me.id }));
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let deleted = false;
     stubFetch((req) => {
