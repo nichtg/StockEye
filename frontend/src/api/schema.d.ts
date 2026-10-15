@@ -809,6 +809,11 @@ export interface components {
       sentiment_label: 'positive' | 'negative' | 'neutral' | 'not_scored';
       /** Sentiment */
       sentiment: number | null;
+      /**
+       * Similar
+       * @default []
+       */
+      similar: components['schemas']['SimilarArticleOut'][];
     };
     /**
      * NewsArticlesOut
@@ -825,6 +830,17 @@ export interface components {
        */
       since: string;
       status: components['schemas']['DataStatus'];
+      /** Months */
+      months?: components['schemas']['NewsMonthOut'][] | null;
+    };
+    /** NewsMonthOut */
+    NewsMonthOut: {
+      /** Month */
+      month: string;
+      /** Label */
+      label: string;
+      /** Count */
+      count: number;
     };
     /**
      * NewsProgressOut
@@ -1084,6 +1100,23 @@ export interface components {
       weight: number;
       /** Detail */
       detail: string;
+    };
+    /**
+     * SimilarArticleOut
+     * @description A near-duplicate of a group's main article (same story, another outlet).
+     */
+    SimilarArticleOut: {
+      /** Title */
+      title: string;
+      /** Url */
+      url: string;
+      /** Source */
+      source: string;
+      /**
+       * Published At
+       * Format: date-time
+       */
+      published_at: string;
     };
     /** @enum {string} */
     Status: 'active' | 'disabled' | 'deleting';
@@ -1887,6 +1920,8 @@ export interface operations {
         /** @description Cursor from next_cursor */
         before?: string | null;
         limit?: number;
+        /** @description Exchange-local month YYYY-MM within the six months */
+        month?: string | null;
       };
       header?: never;
       path: {
