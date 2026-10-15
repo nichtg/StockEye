@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.domain.macro.sentiment_stats import Bucket, RegimeLabel, Reliability
 from app.domain.macro.summary import Scope
+from app.domain.macro.verdicts import AnswerKind, VerdictId
 from app.domain.technical.outlook import Direction, Lean
 from app.providers.models import EventKind, Interval
 from app.services.status import DataStatus
@@ -149,6 +150,8 @@ class BucketStatsOut(BaseModel):
     t: float | None
     p_value: float | None
     label: Reliability | None
+    ci_low_0_1: float | None = None  # 95% interval of mean_car_0_1 (fractions); None if unknown
+    ci_high_0_1: float | None = None
 
 
 class DifferenceOut(BaseModel):
@@ -185,6 +188,16 @@ class TimelinePointOut(BaseModel):
     article_count: int
 
 
+class VerdictOut(BaseModel):
+    """One plain question with a one-word answer chip and one supporting sentence."""
+
+    id: VerdictId
+    question: str
+    answer: str
+    answer_kind: AnswerKind
+    detail: str
+
+
 class MacroReportOut(BaseModel):
     top_events: list[TopEventOut]
     top_events_since: date  # top_events only covers news days from this date on
@@ -201,6 +214,8 @@ class MacroReportOut(BaseModel):
     events_total: int
     events_insufficient: int
     earnings_note: str | None = None  # set when the effect comes mostly from earnings-time news
+    verdicts: list[VerdictOut]  # three plain answers about the primary scope
+    value_statement: str  # one line saying what this section is for
 
 
 class IngestionOut(BaseModel):
@@ -219,13 +234,31 @@ class NewsProgressOut(IngestionOut):
 SentimentLabel = Literal["positive", "negative", "neutral", "not_scored"]
 
 
+class SimilarArticleOut(BaseModel):
+    """A near-duplicate of a group's main article (same story, another outlet)."""
+
+    title: str
+    url: str  # always http(s)
+    source: str
+    published_at: datetime
+
+
 class NewsArticleOut(BaseModel):
     published_at: datetime
     title: str
     url: str  # always http(s)
     source: str
+    # For a group: the mean score of its scored members (main article included).
     sentiment_label: SentimentLabel
     sentiment: float | None  # [-1, 1]; None until the article is scored
+    # Same-day near-duplicates of this article, newest first; [] when nothing groups.
+    similar: list[SimilarArticleOut] = []
+
+
+class NewsMonthOut(BaseModel):
+    month: str  # "YYYY-MM", exchange-local
+    label: str  # "Oct 2026"
+    count: int  # articles the feed would show (price recaps excluded); always > 0
 
 
 class NewsArticlesOut(BaseModel):
@@ -237,6 +270,9 @@ class NewsArticlesOut(BaseModel):
     next_cursor: str | None
     since: datetime  # start of the window (UTC)
     status: DataStatus  # news ingestion status
+    # Per-month counts over the whole window, newest first, whatever month is selected.
+    # Only on the first page (no cursor); null on later pages.
+    months: list[NewsMonthOut] | None = None
 
 
 class MacroResponse(BaseModel):

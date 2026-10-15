@@ -48,6 +48,16 @@ def reliability_label(p: float) -> Reliability:
     return "no_clear_effect"
 
 
+def shown_in_100(p: float) -> int:
+    """The "about X in 100" figure shown to users: p rounded to whole percent, at least 1."""
+    return max(1, round(p * 100))
+
+
+def shown_label(p: float) -> Reliability:
+    """Reliability label of the *rounded* figure, so every surface shows the same label."""
+    return reliability_label(shown_in_100(p) / 100)
+
+
 @dataclass(frozen=True)
 class Correlation:
     """Spearman rank correlation of sentiment with car_0_1 over ``n`` events."""
@@ -75,6 +85,12 @@ class BucketStats:
     t: float | None = None
     p_value: float | None = None
     label: Reliability | None = None
+    # 95% confidence interval of mean_car_0_1 from the same one-sample t model and the same
+    # min_n / spread gate as ``t`` and ``p_value``. ``label`` comes from the p-value rounded to
+    # whole percent (``shown_label``), so in the narrow 0.045-0.05 band the interval can
+    # exclude zero while the label reads "possible_effect".
+    ci_low_0_1: float | None = None
+    ci_high_0_1: float | None = None
 
 
 @dataclass(frozen=True)
@@ -115,15 +131,21 @@ def _median(values: Sequence[float]) -> float | None:
     return float(np.median(values)) if values else None
 
 
-def _bucket_test(car01: Sequence[float], min_n: int) -> tuple[float, float] | None:
-    """One-sample t-test against zero; each bucket claim needs its own evidence."""
+def _bucket_test(car01: Sequence[float], min_n: int) -> tuple[float, float, float, float] | None:
+    """One-sample t-test against zero, with the 95% interval of the mean from the same model.
+
+    Returns (t, p, ci_low, ci_high); the interval excludes zero exactly when p < 0.05. Each
+    bucket claim needs its own evidence, so below ``min_n`` (or with no spread) there is
+    neither a test nor an interval.
+    """
     if len(car01) < min_n or len(car01) < MIN_DISTINCT or np.ptp(car01) == 0:
         return None
     res = stats.ttest_1samp(car01, 0.0)
     t, p = float(res.statistic), float(res.pvalue)
     if math.isnan(t) or math.isnan(p):
         return None
-    return t, p
+    ci = res.confidence_interval(0.95)
+    return t, p, float(ci.low), float(ci.high)
 
 
 def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> BucketStats:
@@ -143,7 +165,9 @@ def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> 
         n_car_pre_5=len(pre),
         t=None if test is None else test[0],
         p_value=None if test is None else test[1],
-        label=None if test is None else reliability_label(test[1]),
+        label=None if test is None else shown_label(test[1]),
+        ci_low_0_1=None if test is None else test[2],
+        ci_high_0_1=None if test is None else test[3],
     )
 
 
@@ -168,7 +192,7 @@ def _difference(pos: list[float], neg: list[float], min_n: int) -> Difference | 
         mean_diff=float(np.mean(pos) - np.mean(neg)),
         t=t,
         p_value=p,
-        label=reliability_label(p),
+        label=shown_label(p),
         n_pos=len(pos),
         n_neg=len(neg),
     )

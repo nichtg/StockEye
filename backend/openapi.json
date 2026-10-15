@@ -948,6 +948,25 @@
               "default": 30,
               "title": "Limit"
             }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 7
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exchange-local month YYYY-MM within the six months",
+              "title": "Month"
+            },
+            "description": "Exchange-local month YYYY-MM within the six months"
           }
         ],
         "responses": {
@@ -1180,6 +1199,28 @@
               }
             ],
             "title": "Label"
+          },
+          "ci_low_0_1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Low 0 1"
+          },
+          "ci_high_0_1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci High 0 1"
           }
         },
         "type": "object",
@@ -2107,6 +2148,17 @@
               }
             ],
             "title": "Earnings Note"
+          },
+          "verdicts": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictOut"
+            },
+            "type": "array",
+            "title": "Verdicts"
+          },
+          "value_statement": {
+            "type": "string",
+            "title": "Value Statement"
           }
         },
         "type": "object",
@@ -2124,7 +2176,9 @@
           "regime",
           "timeline",
           "events_total",
-          "events_insufficient"
+          "events_insufficient",
+          "verdicts",
+          "value_statement"
         ],
         "title": "MacroReportOut"
       },
@@ -2374,6 +2428,14 @@
               }
             ],
             "title": "Sentiment"
+          },
+          "similar": {
+            "items": {
+              "$ref": "#/components/schemas/SimilarArticleOut"
+            },
+            "type": "array",
+            "title": "Similar",
+            "default": []
           }
         },
         "type": "object",
@@ -2414,6 +2476,20 @@
           },
           "status": {
             "$ref": "#/components/schemas/DataStatus"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NewsMonthOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
           }
         },
         "type": "object",
@@ -2425,6 +2501,29 @@
         ],
         "title": "NewsArticlesOut",
         "description": "One page of the News tab, newest first."
+      },
+      "NewsMonthOut": {
+        "properties": {
+          "month": {
+            "type": "string",
+            "title": "Month"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "month",
+          "label",
+          "count"
+        ],
+        "title": "NewsMonthOut"
       },
       "NewsProgressOut": {
         "properties": {
@@ -3260,6 +3359,36 @@
         ],
         "title": "SignalOut"
       },
+      "SimilarArticleOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "url",
+          "source",
+          "published_at"
+        ],
+        "title": "SimilarArticleOut",
+        "description": "A near-duplicate of a group's main article (same story, another outlet)."
+      },
       "Status": {
         "type": "string",
         "enum": [
@@ -3570,6 +3699,52 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerdictOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "good_news",
+              "bad_news",
+              "overall"
+            ],
+            "title": "Id"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "answer_kind": {
+            "type": "string",
+            "enum": [
+              "clear",
+              "possible",
+              "none",
+              "opposite",
+              "insufficient"
+            ],
+            "title": "Answer Kind"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "question",
+          "answer",
+          "answer_kind",
+          "detail"
+        ],
+        "title": "VerdictOut",
+        "description": "One plain question with a one-word answer chip and one supporting sentence."
       },
       "WatchlistOut": {
         "properties": {

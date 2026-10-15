@@ -358,6 +358,6 @@ def build_fake_services(
         IngestBudget(db, settings.max_new_symbols_per_user_per_day), news, clock
     )
     analysis = AnalysisService(db, market, news, admission, clock)
-    feed = NewsFeed(NewsRepository(db), clock, news.status)
+    feed = NewsFeed(NewsRepository(db), clock, news.status, market.company_name)
     discover = DiscoverService(db, market, analysis, clock)
     return Services(market, news, analysis, admission, guard, feed, discover)
