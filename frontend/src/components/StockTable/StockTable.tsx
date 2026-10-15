@@ -17,29 +17,24 @@ import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import { ExchangeTag } from '../../features/search/ExchangeTag';
-import { OutlookCell } from '../../features/watchlist/Outlook';
 import { Sparkline } from '../../features/watchlist/Sparkline';
 import { visuallyHidden } from '../../lib/a11y';
-import { formatCompactCurrency, formatNumber, formatPrice } from '../../lib/format';
 import { radius } from '../../theme/tokens';
 import { Direction } from '../Direction';
 import { Term } from '../Term';
+import { COLUMNS, effectiveSort, type ColumnId } from './columns';
 import { filterRows, sortRows, type SortKey, type SortState, type StockRow } from './sortFilter';
+import { formatPrice } from '../../lib/format';
 import type { TableState } from './useTableState';
 
-type OverviewRow = StockRow;
-
-/** A per-list extra metric (Discover only): P/E, or average daily trading value. */
-export type ExtraColumn = 'pe' | 'traded';
-
 interface ListProps {
-  rows: OverviewRow[];
-  /** One extra metric column for this table, chosen by the page. */
-  extra?: ExtraColumn;
+  rows: StockRow[];
+  /** The columns after the symbol, in order: headers, cells, mobile lines and sort keys all follow it. */
+  columns: readonly ColumnId[];
   /** Names the table (and the mobile list) for assistive tech. */
   ariaLabel: string;
   /** The per-row control: remove for the watchlist, a star toggle for Discover. */
-  renderAction: (row: OverviewRow) => ReactNode;
+  renderAction: (row: StockRow) => ReactNode;
   /** Names the action column for screen readers, since its header is visually empty. */
   actionLabel: string;
 }
@@ -51,40 +46,15 @@ export interface StockTableProps extends ListProps {
 }
 
 interface ViewProps extends ListProps {
-  state: TableState;
+  /** This table's own sort: null when the shared sort is on a column it does not show. */
+  sort: SortState | null;
+  onSort: (key: SortKey) => void;
 }
 
 const UNAVAILABLE = 'Data unavailable';
 const numCell = { textAlign: 'right', whiteSpace: 'nowrap' } as const;
 
-function ExtraCell({ row, extra }: { row: OverviewRow; extra: ExtraColumn }) {
-  if (extra === 'pe') {
-    return (
-      <TableCell sx={numCell}>
-        {row.pe_ratio == null ? '–' : formatNumber(row.pe_ratio, row.exchange, { digits: 1 })}
-      </TableCell>
-    );
-  }
-  return (
-    <TableCell sx={numCell}>
-      {formatCompactCurrency(row.avg_traded_value, row.currency, row.exchange)}
-    </TableCell>
-  );
-}
-
-/** The mobile one-liner for the extra metric, or null when the row has none. */
-function extraText(row: OverviewRow, extra: ExtraColumn | undefined): string | null {
-  if (extra === 'pe' && row.pe_ratio != null) {
-    return `P/E ${formatNumber(row.pe_ratio, row.exchange, { digits: 1 })}`;
-  }
-  if (extra === 'traded' && row.avg_traded_value != null) {
-    const value = formatCompactCurrency(row.avg_traded_value, row.currency, row.exchange);
-    return `Avg daily trading ${value}`;
-  }
-  return null;
-}
-
-function isUnavailable(row: OverviewRow): boolean {
+function isUnavailable(row: StockRow): boolean {
   return row.status === 'unavailable' || row.last_price == null;
 }
 
@@ -94,7 +64,7 @@ function stockPath(symbol: string): string {
   return `/stock/${encodeURIComponent(symbol)}`;
 }
 
-function SymbolLink({ row, showCountry = false }: { row: OverviewRow; showCountry?: boolean }) {
+function SymbolLink({ row, showCountry = false }: { row: StockRow; showCountry?: boolean }) {
   return (
     <Box sx={{ minWidth: 0 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
@@ -122,22 +92,7 @@ function SymbolLink({ row, showCountry = false }: { row: OverviewRow; showCountr
   );
 }
 
-function StaleNote({ row }: { row: OverviewRow }) {
-  if (row.status === 'ok' || row.status === 'unavailable') return null;
-  return (
-    <Tooltip title={row.status_reason ?? 'This data may be out of date.'}>
-      <Typography
-        variant="caption"
-        tabIndex={0}
-        sx={{ display: 'block', color: 'ink3', cursor: 'help' }}
-      >
-        {row.status === 'stale' ? 'Delayed' : 'Partial data'}
-      </Typography>
-    </Tooltip>
-  );
-}
-
-function UnavailableText({ row }: { row: OverviewRow }) {
+function UnavailableText({ row }: { row: StockRow }) {
   return (
     <Tooltip title={row.status_reason ?? 'We could not load this stock right now.'}>
       <Typography
@@ -185,12 +140,8 @@ function SortHeader({
 }
 
 function DesktopTable(props: ViewProps) {
-  const { rows, ariaLabel, state, renderAction, actionLabel, extra } = props;
-  const { sort, toggleSort: onSort } = state;
-  const showMarketCap = state.columns === 'discover';
+  const { rows, ariaLabel, columns, sort, onSort, renderAction, actionLabel } = props;
   const navigate = useNavigate();
-  // Everything between the symbol and the action column.
-  const dataColumns = (showMarketCap ? 6 : 5) + (extra ? 1 : 0);
   return (
     <TableContainer sx={{ border: 1, borderColor: 'line', borderRadius: radius.lg }}>
       <Table aria-label={ariaLabel}>
@@ -199,52 +150,24 @@ function DesktopTable(props: ViewProps) {
             <SortHeader sortKey="symbol" sort={sort} onSort={onSort}>
               Symbol
             </SortHeader>
-            <SortHeader sortKey="country" sort={sort} onSort={onSort}>
-              Country
-            </SortHeader>
-            {showMarketCap && (
-              <SortHeader
-                sortKey="cap"
-                align="right"
-                sort={sort}
-                onSort={onSort}
-                term={<Term id="market_cap" />}
-              >
-                Market cap
-              </SortHeader>
-            )}
-            {extra === 'pe' && (
-              <SortHeader
-                sortKey="pe"
-                align="right"
-                sort={sort}
-                onSort={onSort}
-                term={<Term id="pe_ratio" />}
-              >
-                P/E
-              </SortHeader>
-            )}
-            {extra === 'traded' && (
-              <SortHeader
-                sortKey="traded"
-                align="right"
-                sort={sort}
-                onSort={onSort}
-                term={<Term id="avg_traded_value" />}
-              >
-                Avg daily trading
-              </SortHeader>
-            )}
-            <SortHeader sortKey="last" align="right" sort={sort} onSort={onSort}>
-              Last
-            </SortHeader>
-            <SortHeader sortKey="change" align="right" sort={sort} onSort={onSort}>
-              1W change
-            </SortHeader>
-            <TableCell>1W trend</TableCell>
-            <SortHeader sortKey="outlook" sort={sort} onSort={onSort} term={<Term id="outlook" />}>
-              Outlook
-            </SortHeader>
+            {columns.map((id) => {
+              const col = COLUMNS[id];
+              const term = col.term && <Term id={col.term} />;
+              return col.sortKey ? (
+                <SortHeader
+                  key={id}
+                  sortKey={col.sortKey}
+                  align={col.align}
+                  sort={sort}
+                  onSort={onSort}
+                  term={term}
+                >
+                  {col.label}
+                </SortHeader>
+              ) : (
+                <TableCell key={id}>{col.label}</TableCell>
+              );
+            })}
             <TableCell sx={{ width: 48 }}>
               <Box component="span" sx={visuallyHidden}>
                 {actionLabel}
@@ -253,63 +176,41 @@ function DesktopTable(props: ViewProps) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {rows.map((row) => {
-            const unavailable = isUnavailable(row);
-            return (
-              <TableRow
-                key={row.symbol}
-                hover
-                onClick={(e) => {
-                  // The link is the keyboard and screen-reader target; this is the mouse shortcut.
-                  if (e.target instanceof Element && e.target.closest('a,button')) return;
-                  void navigate(stockPath(row.symbol));
-                }}
-                sx={{ cursor: 'pointer', '&:last-child td': { borderBottom: 0 } }}
-              >
-                <TableCell>
-                  <SymbolLink row={row} />
+          {rows.map((row) => (
+            <TableRow
+              key={row.symbol}
+              hover
+              onClick={(e) => {
+                // The link is the keyboard and screen-reader target; this is the mouse shortcut.
+                if (e.target instanceof Element && e.target.closest('a,button')) return;
+                void navigate(stockPath(row.symbol));
+              }}
+              sx={{ cursor: 'pointer', '&:last-child td': { borderBottom: 0 } }}
+            >
+              <TableCell>
+                <SymbolLink row={row} />
+              </TableCell>
+              {isUnavailable(row) ? (
+                <TableCell colSpan={columns.length}>
+                  <UnavailableText row={row} />
                 </TableCell>
-                {unavailable ? (
-                  <TableCell colSpan={dataColumns}>
-                    <UnavailableText row={row} />
+              ) : (
+                columns.map((id) => (
+                  <TableCell key={id} sx={COLUMNS[id].align === 'right' ? numCell : undefined}>
+                    {COLUMNS[id].cell(row)}
                   </TableCell>
-                ) : (
-                  <>
-                    <TableCell>{row.country ?? '–'}</TableCell>
-                    {showMarketCap && (
-                      <TableCell sx={numCell}>
-                        {formatCompactCurrency(row.market_cap, row.currency, row.exchange)}
-                      </TableCell>
-                    )}
-                    {extra && <ExtraCell row={row} extra={extra} />}
-                    <TableCell sx={numCell}>
-                      <Box sx={{ color: 'ink', fontWeight: 500 }}>
-                        {formatPrice(row.last_price, row.currency, row.exchange)}
-                      </Box>
-                      <StaleNote row={row} />
-                    </TableCell>
-                    <TableCell sx={numCell}>
-                      <Direction value={row.change_1w_pct} variant="pill" />
-                    </TableCell>
-                    <TableCell>
-                      <Sparkline values={row.sparkline} />
-                    </TableCell>
-                    <TableCell>
-                      <OutlookCell lean={row.lean} />
-                    </TableCell>
-                  </>
-                )}
-                <TableCell sx={{ textAlign: 'right' }}>{renderAction(row)}</TableCell>
-              </TableRow>
-            );
-          })}
+                ))
+              )}
+              <TableCell sx={{ textAlign: 'right' }}>{renderAction(row)}</TableCell>
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
     </TableContainer>
   );
 }
 
-function MobileList({ rows, ariaLabel, renderAction, extra }: ListProps) {
+function MobileList({ rows, ariaLabel, renderAction, columns }: ListProps) {
   return (
     <Box
       component="ul"
@@ -342,11 +243,14 @@ function MobileList({ rows, ariaLabel, renderAction, extra }: ListProps) {
                   <Box sx={{ color: 'ink', fontWeight: 500, fontSize: '0.9375rem' }}>
                     {formatPrice(row.last_price, row.currency, row.exchange)}
                   </Box>
-                  {extraText(row, extra) && (
-                    <Typography variant="caption" component="div" sx={{ color: 'ink3' }}>
-                      {extraText(row, extra)}
-                    </Typography>
-                  )}
+                  {columns.map((id) => {
+                    const line = COLUMNS[id].mobile?.(row);
+                    return line ? (
+                      <Typography key={id} variant="caption" component="div" sx={{ color: 'ink3' }}>
+                        {line}
+                      </Typography>
+                    ) : null;
+                  })}
                   <Typography variant="body2" component="div">
                     <Direction value={row.change_1w_pct} variant="pill" />
                   </Typography>
@@ -370,9 +274,10 @@ function MobileList({ rows, ariaLabel, renderAction, extra }: ListProps) {
 export function StockTable({ quietWhenEmpty = false, ...props }: StockTableProps) {
   const theme = useTheme();
   const compact = useMediaQuery(theme.breakpoints.down('sm'));
-  const { state } = props;
-  const sortKey = state.sort?.key ?? null;
-  const sortDir = state.sort?.dir ?? 'asc';
+  const { state, columns } = props;
+  const sort = effectiveSort(state.sort, columns);
+  const sortKey = sort?.key ?? null;
+  const sortDir = sort?.dir ?? 'asc';
   const rows = useMemo(
     () => sortRows(filterRows(props.rows, state.country), sortKey, sortDir),
     [props.rows, state.country, sortKey, sortDir],
@@ -389,7 +294,11 @@ export function StockTable({ quietWhenEmpty = false, ...props }: StockTableProps
       />
     );
   }
-  return compact ? <MobileList {...props} rows={rows} /> : <DesktopTable {...props} rows={rows} />;
+  return compact ? (
+    <MobileList {...props} rows={rows} />
+  ) : (
+    <DesktopTable {...props} rows={rows} sort={sort} onSort={state.toggleSort} />
+  );
 }
 
 /** The line shown when the country filter leaves nothing to list. */

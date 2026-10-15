@@ -1,4 +1,4 @@
-import type { OverviewRow } from '../../api/types';
+import type { DiscoverRow, OverviewRow } from '../../api/types';
 
 export const SORT_KEYS = [
   'symbol',
@@ -18,10 +18,13 @@ export interface SortState {
 }
 
 /** A table row; Discover rows also carry the figures its per-list columns show. */
-export type StockRow = OverviewRow & {
-  pe_ratio?: number | null;
-  avg_traded_value?: number | null;
-};
+export type StockRow = OverviewRow & Partial<Pick<DiscoverRow, 'pe_ratio' | 'avg_traded_value'>>;
+
+/** "Last price" -> "last price", keeping P/E and 1W as written: for use mid-sentence. */
+export function sortPhrase(key: SortKey): string {
+  const label = SORT_LABELS[key];
+  return label === 'P/E' || label.startsWith('1W') ? label : label.toLowerCase();
+}
 
 export const SORT_LABELS: Record<SortKey, string> = {
   symbol: 'Symbol',
@@ -106,7 +109,7 @@ export function sortRows<T extends StockRow>(
 }
 
 /** Rows from one country, or all rows when `country` is null. */
-export function filterRows<T extends OverviewRow>(rows: readonly T[], country: string | null): T[] {
+export function filterRows<T extends StockRow>(rows: readonly T[], country: string | null): T[] {
   if (!country) return [...rows];
   return rows.filter((r) => r.country === country);
 }

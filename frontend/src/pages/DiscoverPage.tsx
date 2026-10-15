@@ -1,14 +1,18 @@
 import SortIcon from '@mui/icons-material/Sort';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
+import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { QueryRegion } from '../components/QueryRegion';
 import { filterRows } from '../components/StockTable/sortFilter';
-import { SORT_LABELS } from '../components/StockTable/sortFilter';
+import {
+  discoverColumns,
+  effectiveSort,
+  type ExtraColumnId,
+} from '../components/StockTable/columns';
+import { sortPhrase } from '../components/StockTable/sortFilter';
 import {
   NoStocksFromCountry,
-  type ExtraColumn,
   StockTable,
   StockTableSkeleton,
 } from '../components/StockTable/StockTable';
@@ -24,7 +28,7 @@ import { useDocumentTitle } from '../hooks';
 import { formatRelative } from '../lib/format';
 
 /** The extra metric each list shows, decided by list id (titles are copy and may change). */
-const LIST_COLUMNS: Record<string, ExtraColumn> = {
+const LIST_COLUMNS: Partial<Record<string, ExtraColumnId>> = {
   us_value_small: 'pe',
   sg_under_radar: 'traded',
 };
@@ -38,11 +42,12 @@ export default function DiscoverPage() {
   const { toggle, isPending } = useWatchlistToggle();
   // One namespaced sort and country filter for the whole page, kept in the URL.
   const table = useTableState({ namespace: 'discover', columns: 'discover' });
+  const heading = useRef<HTMLHeadingElement>(null);
   const allRows = useMemo(() => discover.data?.lists.flatMap((l) => l.rows) ?? [], [discover.data]);
 
   return (
     <Box>
-      <Typography variant="h1" sx={{ mb: 1 }}>
+      <Typography variant="h1" ref={heading} tabIndex={-1} sx={{ mb: 1, outline: 'none' }}>
         Discover
       </Typography>
       <Typography sx={{ color: 'ink2', maxWidth: 640, mb: 1 }}>
@@ -78,8 +83,31 @@ export default function DiscoverPage() {
                 </Typography>
               )}
               <DataStatusLine statuses={[data.data_status]} />
-              <Box sx={{ mt: 3 }}>
+              <Box
+                sx={{
+                  mt: 3,
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'flex-end',
+                  columnGap: 2,
+                }}
+              >
                 <TableControls rows={allRows} state={table} />
+                {table.sort && (
+                  <Link
+                    component="button"
+                    type="button"
+                    variant="body2"
+                    onClick={() => {
+                      table.setSort(null);
+                      // The button disappears on reset, so hand focus to the page heading.
+                      heading.current?.focus();
+                    }}
+                    sx={{ mb: 2, py: 1, color: 'ink' }}
+                  >
+                    Reset to list order
+                  </Link>
+                )}
               </Box>
               {emptyCountry && (
                 <NoStocksFromCountry
@@ -89,79 +117,73 @@ export default function DiscoverPage() {
                   }}
                 />
               )}
-              {data.lists.map((list) => (
-                <Box component="section" key={list.id} sx={{ mt: 6, '&:first-of-type': { mt: 3 } }}>
-                  <Typography variant="h2" component="h2">
-                    {list.title}
-                  </Typography>
-                  <Typography sx={{ color: 'ink2', mb: 0.5 }}>{list.description}</Typography>
-                  <Typography
-                    variant="body2"
-                    sx={{ color: 'ink3', display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}
+              {data.lists.map((list) => {
+                const columns = discoverColumns(LIST_COLUMNS[list.id]);
+                const sort = effectiveSort(table.sort, columns);
+                return (
+                  <Box
+                    component="section"
+                    key={list.id}
+                    sx={{ mt: 6, '&:first-of-type': { mt: 3 } }}
                   >
-                    <SortIcon fontSize="inherit" aria-hidden />
-                    {table.sort ? (
-                      <>
-                        <span>
-                          Sorted by {SORT_LABELS[table.sort.key]},{' '}
-                          {table.sort.dir === 'asc' ? 'ascending' : 'descending'} ·
-                        </span>
-                        <Button
-                          size="small"
-                          variant="text"
-                          onClick={() => {
-                            table.setSort(null);
-                          }}
-                          sx={{
-                            minWidth: 0,
-                            p: 0,
-                            fontSize: 'inherit',
-                            textDecoration: 'underline',
-                          }}
-                        >
-                          Reset to list order
-                        </Button>
-                      </>
+                    <Typography variant="h2" component="h2">
+                      {list.title}
+                    </Typography>
+                    <Typography sx={{ color: 'ink2', mb: 0.5 }}>{list.description}</Typography>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: 'ink3',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.75,
+                        mb: 1,
+                      }}
+                    >
+                      <SortIcon fontSize="inherit" aria-hidden />
+                      <span>
+                        {sort
+                          ? `Sorted by ${sortPhrase(sort.key)}, ${sort.dir === 'asc' ? 'ascending' : 'descending'}.`
+                          : `Ordered by: ${list.order_label}`}
+                      </span>
+                    </Typography>
+                    <DataStatusLine statuses={[list.status]} />
+                    {list.rows.length === 0 ? (
+                      list.status.state === 'ok' && (
+                        <Typography sx={{ color: 'ink2', mt: 1.5 }}>
+                          Nothing matches this list right now.
+                        </Typography>
+                      )
                     ) : (
-                      <span>Ordered by: {list.order_label}</span>
+                      <Box sx={{ mt: 1.5 }}>
+                        {table.country &&
+                          emptyCountry === null &&
+                          filterRows(list.rows, table.country).length === 0 && (
+                            <Typography variant="body2" sx={{ color: 'ink3' }}>
+                              None from {table.country} in this list.
+                            </Typography>
+                          )}
+                        <StockTable
+                          rows={list.rows}
+                          columns={columns}
+                          ariaLabel={list.title}
+                          state={table}
+                          quietWhenEmpty
+                          actionLabel="Watchlist"
+                          renderAction={(row) => (
+                            <WatchStar
+                              symbol={row.symbol}
+                              inList={inWatchlist.has(row.symbol)}
+                              disabled={symbols.isPending || isPending(row.symbol)}
+                              onToggle={toggle}
+                            />
+                          )}
+                        />
+                      </Box>
                     )}
-                  </Typography>
-                  <DataStatusLine statuses={[list.status]} />
-                  {list.rows.length === 0 ? (
-                    list.status.state === 'ok' && (
-                      <Typography sx={{ color: 'ink2', mt: 1.5 }}>
-                        Nothing matches this list right now.
-                      </Typography>
-                    )
-                  ) : (
-                    <Box sx={{ mt: 1.5 }}>
-                      {table.country &&
-                        emptyCountry === null &&
-                        filterRows(list.rows, table.country).length === 0 && (
-                          <Typography variant="body2" sx={{ color: 'ink3' }}>
-                            None from {table.country} in this list.
-                          </Typography>
-                        )}
-                      <StockTable
-                        rows={list.rows}
-                        extra={LIST_COLUMNS[list.id]}
-                        ariaLabel={list.title}
-                        state={table}
-                        quietWhenEmpty
-                        actionLabel="Watchlist"
-                        renderAction={(row) => (
-                          <WatchStar
-                            symbol={row.symbol}
-                            inList={inWatchlist.has(row.symbol)}
-                            disabled={symbols.isPending || isPending(row.symbol)}
-                            onToggle={toggle}
-                          />
-                        )}
-                      />
-                    </Box>
-                  )}
-                </Box>
-              ))}
+                  </Box>
+                );
+              })}
             </>
           );
         }}

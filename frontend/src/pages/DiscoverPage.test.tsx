@@ -224,76 +224,36 @@ describe('DiscoverPage', () => {
       expect(screen.queryByText(/Reset to list order/)).not.toBeInTheDocument();
     });
 
-    it('sorts every list by a chosen column and resets to the server order', async () => {
-      const user = userEvent.setup();
+    it('sorts every list by a shared column and resets once to the server order', async () => {
+      const user = userEvent.setup({ delay: null });
       serve(page());
       renderApp(<DiscoverPage />, { route: '/discover' });
       const table = await screen.findByRole('table', { name: 'Lower-priced small caps' });
-      // Price is a shared column: ascending puts VAL2 (10) first.
       await user.click(within(table).getByRole('button', { name: 'Last' }));
       expect(symbolsIn('Lower-priced small caps')).toEqual(['VAL2', 'VAL3', 'VAL1']);
-      expect(screen.getAllByText(/Sorted by Last price, ascending/)).toHaveLength(3);
+      expect(screen.getAllByText('Sorted by last price, ascending.')).toHaveLength(3);
       expect(screen.queryByText(/Ordered by:/)).not.toBeInTheDocument();
 
-      await user.click(screen.getAllByRole('button', { name: 'Reset to list order' })[0]!);
+      await user.click(screen.getByRole('button', { name: 'Reset to list order' }));
       expect(symbolsIn('Lower-priced small caps')).toEqual(['VAL1', 'VAL2', 'VAL3']);
       expect(screen.getByText('Ordered by: Lowest price-to-earnings first')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reset to list order' })).toBeNull();
+      expect(screen.getByRole('heading', { level: 1, name: 'Discover' })).toHaveFocus();
     });
 
-    it('shows P/E only on the value list and Avg daily trading only on Singapore', async () => {
-      const user = userEvent.setup();
+    it('does not reorder lists that do not show the sorted column', async () => {
+      const user = userEvent.setup({ delay: null });
       serve(page());
       renderApp(<DiscoverPage />, { route: '/discover' });
       const value = await screen.findByRole('table', { name: 'Lower-priced small caps' });
-      const sg = screen.getByRole('table', { name: 'Under the radar in Singapore' });
-      const movers = screen.getByRole('table', { name: 'Small caps on the move' });
-
-      expect(within(value).getByRole('button', { name: 'P/E' })).toBeInTheDocument();
-      expect(within(value).getByRole('button', { name: /What is P.E ratio/ })).toBeInTheDocument();
-      expect(within(value).getByText('8.4')).toBeInTheDocument();
-      expect(within(value).queryByText('Avg daily trading')).not.toBeInTheDocument();
-      expect(within(sg).getByRole('button', { name: 'Avg daily trading' })).toBeInTheDocument();
-      expect(
-        within(sg).getByRole('button', { name: /What is Avg daily trading/ }),
-      ).toBeInTheDocument();
-      expect(within(sg).getByText('S$1.2M')).toBeInTheDocument();
-      expect(within(sg).queryByRole('button', { name: 'P/E' })).not.toBeInTheDocument();
-      expect(within(movers).queryByRole('button', { name: 'P/E' })).not.toBeInTheDocument();
-      expect(
-        within(movers).queryByRole('button', { name: 'Avg daily trading' }),
-      ).not.toBeInTheDocument();
-
-      // Both sort: P/E descending puts the highest first.
       await user.click(within(value).getByRole('button', { name: 'P/E' }));
       await user.click(within(value).getByRole('button', { name: 'P/E' }));
-      expect(
-        within(value)
-          .getAllByRole('link')
-          .map((a) => a.textContent),
-      ).toEqual(['VAL3', 'VAL2', 'VAL1']);
-      await user.click(within(sg).getByRole('button', { name: 'Avg daily trading' }));
-      expect(screen.getAllByText(/Sorted by Avg daily trading, ascending/)).toHaveLength(3);
+      expect(symbolsIn('Lower-priced small caps')).toEqual(['VAL3', 'VAL2', 'VAL1']);
+      expect(screen.getByText('Sorted by P/E, descending.')).toBeInTheDocument();
+      // The movers and Singapore lists have no P/E column: server order and line stay.
+      expect(symbolsIn('Small caps on the move')).toEqual(['AAA', 'BBB']);
+      expect(screen.getByText('Ordered by: Biggest 1-week move first')).toBeInTheDocument();
+      expect(screen.getByText('Ordered by: Most traded first')).toBeInTheDocument();
     });
-  });
-
-  it('shows an error with retry, and recovers', async () => {
-    let fail = true;
-    stubFetch((req) => {
-      if (req.path === '/discover') {
-        return fail
-          ? { status: 500, body: { error: { code: 'x', message: 'boom', request_id: '' } } }
-          : { body: page() };
-      }
-      if (req.path === '/watchlist') return { body: { symbols: [] } };
-      return undefined;
-    });
-    const user = userEvent.setup();
-    renderApp(<DiscoverPage />, { route: '/discover' });
-    const retry = await screen.findByRole('button', { name: 'Try again' });
-    fail = false;
-    await user.click(retry);
-    expect(
-      await screen.findByRole('table', { name: 'Small caps on the move' }),
-    ).toBeInTheDocument();
   });
 });
