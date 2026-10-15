@@ -202,7 +202,7 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   },
   recent_news_window: {
     title: 'Why only the past 3 months',
-    body: 'A news day from long ago says little about what is driving the price now, because its effect has likely faded. The list shows only recent days; the findings above still use 2 years of news.',
+    body: 'A news day from long ago says little about what is driving the price now, because its effect has likely faded. The list shows only recent days; the rest of the analysis still uses 2 years of news.',
   },
   news_day_tones: {
     title: 'Positive, neutral and negative news days',

@@ -94,8 +94,9 @@ function EventRow({ event: e, exchange }: { event: TopEventOut; exchange: Exchan
             No headlines saved for this day.
           </Typography>
         )}
-        {e.headlines.map((h) => (
-          <Typography key={h.url} sx={{ mb: 0.5 }}>
+        {/* Two stories can share a URL (one article syndicated under two titles). */}
+        {e.headlines.map((h, i) => (
+          <Typography key={`${i}:${h.url}`} sx={{ mb: 0.5 }}>
             <Link href={h.url} target="_blank" rel="noopener noreferrer">
               {h.title}
             </Link>
