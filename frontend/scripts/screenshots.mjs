@@ -75,9 +75,27 @@ const SET = [
     viewport: DESKTOP,
     path: '/stock/D05.SI?tab=macro',
   },
+  {
+    file: 'stock-D05.SI-macro-mobile-dark',
+    mode: 'dark',
+    viewport: MOBILE,
+    path: '/stock/D05.SI?tab=macro',
+  },
+  {
+    file: 'stock-RKLB-news-desktop-light',
+    mode: 'light',
+    viewport: DESKTOP,
+    path: '/stock/RKLB?tab=news&month=2026-09',
+  },
+  { file: 'discover-desktop-light', mode: 'light', viewport: DESKTOP, path: '/discover' },
+  { file: 'discover-mobile-dark', mode: 'dark', viewport: MOBILE, path: '/discover' },
 ];
 
-for (const { file, mode, viewport, path, wait = 5000 } of SET) {
+// SHOTS=name1,name2 re-shoots only those files (e.g. after one hit the login rate limit).
+const only = process.env.SHOTS?.split(',');
+for (const { file, mode, viewport, path, wait = 5000 } of SET.filter(
+  (s) => !only || only.includes(s.file),
+)) {
   const { ctx, page } = await session(viewport, mode);
   await page.goto(`${BASE}${path}`);
   await page.waitForTimeout(wait);

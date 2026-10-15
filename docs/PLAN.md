@@ -544,7 +544,18 @@ Then the frontend branches. Same process as earlier phases: Sonnet implements, O
 macro wording; a security review for the changed news endpoint.
 
 ### Phase 7 status
-- [ ] Discover order and funds (5A + 5D)
-- [ ] News months and grouping (3A + 3D)
-- [ ] Macro verdicts and chart (2A + 2B + 2D)
-- [ ] Header line (1A) and country filter (4A)
+- [x] Header line (1A) and country filter (4A) (#43)
+- [x] Discover order and funds (5A + 5D): 10 per list, each in its own order; one column model; a shared sort applies only to
+  lists that show that column; one "Reset to list order" (#44, #47)
+- [x] Macro verdicts and chart (2A + 2B + 2D): three questions with answer chips, a range chart with 3 ticks, the method in
+  "How this was worked out" (#45, #48)
+- [x] News months and grouping (3A + 3D): month chips with article counts (`?month=YYYY-MM`), "+N similar stories" (#46, #49)
+- [x] Live-check fix: month counts are no longer cached while a symbol's news is still being collected (#50)
+- Every item had an Opus review iterated until approved, and a live check at desktop and 375 px. Screenshots re-shot, with new
+  News-months and phone macro shots (`SHOTS=` re-shoots single files).
+- Grouping prefers precision: it needs 3 shared words after stemming, and opposite stories never merge. So headlines that
+  differ in wording (e.g. three "Neutron delayed" stories on Oct 14) stay separate.
+- Deploys: Pages publishes on merge; the backend image (news months, macro verdicts, Discover order) waits for the user's
+  `production` approval.
+- Follow-ups: `test_discover.py::test_a_marker_older_than_six_hours_no_longer_blocks_the_startup_build` flakes under full-suite
+  load (passes alone); Dependabot major bumps.
