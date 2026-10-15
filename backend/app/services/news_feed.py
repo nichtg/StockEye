@@ -227,7 +227,8 @@ class NewsFeed:
         self._months: dict[tuple[str, date], tuple[datetime, list[NewsMonthOut]]] = {}
         self._month_locks: dict[tuple[str, date], asyncio.Lock] = {}  # single flight per key
         # symbol -> (name, expires_at). Names barely change, so a day is plenty; this keeps
-        # the feed off the 60 s quote cache. The ticker fallback is never cached.
+        # the feed off the 60 s quote cache. The ticker fallback is never cached. Bounded by
+        # the symbol universe.
         self._names: dict[str, tuple[str, datetime]] = {}
 
     async def page(
@@ -313,8 +314,10 @@ class NewsFeed:
             cached = self._months.get(key)
             if cached is not None and now < cached[0]:
                 return cached[1]
-            counts = _month_counts(await self._repo.window_titles(symbol, since), tz)
-            self._months = {k: v for k, v in self._months.items() if now < v[0]}  # drop stale
-            self._months[key] = (now + MONTHS_TTL, counts)
-            self._month_locks.pop(key, None)
-            return counts
+            try:
+                counts = _month_counts(await self._repo.window_titles(symbol, since), tz)
+                self._months = {k: v for k, v in self._months.items() if now < v[0]}  # drop stale
+                self._months[key] = (now + MONTHS_TTL, counts)
+                return counts
+            finally:
+                self._month_locks.pop(key, None)  # also after a failed scan: no leaked lock

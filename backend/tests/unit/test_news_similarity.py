@@ -56,6 +56,10 @@ def test_cluster_stories_loosely_worded_reports_stay_apart_for_precision() -> No
         ("Rocket Lab wins NASA contract", "Rocket Lab loses NASA contract"),
         ("Rocket Lab Electron launch succeeds", "Rocket Lab Electron launch fails"),
         ("Rocket Lab hits record high", "Rocket Lab hits record low"),
+        ("Rocket Lab Electron launch succeeds today", "Rocket Lab Electron launch fails today"),
+        ("Rocket Lab hits all-time record high", "Rocket Lab hits all-time record low"),
+        ("Rocket Lab wins big launch deal", "Rocket Lab loses big launch deal"),
+        ("Rocket Lab Neutron launch approved today", "Rocket Lab Neutron launch rejected today"),
         (
             "Rocket Lab will launch Neutron this year",
             "Rocket Lab will not launch Neutron this year",
@@ -147,3 +151,10 @@ def test_cluster_stories_plural_forms_group_but_short_words_and_ss_endings_are_k
     assert _groups(["alpha beta share", "alpha beta shares"]) == [[0, 1]]
     # "loss" must not become "los": that would give 3 shared tokens and merge these.
     assert _groups(["alpha beta loss", "alpha beta los"]) == [[0], [1]]
+
+
+@pytest.mark.parametrize("verb", ["pushing", "postponing", "slipping", "postponed", "slipped"])
+def test_cluster_stories_delay_fold_covers_ing_and_ed_forms(verb: str) -> None:
+    titles = ["Rocket Lab Neutron launch delayed to 2027", f"Rocket Lab Neutron launch {verb} 2027"]
+
+    assert _groups(titles) == [[0, 1]]

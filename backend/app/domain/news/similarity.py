@@ -26,14 +26,6 @@ _MIN_STEM = 3
 _MIN_STEMMED_LENGTH = 5  # "news", "loss", "gain" stay as they are
 _ES_AFTER = ("s", "x", "z", "ch", "sh")
 _NEGATIONS = frozenset({"no", "not"})
-# Words that say "later than planned"; folded to one token before comparing. Kept short on
-# purpose: every entry is a chance of a false merge.
-_DELAY = frozenset(
-    {
-        *("push", "pushed", "pushes", "postpone", "postponed", "postpones"),
-        *("slip", "slipped", "slips", "delay", "delayed", "delays"),
-    }
-)
 
 
 def _stem(word: str) -> str:
@@ -57,17 +49,26 @@ def _stems(words: str) -> frozenset[str]:
     return frozenset(_stem(w) for w in words.split())
 
 
+# Words that say "later than planned", as stems (so "pushing" and "slipped" count too); folded
+# to one token before comparing. Kept short: every entry is a chance of a false merge.
+_DELAY = _stems(
+    "push pushed pushes pushing postpone postponed postpones postponing "
+    "slip slipped slips slipping delay delayed delays delaying"
+)
+
 # Opposite-direction words. If one headline has a word from one side and the other a word
 # from the other side (and neither shares it), the stories disagree and never merge.
 _POSITIVE = _stems(
     "up rise rises rose rising risen soar soars soared soaring surge surges surged jump "
     "jumps jumped gain gains gained rally rallies rallied upgrade upgrades upgraded buy "
-    "buys bullish beat beats raise raises raised climb climbs climbed"
+    "buys bullish beat beats raise raises raised climb climbs climbed win wins won "
+    "succeed succeeds succeeded high approve approves approved"
 )
 _NEGATIVE = _stems(
     "down fall falls fell falling plunge plunges plunged slump slumps slumped sink sinks "
     "sank drop drops dropped lose loses lost losing downgrade downgrades downgraded sell "
-    "sells bearish miss misses missed cut cuts slide slides slid tumble tumbles tumbled"
+    "sells bearish miss misses missed cut cuts slide slides slid tumble tumbles tumbled "
+    "fail fails failed low reject rejects rejected"
 )
 
 
@@ -80,7 +81,9 @@ def _title_tokens(title: str, ignore: Collection[str] = ()) -> frozenset[str]:
     skip = _STOP_WORDS | {w.lower() for w in ignore}
     words = (w for w in _WORDS.findall(title.lower()) if w not in skip)
     return frozenset(
-        "delay" if w in _DELAY else _stem(w) for w in words if len(w) > 1 or w.isdigit()
+        "delay" if (stem := _stem(w)) in _DELAY else stem
+        for w in words
+        if len(w) > 1 or w.isdigit()
     )
 
 
