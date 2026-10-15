@@ -973,6 +973,28 @@
           }
         }
       }
+    },
+    "/api/discover": {
+      "get": {
+        "tags": [
+          "discover"
+        ],
+        "summary": "Discover",
+        "description": "Stored lists only: this never calls a vendor, so it cannot spend any quota.",
+        "operationId": "discover_api_discover_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoverOut"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1439,6 +1461,74 @@
           "n_neg"
         ],
         "title": "DifferenceOut"
+      },
+      "DiscoverList": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "rows",
+          "status"
+        ],
+        "title": "DiscoverList"
+      },
+      "DiscoverOut": {
+        "properties": {
+          "lists": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverList"
+            },
+            "type": "array",
+            "title": "Lists"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "data_status": {
+            "$ref": "#/components/schemas/DataStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lists",
+          "updated_at",
+          "data_status"
+        ],
+        "title": "DiscoverOut"
       },
       "EventPointOut": {
         "properties": {
@@ -2319,6 +2409,39 @@
             ],
             "title": "Lean"
           },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "market_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap"
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -2351,6 +2474,9 @@
           "change_1w_pct",
           "sparkline",
           "lean",
+          "country",
+          "sector",
+          "market_cap",
           "status",
           "status_reason"
         ],
