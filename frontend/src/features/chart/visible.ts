@@ -8,10 +8,13 @@ export function onOrAfter(time: BarTime, from: BarTime): boolean {
   return typeof time === 'string' ? time >= (from as string) : time >= (from as number);
 }
 
-/** Position of the first bar at or after `from` (0 when there is none): where a range view starts. */
+/**
+ * Position of the first bar at or after `from`: where a range view starts. When every bar is
+ * earlier than `from` the view starts at the latest bar, never at the oldest.
+ */
 export function startIndex(candles: Candle[], from: BarTime): number {
   const i = candles.findIndex((c) => onOrAfter(c.time, from));
-  return i === -1 ? 0 : i;
+  return i === -1 ? Math.max(0, candles.length - 1) : i;
 }
 
 /** The bars of the range the viewer chose: everything before `visible_from` is only for panning. */
