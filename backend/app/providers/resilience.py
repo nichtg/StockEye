@@ -31,6 +31,7 @@ from app.providers.errors import (
 )
 from app.providers.models import (
     Bar,
+    CompanyProfile,
     CorporateEvent,
     Interval,
     NewsItem,
@@ -285,6 +286,9 @@ class _GuardedMarket:
 
     async def events(self, symbol: str, start: datetime, end: datetime) -> list[CorporateEvent]:
         return await self._guard.call(self.name, partial(self._adapter.events, symbol, start, end))
+
+    async def profile(self, symbol: str) -> CompanyProfile:
+        return await self._guard.call(self.name, partial(self._adapter.profile, symbol))
 
 
 class _GuardedNews:

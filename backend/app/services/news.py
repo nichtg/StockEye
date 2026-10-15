@@ -22,7 +22,12 @@ from app.providers.base import NewsProvider
 from app.providers.errors import ProviderError, QuotaExhaustedError
 from app.providers.google_news import monthly_windows
 from app.providers.models import NewsItem, NewsQuery
-from app.repositories.news import ArticleText, IngestState, NewsRepository, SentimentRecord
+from app.repositories.news import (
+    ArticleText,
+    IngestState,
+    NewsRepository,
+    SentimentRecord,
+)
 from app.sentiment.scorer import SentimentScore, SentimentScorer, SentimentUnavailableError
 from app.services.calendars import exchange_for, root_ticker
 from app.services.status import DataStatus, ok

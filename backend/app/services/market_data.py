@@ -20,7 +20,7 @@ from app.db import Database
 from app.logging_setup import get_logger
 from app.providers.base import MarketDataProvider
 from app.providers.errors import ProviderDataError, ProviderError, SymbolNotFoundError
-from app.providers.models import Bar, CorporateEvent, Interval, Quote, SymbolMatch
+from app.providers.models import Bar, CompanyProfile, CorporateEvent, Interval, Quote, SymbolMatch
 from app.repositories.bars import BarsRepository, FetchState
 from app.repositories.cache import CacheEntry, CacheRepository
 from app.repositories.events import EventsFetchState, EventsRepository
@@ -102,6 +102,7 @@ _NOT_FOUND: dict[str, Any] = {"not_found": True}
 
 _QUOTE = _CacheKind(QUOTE_TTL, "price quote", "quote")
 _SEARCH = _CacheKind(SEARCH_TTL, "stock search", "search results")
+_PROFILE = _CacheKind(timedelta(hours=24), "company profile", "profile")
 
 
 def _saved[M: BaseModel](entry: CacheEntry | None, model: type[M]) -> M | None:
@@ -155,6 +156,17 @@ class MarketDataService:
             _QUOTE, f"quote:{symbol}", symbol, Quote, lambda: self._provider.quote(symbol)
         )
         return quote, degraded or ok(quote.as_of)
+
+    async def profile(self, symbol: str) -> tuple[CompanyProfile, DataStatus]:
+        """Company facts, cached a day (they barely change); stale fallback like ``quote``."""
+        profile, degraded = await self._cached(
+            _PROFILE,
+            f"profile:{symbol}",
+            symbol,
+            CompanyProfile,
+            lambda: self._provider.profile(symbol),
+        )
+        return profile, degraded or ok()
 
     async def search(self, query: str) -> list[SymbolMatch]:
         """Matches for ``query``; a stale fallback is logged (the endpoint returns a bare list)."""

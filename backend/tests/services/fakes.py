@@ -12,6 +12,7 @@ from app.db import Database
 from app.providers.errors import ProviderError, QuotaExhaustedError, SymbolNotFoundError
 from app.providers.models import (
     Bar,
+    CompanyProfile,
     CorporateEvent,
     Exchange,
     Interval,
@@ -22,6 +23,7 @@ from app.providers.models import (
 )
 from app.providers.resilience import ProviderGuard
 from app.repositories.ingest_budget import IngestBudget
+from app.repositories.news import NewsRepository
 from app.repositories.quotas import QuotaLedger
 from app.sentiment.scorer import SentimentScore, SentimentUnavailableError
 from app.services.admission import NewSymbolAdmission
@@ -30,6 +32,7 @@ from app.services.calendars import exchange_for, session_calendar
 from app.services.container import Services
 from app.services.market_data import MarketDataService
 from app.services.news import NewsService
+from app.services.news_feed import NewsFeed
 
 # Saturday: both exchanges closed, last completed session is Friday 2026-10-02.
 CLOSED_NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
@@ -64,7 +67,7 @@ class FakeMarketData:
         self.fail_with: ProviderError | None = None
         self.fail_symbols: dict[str, ProviderError] = {}
         self.empty_bars = False  # answer bar requests with an empty list, like a vendor glitch
-        self.calls: dict[str, int] = {"search": 0, "quote": 0, "bars": 0, "events": 0}
+        self.calls: dict[str, int] = {"search": 0, "quote": 0, "bars": 0, "events": 0, "profile": 0}
 
     def _check(self, symbol: str) -> None:
         if symbol in self.unknown:
@@ -95,6 +98,25 @@ class FakeMarketData:
             price=bars[-1].close,
             previous_close=bars[-2].close,
             as_of=self._clock(),
+        )
+
+    async def profile(self, symbol: str) -> CompanyProfile:
+        self.calls["profile"] += 1
+        self._check(symbol)
+        return CompanyProfile(
+            description=f"{NAMES.get(symbol, symbol)} makes things.",
+            sector="Technology",
+            industry="Consumer Electronics",
+            country="Singapore" if symbol.endswith(".SI") else "United States",
+            website="https://example.com",
+            employees=1000,
+            market_cap=2.5e9,
+            pe_ratio=21.5,
+            dividend_yield=0.0428,
+            week52_low=80.0,
+            week52_high=120.0,
+            avg_volume=1_000_000.0,
+            currency="SGD" if symbol.endswith(".SI") else "USD",
         )
 
     def _daily(self, symbol: str, start: date, end: date) -> list[Bar]:
@@ -268,4 +290,5 @@ def build_fake_services(
         IngestBudget(db, settings.max_new_symbols_per_user_per_day), news, clock
     )
     analysis = AnalysisService(db, market, news, admission, clock)
-    return Services(market, news, analysis, admission, guard)
+    feed = NewsFeed(NewsRepository(db), clock, news.status)
+    return Services(market, news, analysis, admission, guard, feed)

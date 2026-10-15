@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from bson import ObjectId
-from pymongo import ASCENDING, UpdateOne
+from pymongo import ASCENDING, DESCENDING, UpdateOne
 
 from app.db import Database, Document
 from app.domain.macro import ScoredArticle
@@ -33,6 +33,23 @@ def dedupe_key(title: str, source: str) -> str:
 class ArticleText:
     id: ObjectId
     text: str  # title + ". " + summary, the input to the sentiment model
+
+
+@dataclass(frozen=True)
+class RecentArticle:
+    """One stored article for the News tab; ``score`` is None until the article is scored."""
+
+    published_at: datetime
+    title: str
+    url: str
+    source: str
+    score: float | None
+    dedupe_key: str  # the tiebreak that makes pagination stable when timestamps are equal
+
+    @property
+    def position(self) -> tuple[datetime, str]:
+        """Total-order position ``(published_at, dedupe_key)``, the paging cursor."""
+        return self.published_at, self.dedupe_key
 
 
 @dataclass(frozen=True)
@@ -61,6 +78,20 @@ async def install_indexes(db: Database) -> None:
         [("symbols", ASCENDING), ("published_at", ASCENDING)], name="symbols_published"
     )
     await db[STATE].create_index("symbol", unique=True, name="symbol_unique")
+
+
+def _recent_query(symbol: str, since: datetime, after: tuple[datetime, str] | None) -> Document:
+    """The exact filter ``NewsRepository.recent`` runs (shared so tests can explain it)."""
+    query: Document = {
+        "symbols": symbol,
+        "url": {"$regex": "^https?://"},
+        "published_at": {"$gte": since},
+    }
+    if after is not None:
+        moment, key = after
+        query["published_at"] = {"$gte": since, "$lte": moment}
+        query["$or"] = [{"published_at": {"$lt": moment}}, {"dedupe_key": {"$lt": key}}]
+    return query
 
 
 class NewsRepository:
@@ -147,6 +178,42 @@ class NewsRepository:
                 title=doc["title"],
                 url=doc["url"],
                 source=doc["source"],
+            )
+            async for doc in cursor
+        ]
+
+    async def recent(
+        self,
+        symbol: str,
+        *,
+        since: datetime,
+        after: tuple[datetime, str] | None,
+        limit: int,
+    ) -> list[RecentArticle]:
+        """Up to ``limit + 1`` articles, newest first (the extra row says "more exist").
+
+        Keeps ``published_at >= since``. With ``after = (t, k)`` it keeps only rows strictly
+        later in the order: older than ``t``, or at ``t`` with a smaller ``dedupe_key``. The
+        order is ``published_at`` then ``dedupe_key``, both descending, so equal timestamps
+        never reorder between pages. Scored and unscored articles both count; only http(s)
+        links are returned. The ``symbols_published`` index serves the match; the
+        ``dedupe_key`` tiebreak adds an in-memory SORT, which is fine at per-symbol volumes.
+        """
+        query = _recent_query(symbol, since, after)
+        cursor = self._articles.find(
+            query,
+            {"title": 1, "url": 1, "source": 1, "published_at": 1, "sentiment": 1, "dedupe_key": 1},
+            sort=[("published_at", DESCENDING), ("dedupe_key", DESCENDING)],
+            limit=limit + 1,
+        )
+        return [
+            RecentArticle(
+                published_at=doc["published_at"],
+                title=doc["title"],
+                url=doc["url"],
+                source=doc["source"],
+                score=None if doc.get("sentiment") is None else float(doc["sentiment"]["score"]),
+                dedupe_key=doc["dedupe_key"],
             )
             async for doc in cursor
         ]

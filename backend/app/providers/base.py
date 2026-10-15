@@ -10,6 +10,7 @@ from typing import Protocol
 
 from app.providers.models import (
     Bar,
+    CompanyProfile,
     CorporateEvent,
     Exchange,
     Interval,
@@ -32,6 +33,8 @@ class MarketDataProvider(Protocol):
     ) -> list[Bar]: ...
 
     async def events(self, symbol: str, start: datetime, end: datetime) -> list[CorporateEvent]: ...
+
+    async def profile(self, symbol: str) -> CompanyProfile: ...
 
 
 class NewsProvider(Protocol):

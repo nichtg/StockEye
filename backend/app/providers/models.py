@@ -6,8 +6,9 @@ ever sees a vendor-specific field. All datetimes are timezone-aware UTC.
 
 from datetime import date, datetime
 from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, HttpUrl
+from pydantic import AwareDatetime, BaseModel, ConfigDict, HttpUrl, field_validator
 
 Exchange = Literal["US", "SGX"]
 Interval = Literal["1d", "1h"]
@@ -60,6 +61,37 @@ class CorporateEvent(_Frozen):
     date: date
     label: str  # human-readable, e.g. "Dividend 0.25 USD", "Split 4:1"
     value: float | None = None  # dividend amount, split ratio, or reported EPS
+
+
+class CompanyProfile(_Frozen):
+    """Descriptive facts about a company; each field is None when the vendor has no usable value."""
+
+    description: str | None = None  # plain text, at most 4000 characters
+    sector: str | None = None
+    industry: str | None = None
+    country: str | None = None
+    website: str | None = None  # absolute http(s) URL with a host; never any other scheme
+    employees: int | None = None
+    market_cap: float | None = None  # in ``currency``
+    pe_ratio: float | None = None  # trailing twelve months
+    dividend_yield: float | None = None  # a fraction: 0.0428 means 4.28%
+    week52_low: float | None = None  # in ``currency``
+    week52_high: float | None = None
+    avg_volume: float | None = None  # shares per day
+    currency: str | None = None
+
+    @field_validator("website")
+    @classmethod
+    def _web_url_only(cls, value: str | None) -> str | None:
+        """Keep only an absolute http(s) URL with a host: it is rendered as a link."""
+        if value is None:
+            return None
+        try:
+            parts = urlsplit(value.strip())
+            host = parts.hostname
+        except ValueError:
+            return None
+        return urlunsplit(parts) if parts.scheme in {"http", "https"} and host else None
 
 
 class NewsItem(_Frozen):

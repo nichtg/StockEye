@@ -642,6 +642,51 @@
         }
       }
     },
+    "/api/stocks/{symbol}/profile": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Profile",
+        "operationId": "profile_api_stocks__symbol__profile_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9^][A-Z0-9.\\-^]{0,14}$",
+              "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI",
+              "title": "Symbol"
+            },
+            "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/stocks/{symbol}/chart": {
       "get": {
         "tags": [
@@ -835,6 +880,83 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/NewsProgressOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stocks/{symbol}/news/articles": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "News Articles",
+        "description": "Stored news from the past six months, newest first. Read-only: never starts collection.",
+        "operationId": "news_articles_api_stocks__symbol__news_articles_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9^][A-Z0-9.\\-^]{0,14}$",
+              "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI",
+              "title": "Symbol"
+            },
+            "description": "Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from next_cursor",
+              "title": "Before"
+            },
+            "description": "Cursor from next_cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsArticlesOut"
                 }
               }
             }
@@ -1932,6 +2054,97 @@
         ],
         "title": "Marker"
       },
+      "NewsArticleOut": {
+        "properties": {
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "sentiment_label": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative",
+              "neutral",
+              "not_scored"
+            ],
+            "title": "Sentiment Label"
+          },
+          "sentiment": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sentiment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "published_at",
+          "title",
+          "url",
+          "source",
+          "sentiment_label",
+          "sentiment"
+        ],
+        "title": "NewsArticleOut"
+      },
+      "NewsArticlesOut": {
+        "properties": {
+          "articles": {
+            "items": {
+              "$ref": "#/components/schemas/NewsArticleOut"
+            },
+            "type": "array",
+            "title": "Articles"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Since"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "articles",
+          "next_cursor",
+          "since",
+          "status"
+        ],
+        "title": "NewsArticlesOut",
+        "description": "One page of the News tab, newest first."
+      },
       "NewsProgressOut": {
         "properties": {
           "months_done": {
@@ -2261,6 +2474,161 @@
           "overall"
         ],
         "title": "PriceStatuses"
+      },
+      "ProfileOut": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "industry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Industry"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          },
+          "employees": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employees"
+          },
+          "market_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap"
+          },
+          "pe_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pe Ratio"
+          },
+          "dividend_yield": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Yield"
+          },
+          "week52_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Week52 Low"
+          },
+          "week52_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Week52 High"
+          },
+          "avg_volume": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Volume"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "data_status": {
+            "$ref": "#/components/schemas/DataStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data_status"
+        ],
+        "title": "ProfileOut"
       },
       "ProviderStatus": {
         "properties": {

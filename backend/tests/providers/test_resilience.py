@@ -19,6 +19,7 @@ from app.providers.errors import (
 )
 from app.providers.models import (
     Bar,
+    CompanyProfile,
     CorporateEvent,
     Exchange,
     Interval,
@@ -345,6 +346,10 @@ class _Market:
         self._run("events")
         return []
 
+    async def profile(self, symbol: str) -> CompanyProfile:
+        self._run("profile")
+        return CompanyProfile()
+
 
 class _News:
     name = "p"
@@ -369,10 +374,11 @@ async def test_wrap_market_routes_every_method_through_the_guard() -> None:
     await market.search("a")
     await market.bars("AAPL", "1d", NOW, NOW)
     await market.events("AAPL", NOW, NOW)
+    await market.profile("AAPL")
 
     assert market.name == "p"
-    assert adapter.ran == ["search", "bars", "events"]
-    assert h.ledger.consumed == 3
+    assert adapter.ran == ["search", "bars", "events", "profile"]
+    assert h.ledger.consumed == 4
 
 
 async def test_wrap_market_failure_trips_the_breaker_of_the_adapters_name() -> None:
