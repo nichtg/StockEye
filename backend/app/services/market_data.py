@@ -388,17 +388,30 @@ class MarketDataService:
         Never raises for provider trouble: events are optional.
         """
         now = self._clock()
+        today = now.astimezone(UTC).date()
         try:
-            state, failure = await self._event_flights.run(
-                symbol, lambda: self._refresh_events(symbol)
-            )
+            try:
+                state, failure = await self._event_flights.run(
+                    symbol, lambda: self._refresh_events(symbol), patience=_patience()
+                )
+            except FlightPending:
+                # A background refresh is still running: show what is saved, or wait if nothing is.
+                if (late := await self._events.get_state(symbol)) is not None:
+                    events = await self._events.get_range(
+                        symbol, today - timedelta(days=EVENTS_START_DAYS), today
+                    )
+                    return events, _still_refreshing(
+                        "Corporate event data", "events", late.last_fetched_at, now
+                    )
+                state, failure = await self._event_flights.run(
+                    symbol, lambda: self._refresh_events(symbol)
+                )
         except ProviderError as exc:
             reason = (
                 f"Corporate events are unavailable: {describe_failure(exc)}. "
                 "Earnings, dividend and split markers are hidden for now."
             )
             return [], DataStatus(state="unavailable", as_of=None, reason=reason)
-        today = now.astimezone(UTC).date()
         events = await self._events.get_range(
             symbol, today - timedelta(days=EVENTS_START_DAYS), today
         )

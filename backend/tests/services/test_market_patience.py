@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from app.db import Database
-from app.providers.models import Bar, Interval, Quote
+from app.providers.models import Bar, CorporateEvent, Interval, Quote
 from app.providers.quota import scheduled_calls
 from app.services import market_data
 from app.services.container import Services
@@ -111,3 +111,57 @@ async def test_fetch_state_without_bars_is_refetched_not_reported_unknown(
     assert len(frame) > 100
     assert status.state == "ok"
     assert provider.calls["bars"] == 2
+
+
+async def test_user_gets_saved_events_while_a_scheduled_events_flight_is_still_running(
+    services: Services, provider: FakeMarketData, clock: FakeClock
+) -> None:
+    saved, _ = await services.market.standard_events("AAPL")
+    assert saved
+    clock.now = TUESDAY  # more than a day later: the saved events are due for a refresh
+    gate = asyncio.Event()
+    real = provider.events
+
+    async def slow(symbol: str, start: datetime, end: datetime) -> list[CorporateEvent]:
+        await gate.wait()
+        return await real(symbol, start, end)
+
+    provider.events = slow  # type: ignore[method-assign]  # test spy
+    with scheduled_calls():
+        background = asyncio.create_task(services.market.standard_events("AAPL"))
+    await asyncio.sleep(0.01)
+
+    events, status = await asyncio.wait_for(services.market.standard_events("AAPL"), 2)
+
+    assert events
+    assert status.state == "stale"
+    assert status.reason is not None
+    assert "still running" in status.reason
+    assert not background.done()
+    gate.set()
+    await background
+
+
+async def test_user_with_no_saved_events_keeps_waiting_for_the_flight(
+    services: Services, provider: FakeMarketData
+) -> None:
+    gate = asyncio.Event()
+    real = provider.events
+
+    async def slow(symbol: str, start: datetime, end: datetime) -> list[CorporateEvent]:
+        await gate.wait()
+        return await real(symbol, start, end)
+
+    provider.events = slow  # type: ignore[method-assign]  # test spy
+    with scheduled_calls():
+        background = asyncio.create_task(services.market.standard_events("MSFT"))
+    await asyncio.sleep(0.01)
+    waiting = asyncio.create_task(services.market.standard_events("MSFT"))
+    await asyncio.sleep(0.2)  # well past the patience
+
+    assert not waiting.done()
+    gate.set()
+    events, status = await waiting
+    assert events
+    assert status.state == "ok"
+    await background

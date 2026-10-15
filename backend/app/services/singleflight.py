@@ -35,8 +35,9 @@ class SingleFlight[T]:
         try:
             return await asyncio.wait_for(asyncio.shield(flight), patience)
         except TimeoutError:
-            if flight.done():  # the job itself raised TimeoutError: that is its result
-                raise
+            # Finished as the patience ran out: its value (or its own error) is the answer.
+            if flight.done():
+                return flight.result()
             raise FlightPending from None
 
     def _finished(self, key: Hashable, flight: asyncio.Future[T]) -> None:
