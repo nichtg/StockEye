@@ -1607,6 +1607,11 @@
             "type": "array",
             "title": "Top Events"
           },
+          "top_events_since": {
+            "type": "string",
+            "format": "date",
+            "title": "Top Events Since"
+          },
           "events": {
             "items": {
               "$ref": "#/components/schemas/EventPointOut"
@@ -1704,6 +1709,7 @@
         "type": "object",
         "required": [
           "top_events",
+          "top_events_since",
           "events",
           "headline_findings",
           "primary_findings",

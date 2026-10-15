@@ -585,6 +585,11 @@ export interface components {
     MacroReportOut: {
       /** Top Events */
       top_events: components['schemas']['TopEventOut'][];
+      /**
+       * Top Events Since
+       * Format: date
+       */
+      top_events_since: string;
       /** Events */
       events: components['schemas']['EventPointOut'][];
       /** Headline Findings */

@@ -192,6 +192,7 @@ async def test_chart_includes_news_markers_from_cached_macro_report(services: Se
     macro = await services.analysis.macro("AAPL", USER)
     assert macro.report is not None
     assert macro.report.top_events
+    assert all(t.date >= macro.report.top_events_since for t in macro.report.top_events)
     assert macro.report.events
 
     chart = await services.analysis.chart("AAPL", "2Y", [])

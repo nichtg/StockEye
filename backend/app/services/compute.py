@@ -157,7 +157,10 @@ def compute_macro(
     events = run_event_study(stock["close"], bench["close"], daily_sent, earnings)
     stats_all = compute_stats(events, exclude_near_earnings=False)
     stats_ex = compute_stats(events, exclude_near_earnings=True)
-    regime = sentiment_regime(daily_sent, pd.Timestamp(stock.index[-1]).date())
+    as_of = pd.Timestamp(stock.index[-1]).date()
+    regime = sentiment_regime(daily_sent, as_of)
     timeline = weekly_timeline(daily_sent)
-    report = build_macro_report(events, stats_all, stats_ex, regime, timeline, by_session)
+    report = build_macro_report(
+        events, stats_all, stats_ex, regime, timeline, by_session, as_of=as_of
+    )
     return MacroReportOut.model_validate(asdict(report))

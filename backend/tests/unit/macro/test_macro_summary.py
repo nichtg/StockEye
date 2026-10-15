@@ -18,6 +18,7 @@ from app.domain.macro import (
     compute_stats,
     reliability_label,
 )
+from app.domain.macro.summary import months_before
 
 # A bare "n" or "p" reads as statistician shorthand; user text must never contain one.
 BARE_SYMBOL = re.compile(r"(?<![A-Za-z0-9])[npNP](?![A-Za-z0-9])")
@@ -79,8 +80,13 @@ def _diff(p: float, label: str = "clear_effect", mean_diff: float = 0.012) -> Di
     )
 
 
+AS_OF = date(2024, 1, 31)  # keeps the 2024-01 test events inside the top-events window
+
+
 def _report(ex: MacroStats, allv: MacroStats | None = None, **kwargs):
-    return build_macro_report([], allv or ex, ex, kwargs.pop("regime", None), [], {}, **kwargs)
+    return build_macro_report(
+        [], allv or ex, ex, kwargs.pop("regime", None), [], {}, as_of=AS_OF, **kwargs
+    )
 
 
 def _texts(report) -> list[str]:
@@ -398,7 +404,7 @@ def test_build_macro_report_passes_through_stats_timeline_and_counts():
     ]
     tl = [TimelinePoint(date(2024, 1, 5), 0.1, 3)]
 
-    report = build_macro_report(events, allv, ex, None, tl, {})
+    report = build_macro_report(events, allv, ex, None, tl, {}, as_of=AS_OF)
 
     assert report.stats_all is allv
     assert report.stats_ex_earnings is ex
@@ -433,7 +439,7 @@ def test_build_macro_report_top_events_ranked_by_absolute_car_with_headlines():
     }
     ex = _stats()
 
-    report = build_macro_report(events, ex, ex, None, [], arts, top_n=2)
+    report = build_macro_report(events, ex, ex, None, [], arts, as_of=AS_OF, top_n=2)
 
     assert [t.date for t in report.top_events] == [d[1], d[2]]
     top = report.top_events[0]
@@ -456,7 +462,7 @@ def test_build_macro_report_end_to_end_with_compute_stats_has_findings():
     ex = compute_stats(events, exclude_near_earnings=True)
     allv = compute_stats(events, exclude_near_earnings=False)
 
-    report = build_macro_report(events, allv, ex, None, [], {})
+    report = build_macro_report(events, allv, ex, None, [], {}, as_of=AS_OF)
 
     assert all(isinstance(f, Finding) for f in report.headline_findings)
     reliab = [f for f in report.headline_findings if f.reliability]
@@ -475,7 +481,7 @@ def test_build_macro_report_events_sorted_ok_only_with_headline_mapping():
     arts = {d[0]: [_art(d[0], 0.1, "mild", 1), _art(d[0], -0.8, "big", 2)]}
     ex = _stats()
 
-    report = build_macro_report(events, ex, ex, None, [], arts, top_n=1)
+    report = build_macro_report(events, ex, ex, None, [], arts, as_of=AS_OF, top_n=1)
 
     assert [e.date for e in report.events] == [d[0], d[2]]
     assert report.events[0].headline == "big"  # most extreme story
@@ -582,3 +588,47 @@ def test_build_macro_report_findings_never_contain_bare_n_or_p_tokens():
     assert any(t.startswith("Across 29 news days") for t in texts)
     for text in texts:
         assert not BARE_SYMBOL.search(text), text
+
+
+@pytest.mark.parametrize(
+    ("day", "expected"),
+    [
+        (date(2026, 5, 31), date(2026, 2, 28)),
+        (date(2024, 5, 31), date(2024, 2, 29)),
+        (date(2026, 10, 15), date(2026, 7, 15)),
+        (date(2026, 1, 10), date(2025, 10, 10)),
+    ],
+)
+def test_months_before_three_months_clamps_to_month_end_and_crosses_years(day, expected):
+    assert months_before(day, 3) == expected
+
+
+def test_build_macro_report_top_events_keep_since_day_and_drop_the_day_before():
+    as_of = date(2026, 10, 15)
+    since = date(2026, 7, 15)
+    events = [
+        make_event(since - timedelta(days=1), 0.5, 0.20),  # biggest, but just outside
+        make_event(since, 0.5, 0.01),
+        make_event(since + timedelta(days=5), 0.5, -0.04),
+        make_event(as_of, 0.5, 0.02),
+    ]
+    ex = _stats()
+
+    report = build_macro_report(events, ex, ex, None, [], {}, as_of=as_of)
+
+    assert report.top_events_since == since
+    # ranking inside the window is unchanged: |car| descending
+    assert [t.date for t in report.top_events] == [since + timedelta(days=5), as_of, since]
+    assert len(report.events) == 4  # chart markers keep the full window
+
+
+def test_build_macro_report_all_events_older_than_window_gives_no_top_events_but_keeps_rest():
+    events = [make_event(date(2025, 1, 6) + timedelta(days=i), 0.5, 0.03) for i in range(3)]
+    ex = _stats()
+
+    report = build_macro_report(events, ex, ex, None, [], {}, as_of=date(2026, 10, 15))
+
+    assert report.top_events == []
+    assert len(report.events) == 3
+    assert report.stats_all is ex
+    assert report.events_total == 3

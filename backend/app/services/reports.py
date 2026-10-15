@@ -187,6 +187,7 @@ class TimelinePointOut(BaseModel):
 
 class MacroReportOut(BaseModel):
     top_events: list[TopEventOut]
+    top_events_since: date  # top_events only covers news days from this date on
     events: list[EventPointOut]
     headline_findings: list[FindingOut]
     primary_findings: list[FindingOut]

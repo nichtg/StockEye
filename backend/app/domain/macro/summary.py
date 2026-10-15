@@ -6,10 +6,15 @@ statistical symbols for sample size or probability. The raw p-value travels in
 over past news days, never a statement about today's price. Sentences say "On average" or
 "Across N news days studied" and carry the day count. The counts are the sessions the study
 selected (at most one per 6 trading days, earnings-excluded in that scope), hence "studied".
+
+Only the "biggest news days" list is limited to the past ``TOP_EVENTS_MONTHS`` months, so it
+shows what is recent. Statistics, findings, regime, timeline and the chart's ``events`` keep the
+full study window.
 """
 
 from __future__ import annotations
 
+import calendar
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -30,6 +35,7 @@ from app.domain.macro.sentiment_stats import (
 Scope = Literal["all_events", "excluding_earnings"]
 
 MAX_HEADLINES = 3
+TOP_EVENTS_MONTHS = 3  # the biggest-news-days list only looks this far back
 MIN_LINK = 0.1  # |rank correlation| below this is described as no clear link
 VERY_OFTEN_AT = 95  # "in 100" figure from which chance is described as "very often"
 PRE_MOVE_CAVEAT = 0.01  # a mean pre-event move this large (1%) gets a caveat sentence
@@ -79,7 +85,8 @@ class Finding:
 
 @dataclass(frozen=True)
 class MacroReport:
-    top_events: list[TopEvent]
+    top_events: list[TopEvent]  # only news days on or after ``top_events_since``
+    top_events_since: date  # first day the top-events list looks at
     events: list[EventPoint]  # every ok event with a car_0_1, sorted by date
     headline_findings: list[Finding]  # primary + regime, kept for compatibility
     primary_findings: list[Finding]  # shown first: ex-earnings scope (or the only scope)
@@ -273,12 +280,25 @@ def _regime_finding(regime: Regime) -> Finding:
     )
 
 
+def months_before(day: date, months: int) -> date:
+    """``day`` minus whole calendar months, clamped to the end of a shorter month.
+
+    31 May minus 3 months is 28 (or 29) February, never an invalid date.
+    """
+    total = day.year * 12 + (day.month - 1) - months
+    year, month = divmod(total, 12)
+    month += 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
+
+
 def _top_events(
     events: Sequence[EventResult],
     session_articles: Mapping[date, Sequence[ScoredArticle]],
     top_n: int,
+    since: date,
 ) -> list[TopEvent]:
-    usable = [e for e in events if e.status == "ok" and e.car_0_1 is not None]
+    # The window applies before ranking, so a big old move never crowds out recent ones.
+    usable = [e for e in events if e.status == "ok" and e.car_0_1 is not None and e.date >= since]
     usable.sort(key=lambda e: (-abs(e.car_0_1 or 0.0), e.date))
     out: list[TopEvent] = []
     for e in usable[:top_n]:
@@ -357,6 +377,7 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
     timeline: Sequence[TimelinePoint],
     session_articles: Mapping[date, Sequence[ScoredArticle]],
     *,
+    as_of: date,
     top_n: int = 10,
 ) -> MacroReport:
     """Combine events, statistics and context into the report shown to the user.
@@ -367,7 +388,12 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
     emitted, named "all_events", and ``secondary_scope`` is None. ``headline_findings`` is
     primary plus the regime line. ``earnings_note`` is set only when both scopes exist and the
     effect is clear with earnings days included but not without them (see ``_earnings_note``).
+
+    ``as_of`` is the date of the last session in the stock's daily price data. Only
+    ``top_events`` is limited, to the past ``TOP_EVENTS_MONTHS`` months up to ``as_of``
+    (``top_events_since``); ``events``, statistics, findings, regime and timeline are not.
     """
+    since = months_before(as_of, TOP_EVENTS_MONTHS)
     primary = _scope_findings(stats_ex_earnings)
     primary_scope: Scope = "excluding_earnings"
     secondary: list[Finding] = []
@@ -383,7 +409,8 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
     if regime is not None:
         headline.append(_regime_finding(regime))
     return MacroReport(
-        top_events=_top_events(events, session_articles, top_n),
+        top_events=_top_events(events, session_articles, top_n, since),
+        top_events_since=since,
         events=_event_points(events, session_articles),
         headline_findings=headline,
         primary_findings=primary,

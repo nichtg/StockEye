@@ -103,6 +103,7 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
     symbol: 'AAPL',
     name: 'Apple Inc.',
     report: {
+      top_events_since: '2025-11-12',
       top_events: [
         {
           date: '2026-02-12',

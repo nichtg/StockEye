@@ -6,7 +6,7 @@ import Tooltip from '@mui/material/Tooltip';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { RangeKey } from '../../api/types';
 import { radius } from '../../theme/tokens';
-import { INDICATORS, vwapVariant, type IndicatorId } from './indicators';
+import { INDICATORS, type IndicatorId } from './indicators';
 import { RANGES } from './useChartSettings';
 
 /**
@@ -146,39 +146,33 @@ export function ChartToolbar({
       <ChipRow>
         {INDICATORS.map((ind) => {
           const on = selection.includes(ind.id);
-          const chip = (
-            <Chip
-              key={ind.id}
-              label={ind.label}
-              clickable
-              size="small"
-              variant={on ? 'filled' : 'outlined'}
-              aria-pressed={on}
-              onClick={() => {
-                onToggleIndicator(ind.id);
-              }}
-              sx={{
-                borderRadius: '999px',
-                height: 28,
-                px: 0.5,
-                fontSize: '0.8125rem',
-                ...(on
-                  ? {
-                      bgcolor: 'ink',
-                      color: 'bg',
-                      borderColor: 'ink',
-                      '&:hover': { bgcolor: 'ink2' },
-                    }
-                  : { bgcolor: 'transparent', color: 'ink2', borderColor: 'line' }),
-              }}
-            />
-          );
-          return ind.id === 'vwap' ? (
-            <Tooltip key={ind.id} title={vwapVariant(range).hint} describeChild>
-              {chip}
+          return (
+            <Tooltip key={ind.id} title={ind.hint(range)} describeChild>
+              <Chip
+                label={ind.label}
+                clickable
+                size="small"
+                variant={on ? 'filled' : 'outlined'}
+                aria-pressed={on}
+                onClick={() => {
+                  onToggleIndicator(ind.id);
+                }}
+                sx={{
+                  borderRadius: '999px',
+                  height: 28,
+                  px: 0.5,
+                  fontSize: '0.8125rem',
+                  ...(on
+                    ? {
+                        bgcolor: 'ink',
+                        color: 'bg',
+                        borderColor: 'ink',
+                        '&:hover': { bgcolor: 'ink2' },
+                      }
+                    : { bgcolor: 'transparent', color: 'ink2', borderColor: 'line' }),
+                }}
+              />
             </Tooltip>
-          ) : (
-            chip
           );
         })}
       </ChipRow>
