@@ -310,3 +310,15 @@ async def test_lists_missing_tuesdays_run_say_they_are_old(
 
     assert page.lists
     assert page.data_status.state == "stale"
+
+
+async def test_a_marker_older_than_six_hours_no_longer_blocks_the_startup_build(
+    services: Services, db: Database, clock: FakeClock
+) -> None:
+    await services.discover.refresh()
+    await db[COLLECTION].delete_one({"key": CACHE_KEY})
+    assert not await services.discover.needs_startup_build()
+
+    clock.now += timedelta(hours=7)
+
+    assert await services.discover.needs_startup_build()

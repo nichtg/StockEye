@@ -207,3 +207,23 @@ async def test_try_consume_scheduled_calls_stop_at_their_minute_share(
     assert [d.allowed for d in scheduled] == [True] * 7 + [False] * 2  # 70% of 10
     assert [d.allowed for d in interactive] == [True] * 3 + [False]  # the other 30% is theirs
     assert scheduled[-1].window_blocked == "minute"
+
+
+async def test_throttle_log_names_priority_and_cap_and_keeps_one_flag_per_priority(
+    ledger: QuotaLedger,
+) -> None:
+    limits = ProviderLimits(per_minute=10, per_day=100)
+
+    with capture_logs() as logs:
+        for _ in range(8):  # scheduled stops at 7 (70%); the 8th is blocked
+            await ledger.try_consume("p", limits, NOW, "scheduled")
+        for _ in range(3):  # interactive then spends the other 3
+            await ledger.try_consume("p", limits, NOW, "interactive")
+        await ledger.try_consume("p", limits, NOW, "interactive")  # a real interactive block
+        await ledger.try_consume("p", limits, NOW, "interactive")  # same minute: not logged again
+
+    throttled = _events(logs, "provider_rate_throttled")
+    assert [(e["priority"], e["cap_applied"]) for e in throttled] == [
+        ("scheduled", 7),
+        ("interactive", 10),
+    ]

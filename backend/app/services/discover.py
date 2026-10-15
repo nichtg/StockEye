@@ -151,7 +151,10 @@ class DiscoverService:
 
     async def needs_startup_build(self) -> bool:
         """True when nothing is stored and no build was attempted lately (crash-loop guard)."""
-        return await self._stored() is None and await self._cache.lookup(ATTEMPT_KEY) is None
+        if await self._stored() is not None:
+            return False
+        marker = await self._cache.lookup(ATTEMPT_KEY)  # also returns expired entries
+        return marker is None or not marker.is_fresh(self._clock())
 
     async def current_symbols(self) -> set[str]:
         """Every symbol on the stored page (so pruning keeps what Discover still shows)."""

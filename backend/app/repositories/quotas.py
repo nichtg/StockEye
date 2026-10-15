@@ -94,11 +94,14 @@ class QuotaLedger:
         )
         if minute_doc is None:
             retry_at = minute + timedelta(minutes=1)
-            if await self._flag_once(provider, "minute", minute, "blocked_logged"):
+            # One flag per priority: a scheduled block must not hide a real interactive one.
+            if await self._flag_once(provider, "minute", minute, f"blocked_logged_{priority}"):
                 log.warning(
                     "provider_rate_throttled",
                     provider=provider,
+                    priority=priority,
                     limit_per_minute=limits.per_minute,
+                    cap_applied=minute_cap(limits.per_minute, priority),
                     retry_at=retry_at.isoformat(),
                 )
             return QuotaDecision(
