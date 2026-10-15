@@ -1,22 +1,22 @@
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
-import Link from '@mui/material/Link';
 import Toolbar from '@mui/material/Toolbar';
-import Typography from '@mui/material/Typography';
-import { Suspense } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { Outlet } from 'react-router';
 import { useMe } from '../features/auth/useAuth';
 import { SearchBox } from '../features/search/SearchBox';
 import { layout } from '../theme/tokens';
 import { AccountMenu } from './AccountMenu';
 import { PageSkeleton } from './PageSkeleton';
+import { SiteFooter } from './SiteFooter';
 import { ThemeToggle } from './ThemeToggle';
 import { Wordmark } from './Wordmark';
 
 export const MAIN_ID = 'main-content';
 const gutter = { xs: 2, md: 3 };
 
-export function AppShell() {
+/** Signed-in frame. Routes render through the outlet; a parent that is not a route passes children. */
+export function AppShell({ children }: { children?: ReactNode }) {
   const me = useMe();
   const user = me.data;
 
@@ -79,27 +79,10 @@ export function AppShell() {
           outline: 'none',
         }}
       >
-        <Suspense fallback={<PageSkeleton />}>
-          <Outlet />
-        </Suspense>
+        <Suspense fallback={<PageSkeleton />}>{children ?? <Outlet />}</Suspense>
       </Box>
 
-      <Box component="footer" sx={{ borderTop: 1, borderColor: 'line', px: gutter, py: 3 }}>
-        <Typography
-          variant="body2"
-          sx={{ color: 'ink3', maxWidth: layout.columnWidth - 48, mx: 'auto' }}
-        >
-          StockEye is an analysis tool, not investment advice. Data may be delayed.{' '}
-          <Link
-            href="https://www.tradingview.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            sx={{ color: 'inherit', textDecorationColor: 'currentColor' }}
-          >
-            Charts by TradingView
-          </Link>
-        </Typography>
-      </Box>
+      <SiteFooter />
     </Box>
   );
 }
