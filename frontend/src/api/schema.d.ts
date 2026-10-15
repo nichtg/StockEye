@@ -439,6 +439,10 @@ export interface components {
       p_value: number | null;
       /** Label */
       label: ('clear_effect' | 'possible_effect' | 'no_clear_effect') | null;
+      /** Ci Low 0 1 */
+      ci_low_0_1?: number | null;
+      /** Ci High 0 1 */
+      ci_high_0_1?: number | null;
     };
     /** Candle */
     Candle: {
@@ -695,6 +699,10 @@ export interface components {
       events_insufficient: number;
       /** Earnings Note */
       earnings_note?: string | null;
+      /** Verdicts */
+      verdicts: components['schemas']['VerdictOut'][];
+      /** Value Statement */
+      value_statement: string;
     };
     /** MacroResponse */
     MacroResponse: {
@@ -1148,6 +1156,28 @@ export interface components {
       input?: unknown;
       /** Context */
       ctx?: Record<string, never>;
+    };
+    /**
+     * VerdictOut
+     * @description One plain question with a one-word answer chip and one supporting sentence.
+     */
+    VerdictOut: {
+      /**
+       * Id
+       * @enum {string}
+       */
+      id: 'good_news' | 'bad_news' | 'overall';
+      /** Question */
+      question: string;
+      /** Answer */
+      answer: string;
+      /**
+       * Answer Kind
+       * @enum {string}
+       */
+      answer_kind: 'clear' | 'possible' | 'none' | 'opposite' | 'insufficient';
+      /** Detail */
+      detail: string;
     };
     /** WatchlistOut */
     WatchlistOut: {
