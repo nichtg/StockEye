@@ -1,0 +1,85 @@
+import Check from '@mui/icons-material/Check';
+import Box from '@mui/material/Box';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import Typography from '@mui/material/Typography';
+import { useId } from 'react';
+import { countSx, type Choice } from './Choice';
+
+/**
+ * A non-native single-choice menu in the app's look: static label above the field, ink-toned
+ * highlight, a check on the chosen item, counts right-aligned. The first item is the "all" /
+ * default entry and carries a bottom border as its divider (a Divider child would become a
+ * bogus, clickable option).
+ */
+export function ThemedSelect({
+  label,
+  choices,
+  value,
+  onChange,
+  minWidth,
+}: {
+  label: string;
+  choices: Choice[];
+  value: string;
+  onChange: (value: string) => void;
+  minWidth: number;
+}) {
+  const labelId = useId();
+  const current = choices.find((c) => c.value === value);
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.5 }}>
+      <Typography
+        id={labelId}
+        component="span"
+        variant="caption"
+        sx={{ color: 'ink2', fontWeight: 500 }}
+      >
+        {label}
+      </Typography>
+      <Select
+        size="small"
+        displayEmpty
+        labelId={labelId}
+        value={value}
+        renderValue={() => current?.label ?? value}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
+        MenuProps={{ slotProps: { paper: { sx: { maxHeight: 360, minWidth } } } }}
+        sx={{ minWidth }}
+      >
+        {choices.map((c, i) => (
+          <MenuItem
+            key={c.value}
+            value={c.value}
+            sx={{
+              gap: 1,
+              ...(i === 0 && { borderBottom: 1, borderColor: 'line', mb: 0.5 }),
+              '&.Mui-selected, &.Mui-selected:hover, &.Mui-selected.Mui-focusVisible': {
+                backgroundColor: 'raised',
+                color: 'ink',
+                fontWeight: 600,
+              },
+            }}
+          >
+            <Check
+              fontSize="small"
+              aria-hidden="true"
+              sx={{ visibility: c.value === value ? 'visible' : 'hidden', flexShrink: 0 }}
+            />
+            <Box component="span" sx={{ flexGrow: 1 }}>
+              {c.label}
+            </Box>
+            {c.count !== undefined && (
+              <Box component="span" sx={{ ml: 2, ...countSx }}>
+                {c.count}
+              </Box>
+            )}
+          </MenuItem>
+        ))}
+      </Select>
+    </Box>
+  );
+}
