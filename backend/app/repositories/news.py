@@ -80,16 +80,27 @@ async def install_indexes(db: Database) -> None:
     await db[STATE].create_index("symbol", unique=True, name="symbol_unique")
 
 
-def _recent_query(symbol: str, since: datetime, after: tuple[datetime, str] | None) -> Document:
-    """The exact filter ``NewsRepository.recent`` runs (shared so tests can explain it)."""
+def _recent_query(
+    symbol: str,
+    since: datetime,
+    after: tuple[datetime, str] | None,
+    until: datetime | None = None,
+) -> Document:
+    """The exact filter ``NewsRepository.recent`` runs (shared so tests can explain it).
+
+    ``until`` is an exclusive upper bound (the end of a month filter); a cursor can never
+    widen the window past it.
+    """
     query: Document = {
         "symbols": symbol,
         "url": {"$regex": "^https?://"},
         "published_at": {"$gte": since},
     }
+    if until is not None:
+        query["published_at"]["$lt"] = until
     if after is not None:
         moment, key = after
-        query["published_at"] = {"$gte": since, "$lte": moment}
+        query["published_at"]["$lte"] = moment
         query["$or"] = [{"published_at": {"$lt": moment}}, {"dedupe_key": {"$lt": key}}]
     return query
 
@@ -189,6 +200,7 @@ class NewsRepository:
         since: datetime,
         after: tuple[datetime, str] | None,
         limit: int,
+        until: datetime | None = None,
     ) -> list[RecentArticle]:
         """Up to ``limit + 1`` articles, newest first (the extra row says "more exist").
 
@@ -199,7 +211,7 @@ class NewsRepository:
         links are returned. The ``symbols_published`` index serves the match; the
         ``dedupe_key`` tiebreak adds an in-memory SORT, which is fine at per-symbol volumes.
         """
-        query = _recent_query(symbol, since, after)
+        query = _recent_query(symbol, since, after, until)
         cursor = self._articles.find(
             query,
             {"title": 1, "url": 1, "source": 1, "published_at": 1, "sentiment": 1, "dedupe_key": 1},
@@ -217,6 +229,18 @@ class NewsRepository:
             )
             async for doc in cursor
         ]
+
+    async def window_titles(self, symbol: str, since: datetime) -> list[tuple[datetime, str]]:
+        """``(published_at, title)`` of every showable article with ``published_at >= since``.
+
+        Feeds the News tab's per-month counts. Mongo cannot apply the Python price-recap
+        rule, so the caller counts. Cost: a two-field projection, a few thousand titles at
+        most per symbol over six months.
+        """
+        cursor = self._articles.find(
+            _recent_query(symbol, since, None), {"title": 1, "published_at": 1}
+        )
+        return [(doc["published_at"], doc["title"]) async for doc in cursor]
 
     # --- ingestion state -------------------------------------------------------------------
 

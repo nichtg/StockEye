@@ -114,6 +114,10 @@ async def news_articles(
         str | None, Query(max_length=300, description="Cursor from next_cursor")
     ] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+    month: Annotated[
+        str | None,
+        Query(max_length=7, description="Exchange-local month YYYY-MM within the six months"),
+    ] = None,
 ) -> NewsArticlesOut:
     """Stored news from the past six months, newest first. Read-only: never starts collection."""
-    return await services.news_feed.page(symbol, before, limit)
+    return await services.news_feed.page(symbol, before, limit, month)
