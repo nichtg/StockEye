@@ -48,6 +48,16 @@ def reliability_label(p: float) -> Reliability:
     return "no_clear_effect"
 
 
+def shown_in_100(p: float) -> int:
+    """The "about X in 100" figure shown to users: p rounded to whole percent, at least 1."""
+    return max(1, round(p * 100))
+
+
+def shown_label(p: float) -> Reliability:
+    """Reliability label of the *rounded* figure, so every surface shows the same label."""
+    return reliability_label(shown_in_100(p) / 100)
+
+
 @dataclass(frozen=True)
 class Correlation:
     """Spearman rank correlation of sentiment with car_0_1 over ``n`` events."""
@@ -76,7 +86,9 @@ class BucketStats:
     p_value: float | None = None
     label: Reliability | None = None
     # 95% confidence interval of mean_car_0_1 from the same one-sample t model and the same
-    # min_n / spread gate as ``t`` and ``p_value`` (excludes zero exactly when p < 0.05).
+    # min_n / spread gate as ``t`` and ``p_value``. ``label`` comes from the p-value rounded to
+    # whole percent (``shown_label``), so in the narrow 0.045-0.05 band the interval can
+    # exclude zero while the label reads "possible_effect".
     ci_low_0_1: float | None = None
     ci_high_0_1: float | None = None
 
@@ -153,7 +165,7 @@ def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> 
         n_car_pre_5=len(pre),
         t=None if test is None else test[0],
         p_value=None if test is None else test[1],
-        label=None if test is None else reliability_label(test[1]),
+        label=None if test is None else shown_label(test[1]),
         ci_low_0_1=None if test is None else test[2],
         ci_high_0_1=None if test is None else test[3],
     )
@@ -180,7 +192,7 @@ def _difference(pos: list[float], neg: list[float], min_n: int) -> Difference | 
         mean_diff=float(np.mean(pos) - np.mean(neg)),
         t=t,
         p_value=p,
-        label=reliability_label(p),
+        label=shown_label(p),
         n_pos=len(pos),
         n_neg=len(neg),
     )

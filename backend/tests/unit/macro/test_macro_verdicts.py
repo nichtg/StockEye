@@ -12,6 +12,7 @@ from app.domain.macro import (
     compute_stats,
     reliability_label,
 )
+from app.domain.macro.sentiment_stats import shown_label
 from app.services import analysis
 
 AS_OF = date(2026, 10, 1)
@@ -145,7 +146,7 @@ def test_verdicts_report_has_three_in_order_and_value_statement() -> None:
         (0.012, 0.1, "possible", "Possibly"),
         (0.012, 0.6, "none", "Not clearly"),
         (-0.012, 0.01, "opposite", "No, the opposite"),
-        (-0.012, 0.1, "opposite", "No, the opposite"),
+        (-0.012, 0.1, "none", "Not clearly"),  # a possible effect the wrong way is not claimed
     ],
 )
 def test_good_news_verdict_kind_follows_sign_and_reliability(
@@ -165,6 +166,7 @@ def test_good_news_verdict_kind_follows_sign_and_reliability(
         (-0.012, 0.1, "possible"),
         (-0.012, 0.6, "none"),
         (0.012, 0.01, "opposite"),
+        (0.012, 0.1, "none"),
     ],
 )
 def test_bad_news_verdict_is_sign_aware(mean: float, p: float, kind: str) -> None:
@@ -226,19 +228,28 @@ def test_overall_verdict_possible_difference_is_possibly() -> None:
     assert v.detail.endswith("A gap this size could still happen by chance.")
 
 
-def test_overall_verdict_no_clear_difference_says_about_the_same() -> None:
+def test_overall_verdict_no_clear_difference_uses_the_same_sentence_with_chance() -> None:
     stats = _stats(_bucket("positive", 17, 0.01), _bucket("negative", 17, -0.01), _diff(0.6, 0.002))
 
     v = _verdicts(stats)["overall"]
 
     assert v.answer_kind == "none"
     assert v.detail == (
-        "Positive-news and negative-news days moved about the same against the market; "
-        "any gap could easily be chance."
+        "On average, positive-news days did 0.2% better than negative-news days over 2 days, "
+        "compared with what the market predicted. A gap this size often happens by chance."
     )
 
 
-def test_overall_verdict_reversed_difference_is_opposite() -> None:
+def test_overall_verdict_zero_gap_says_about_the_same() -> None:
+    stats = _stats(_bucket("positive", 17, 0.0), _bucket("negative", 17, 0.0), _diff(0.6, 0.0001))
+
+    assert _verdicts(stats)["overall"].detail == (
+        "On average, positive-news days did about the same as negative-news days over 2 days, "
+        "compared with what the market predicted. A gap this size often happens by chance."
+    )
+
+
+def test_overall_verdict_clear_reversed_difference_is_opposite() -> None:
     stats = _stats(
         _bucket("positive", 17, -0.01), _bucket("negative", 17, 0.01), _diff(0.01, -0.02)
     )
@@ -247,9 +258,38 @@ def test_overall_verdict_reversed_difference_is_opposite() -> None:
 
     assert v.answer_kind == "opposite"
     assert v.detail == (
-        "Positive-news days did 2.0% worse than negative-news days on average over 2 days, "
-        "the reverse of what the news suggested."
+        "On average, positive-news days did 2.0% worse than negative-news days over 2 days, "
+        "compared with what the market predicted. A gap this size rarely happens by chance."
     )
+
+
+def test_overall_verdict_possible_reversed_difference_is_none() -> None:
+    stats = _stats(_bucket("positive", 17, -0.01), _bucket("negative", 17, 0.01), _diff(0.1, -0.02))
+
+    assert _verdicts(stats)["overall"].answer_kind == "none"
+
+
+def test_bucket_verdict_move_rounding_to_zero_says_too_small_to_matter() -> None:
+    stats = _stats(_bucket("positive", 17, 0.0002, 0.01), _bucket("negative", 17, -0.01))
+
+    assert _verdicts(stats)["good_news"].detail.endswith("That is too small to matter.")
+
+
+def test_bucket_and_difference_labels_use_the_shown_rounded_p() -> None:
+    # p = 0.046 shows as "5 in 100", which the findings call possible, so the stored label too.
+    cars = [0.001 * i for i in range(12)]
+    events = [
+        make_event(date(2025, 1, 6) + timedelta(days=10 * i), 0.5, c) for i, c in enumerate(cars)
+    ]
+    b = compute_stats(events, exclude_near_earnings=False).buckets["positive"]
+
+    assert b.p_value is not None
+    assert b.label == shown_label(b.p_value)
+
+
+def test_shown_label_in_the_045_to_05_band_reads_possible() -> None:
+    assert shown_label(0.046) == "possible_effect"
+    assert reliability_label(0.046) == "clear_effect"
 
 
 def test_overall_verdict_clear_gap_rounding_to_zero_is_none_not_opposite() -> None:

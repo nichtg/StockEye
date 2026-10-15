@@ -59,12 +59,13 @@ def _kind(label: Reliability, seen: Direction, expected: Direction) -> AnswerKin
     """Answer kind for a tested effect.
 
     No clear effect, or an effect that rounds to 0.0%, is "none"; only then is the direction
-    compared with the expected one, and a clear or possible effect the wrong way is "opposite".
+    compared with the expected one, and only a clear effect the wrong way is "opposite".
     """
     if label == "no_clear_effect" or seen == 0:
         return "none"
     if seen != expected:
-        return "opposite"
+        # Only a clear effect the wrong way earns "opposite"; a possible one is not claimed.
+        return "opposite" if label == "clear_effect" else "none"
     return "clear" if label == "clear_effect" else "possible"
 
 
@@ -82,9 +83,13 @@ def _bucket_verdict(
         return Verdict(vid, question, ANSWERS["insufficient"], "insufficient", detail)
     label = shown_label(b.p_value)
     kind = _kind(label, direction(b.mean_car_0_1), expected)
+    # A move that rounds to 0.0% is too small to matter, whatever its chance figure says.
+    chance = (
+        "That is too small to matter." if direction(b.mean_car_0_1) == 0 else _MOVE_CHANCE[label]
+    )
     detail = (
         f"On average {pct_signed(b.mean_car_0_1)} versus what the market predicted over 2 days, "
-        f"across {_days(b.n, what)}. {_MOVE_CHANCE[label]}"
+        f"across {_days(b.n, what)}. {chance}"
     )
     return Verdict(vid, question, ANSWERS[kind], kind, detail)
 
@@ -101,22 +106,16 @@ def _overall_verdict(stats: MacroStats) -> Verdict:
         return Verdict("overall", question, ANSWERS["insufficient"], "insufficient", detail)
     label = shown_label(diff.p_value)
     kind = _kind(label, direction(diff.mean_diff), 1)
-    if kind in ("clear", "possible"):
-        detail = (
-            f"On average, positive-news days did {pct_abs(diff.mean_diff)} better than "
-            "negative-news days over 2 days, compared with what the market predicted. "
-            f"{_GAP_CHANCE[label]}"
-        )
-    elif kind == "opposite":
-        detail = (
-            f"Positive-news days did {pct_abs(diff.mean_diff)} worse than negative-news days "
-            "on average over 2 days, the reverse of what the news suggested."
-        )
-    else:
-        detail = (
-            "Positive-news and negative-news days moved about the same against the market; "
-            "any gap could easily be chance."
-        )
+    sign = direction(diff.mean_diff)
+    how = (
+        "about the same as"
+        if sign == 0
+        else f"{pct_abs(diff.mean_diff)} {'better' if sign > 0 else 'worse'} than"
+    )
+    detail = (
+        f"On average, positive-news days did {how} negative-news days over 2 days, "
+        f"compared with what the market predicted. {_GAP_CHANCE[label]}"
+    )
     return Verdict("overall", question, ANSWERS[kind], kind, detail)
 
 

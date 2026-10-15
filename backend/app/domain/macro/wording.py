@@ -4,9 +4,19 @@ from __future__ import annotations
 
 from typing import Literal
 
-from app.domain.macro.sentiment_stats import Reliability, reliability_label
+from app.domain.macro.sentiment_stats import shown_in_100, shown_label
 
 Direction = Literal[-1, 0, 1]
+__all__ = [
+    "VERY_OFTEN_AT",
+    "Direction",
+    "direction",
+    "pct_abs",
+    "pct_signed",
+    "shown_in_100",
+    "shown_label",
+]
+
 VERY_OFTEN_AT = 95  # "in 100" figure from which chance is described as "very often"
 
 
@@ -25,13 +35,3 @@ def pct_signed(x: float) -> str:
     """Percentage with an explicit sign ("+1.0%", "-0.4%"; no sign when it rounds to 0.0%)."""
     sign = {1: "+", -1: "-", 0: ""}[direction(x)]
     return f"{sign}{abs(round(x * 100, 1)):.1f}%"
-
-
-def shown_in_100(p: float) -> int:
-    """The "about X in 100" figure shown to users: p rounded to whole percent, at least 1."""
-    return max(1, round(p * 100))
-
-
-def shown_label(p: float) -> Reliability:
-    """Reliability label of the *rounded* figure, so chips and Details text never disagree."""
-    return reliability_label(shown_in_100(p) / 100)
