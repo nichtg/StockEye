@@ -102,9 +102,10 @@ function changeText(stock: StockOut): string {
 /** Sector, industry and country as quiet separate items; the line's height is reserved so nothing shifts. */
 function ProfileLine({ symbol }: { symbol: string }) {
   const profile = useProfile(symbol).data;
-  const items = [profile?.sector, profile?.industry, profile?.country].filter(
-    (v): v is string => !!v,
-  );
+  const items = (['sector', 'industry', 'country'] as const).flatMap((field) => {
+    const value = profile?.[field];
+    return value ? [{ field, value }] : [];
+  });
   return (
     <Box
       sx={{
@@ -117,8 +118,8 @@ function ProfileLine({ symbol }: { symbol: string }) {
       }}
     >
       {items.map((item) => (
-        <Typography key={item} variant="body2" component="span" sx={{ color: 'inherit' }}>
-          {item}
+        <Typography key={item.field} variant="body2" component="span" sx={{ color: 'inherit' }}>
+          {item.value}
         </Typography>
       ))}
     </Box>

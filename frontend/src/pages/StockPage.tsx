@@ -95,7 +95,7 @@ export default function StockPage() {
           // Three labels are wider than a phone: the track scrolls sideways instead of the page.
           variant="scrollable"
           scrollButtons={false}
-          sx={{ mb: { xs: 4, md: 5 }, maxWidth: 'min(100%, fit-content)' }}
+          sx={{ mb: { xs: 4, md: 5 }, width: 'fit-content', maxWidth: '100%' }}
         >
           {/* aria-controls may only name a panel that exists, and only the active one is rendered. */}
           <Tab

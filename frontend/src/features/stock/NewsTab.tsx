@@ -4,11 +4,12 @@ import Chip from '@mui/material/Chip';
 import Link from '@mui/material/Link';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
-import { useMemo } from 'react';
+import { useEffect, useId, useMemo, useRef } from 'react';
 import { userMessage } from '../../api/errors';
 import type { NewsArticle, NewsProgress } from '../../api/types';
 import { ErrorState } from '../../components/ErrorState';
 import { Term } from '../../components/Term';
+import { visuallyHidden } from '../../lib/a11y';
 import type { Exchange } from '../../lib/exchange';
 import { exchangeDay, formatClock, formatDate } from '../../lib/format';
 import { DataStatusLine } from './StockHeader';
@@ -115,6 +116,8 @@ const skeleton = (
   </Box>
 );
 
+const MAX_AUTO_FETCHES = 3;
+
 interface Props {
   symbol: string;
   name: string | undefined;
@@ -124,10 +127,28 @@ interface Props {
 }
 
 export function NewsTab({ symbol, name, exchange, news }: Props) {
-  const query = useNewsArticles(symbol, news);
+  const query = useNewsArticles(symbol);
+  const headingId = useId();
   const pages = query.data?.pages;
   const articles = useMemo(() => pages?.flatMap((p) => p.articles) ?? [], [pages]);
   const days = useMemo(() => groupByDay(articles, exchange), [articles, exchange]);
+
+  // A page may be short or even empty while a cursor remains (the server filters after paging),
+  // so keep going a few times before handing the choice to the user.
+  const autoFetches = useRef(0);
+  const last = pages?.[pages.length - 1];
+  const emptyTail = !!last && last.articles.length === 0;
+  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = query;
+  useEffect(() => {
+    if (!emptyTail) {
+      autoFetches.current = 0;
+      return;
+    }
+    if (!hasNextPage || isFetchingNextPage || isFetchNextPageError) return;
+    if (autoFetches.current >= MAX_AUTO_FETCHES) return;
+    autoFetches.current += 1;
+    void fetchNextPage();
+  }, [emptyTail, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage, pages]);
 
   if (query.isError && !pages) {
     return (
@@ -144,18 +165,25 @@ export function NewsTab({ symbol, name, exchange, news }: Props) {
     <Box>
       <Typography sx={{ color: 'ink2', mb: 2, maxWidth: 720 }}>
         News about {name ?? symbol} from the past 6 months, newest first. Headlines that only report
-        a price move are left out. <Term id="news_sentiment">What the labels mean</Term>
+        a price move are left out.{' '}
+        <Term id="news_sentiment" label="a sentiment label">
+          How the labels work
+        </Term>
+      </Typography>
+      <Typography id={headingId} variant="h2" component="h2" sx={visuallyHidden}>
+        Articles
       </Typography>
       <Collecting progress={news} />
       <DataStatusLine statuses={[pages[0]?.status]} />
 
-      {articles.length === 0 ? (
+      {articles.length === 0 && !query.hasNextPage ? (
         <Typography>No news found for the past 6 months yet.</Typography>
       ) : (
         <>
           {days.map((d) => (
-            <Box key={d.day} component="section" aria-label={formatDate(d.day, exchange)}>
+            <Box key={d.day} component="section" aria-labelledby={`${headingId}-${d.day}`}>
               <Typography
+                id={`${headingId}-${d.day}`}
                 variant="h3"
                 component="h3"
                 sx={{ mt: 3, mb: 0.5, fontSize: '0.9375rem' }}

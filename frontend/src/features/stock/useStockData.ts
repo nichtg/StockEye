@@ -52,18 +52,11 @@ export function useProfile(symbol: string) {
 
 /**
  * The News tab's articles, newest first, one cursor page at a time. Reads only: collection is
- * started by useNewsProgress. When that poller reports a new month or update, the loaded pages
- * are refetched, so the list never lags behind what has been collected.
+ * started by useNewsProgress, which also refetches these pages as months land.
  */
-export function useNewsArticles(
-  symbol: string,
-  progress: NewsProgress | undefined,
-  enabled = true,
-) {
-  const client = useQueryClient();
-  const query = useInfiniteQuery({
+export function useNewsArticles(symbol: string) {
+  return useInfiniteQuery({
     queryKey: newsArticlesKey(symbol),
-    enabled,
     initialPageParam: undefined as string | undefined,
     queryFn: ({ signal, pageParam }) =>
       api.get<NewsArticlesPage>(`/stocks/${encodeURIComponent(symbol)}/news/articles`, {
@@ -72,19 +65,6 @@ export function useNewsArticles(
       }),
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
-
-  const seen = useRef<{ symbol: string; marker: string } | undefined>(undefined);
-  const marker = progress ? `${String(progress.months_done)}|${progress.updated_at ?? ''}` : null;
-  useEffect(() => {
-    if (marker === null) return;
-    const before = seen.current;
-    seen.current = { symbol, marker };
-    // The first answer for a stock is a baseline, never a change.
-    if (before?.symbol !== symbol || before.marker === marker) return;
-    void client.invalidateQueries({ queryKey: newsArticlesKey(symbol) });
-  }, [marker, symbol, client]);
-
-  return query;
 }
 
 /** Every indicator is fetched with the bars, so toggling one never refetches or discards the chart. */
@@ -149,6 +129,7 @@ export function useNewsProgress(symbol: string) {
     const finished = before.inProgress && !data.in_progress;
     if (finished || data.months_done > before.monthsDone) {
       void client.invalidateQueries({ queryKey: macroKey(symbol) });
+      void client.invalidateQueries({ queryKey: newsArticlesKey(symbol) });
     }
     // The backend rebuilds markers on every month, so refresh the chart once early, not each time.
     const firstDots =

@@ -24,6 +24,15 @@ function priceFormat(locale: string, currency: string): Intl.NumberFormat {
   return fmt;
 }
 
+/**
+ * Swaps the currency part for our own symbol when we have one ("S$" for SGD). Other currencies
+ * keep what Intl produced, and a code Intl rejects was already replaced by a bare number.
+ */
+function withCurrencySymbol(parts: Intl.NumberFormatPart[], code: string): string {
+  const symbol = CURRENCY_SYMBOLS[code];
+  return parts.map((p) => (p.type === 'currency' && symbol ? symbol : p.value)).join('');
+}
+
 /** "$333.69" for USD, "S$77.21" for SGD, in the exchange's number format. */
 export function formatPrice(
   value: number | null | undefined,
@@ -32,10 +41,7 @@ export function formatPrice(
 ): string {
   if (value == null) return '–';
   const code = currency ?? 'USD';
-  const parts = priceFormat(exchangeLocale(exchange), code).formatToParts(value);
-  const symbol = CURRENCY_SYMBOLS[code];
-  if (!symbol) return parts.map((p) => p.value).join('');
-  return parts.map((p) => (p.type === 'currency' ? symbol : p.value)).join('');
+  return withCurrencySymbol(priceFormat(exchangeLocale(exchange), code).formatToParts(value), code);
 }
 
 const numberFormats = new Map<string, Intl.NumberFormat>();
@@ -246,13 +252,10 @@ export function formatCompactCurrency(
       maximumFractionDigits: 1,
     });
   } catch {
+    // Intl rejects a code it doesn't know: show the bare compact number rather than fail.
     return formatVolume(value, exchange);
   }
-  const symbol = CURRENCY_SYMBOLS[code];
-  return fmt
-    .formatToParts(value)
-    .map((p) => (p.type === 'currency' && symbol ? symbol : p.value))
-    .join('');
+  return withCurrencySymbol(fmt.formatToParts(value), code);
 }
 
 /** A yield from a fraction: `0.0044` is "0.44%". */

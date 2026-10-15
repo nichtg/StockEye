@@ -3,7 +3,7 @@ import Button from '@mui/material/Button';
 import Link from '@mui/material/Link';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { Profile } from '../../api/types';
 import { SectionTitle } from '../../components/SectionTitle';
 import { Term } from '../../components/Term';
@@ -95,7 +95,7 @@ function Description({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const measure = () => {
@@ -103,9 +103,12 @@ function Description({ text }: { text: string }) {
       if (!expanded) setOverflows(el.scrollHeight > el.clientHeight + 1);
     };
     measure();
-    window.addEventListener('resize', measure);
+    // The width, and so the line count, changes with the layout, not only the window.
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
     return () => {
-      window.removeEventListener('resize', measure);
+      observer.disconnect();
     };
   }, [text, expanded]);
 

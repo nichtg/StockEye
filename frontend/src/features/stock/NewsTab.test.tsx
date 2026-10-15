@@ -53,14 +53,14 @@ describe('NewsTab', () => {
     // 02:30 UTC on Oct 4 is still Oct 3 in New York, so it joins the Oct 3 group.
     const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
     expect(headings).toEqual(['Sat, Oct 3, 2026', 'Thu, Oct 1, 2026']);
-    const first = screen.getByRole('region', { name: 'Oct 3, 2026' });
+    const first = screen.getByRole('region', { name: 'Sat, Oct 3, 2026' });
     expect(within(first).getAllByRole('listitem')).toHaveLength(2);
     expect(within(first).getByText('Negative')).toBeInTheDocument();
     expect(within(first).getByText('Positive')).toBeInTheDocument();
-    const second = screen.getByRole('region', { name: 'Oct 1, 2026' });
+    const second = screen.getByRole('region', { name: 'Thu, Oct 1, 2026' });
     expect(within(second).getByText('Neutral')).toBeInTheDocument();
     expect(within(second).getByText('Not scored yet')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'What is What the labels mean?' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'What is a sentiment label?' })).toBeVisible();
 
     const link = screen.getByRole('link', { name: 'Afternoon news' });
     expect(link).toHaveAttribute('href', 'https://example.com/a');
@@ -90,6 +90,33 @@ describe('NewsTab', () => {
     expect(screen.getByText('First page')).toBeInTheDocument();
     expect(seen.at(-1)?.search.get('before')).toBe('cursor-1');
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+  });
+
+  it('does not claim there is no news while an empty page still has a cursor', async () => {
+    const seen = stubFetch((req) => {
+      if (req.path !== '/stocks/AAPL/news/articles') return undefined;
+      return req.search.get('before') === 'c1'
+        ? { body: articlesPageFixture([articleFixture({ title: 'Found later' })]) }
+        : { body: articlesPageFixture([], 'c1') };
+    });
+    show();
+    expect(await screen.findByText('Found later')).toBeInTheDocument();
+    expect(screen.queryByText('No news found for the past 6 months yet.')).not.toBeInTheDocument();
+    expect(seen.filter((r) => r.path.endsWith('/articles'))).toHaveLength(2);
+  });
+
+  it('stops auto-fetching after a few empty pages and offers Load more', async () => {
+    const seen = stubFetch((req) =>
+      req.path === '/stocks/AAPL/news/articles'
+        ? { body: articlesPageFixture([], 'again') }
+        : undefined,
+    );
+    show();
+    expect(await screen.findByRole('button', { name: 'Load more' })).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(seen.filter((r) => r.path.endsWith('/articles'))).toHaveLength(4);
+    });
+    expect(screen.queryByText('No news found for the past 6 months yet.')).not.toBeInTheDocument();
   });
 
   it('keeps unique rows even when two articles share a URL', async () => {

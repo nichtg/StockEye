@@ -1,6 +1,6 @@
 import { screen } from '@testing-library/react';
 import { useEffect } from 'react';
-import { Route, Routes } from 'react-router';
+import { Route, Routes, useLocation } from 'react-router';
 import type { FullStatuses } from '../api/types';
 import { stubFetch } from '../test/mockApi';
 import userEvent from '@testing-library/user-event';
@@ -30,6 +30,10 @@ vi.mock('../features/chart/StockChart', () => ({
   },
 }));
 
+function LocationProbe() {
+  return <output data-testid="search">{useLocation().search}</output>;
+}
+
 describe('Stock page tabs', () => {
   function stub() {
     return stubFetch((req) => {
@@ -42,9 +46,12 @@ describe('Stock page tabs', () => {
   }
   function renderAt(route: string) {
     return renderApp(
-      <Routes>
-        <Route path="/stock/:symbol" element={<StockPage />} />
-      </Routes>,
+      <>
+        <LocationProbe />
+        <Routes>
+          <Route path="/stock/:symbol" element={<StockPage />} />
+        </Routes>
+      </>,
       { route },
     );
   }
@@ -70,17 +77,18 @@ describe('Stock page tabs', () => {
       'aria-selected',
       'true',
     );
+    expect(screen.getByTestId('search')).toHaveTextContent('?tab=news');
     expect(await screen.findByText('A headline')).toBeInTheDocument();
   });
 
-  it('shows About on every tab', async () => {
+  it.each(['technical', 'macro', 'news'])('shows About on the %s tab', async (tab) => {
     stubFetch((req) => {
       if (req.path === '/stocks/AAPL') return { body: stockFixture };
       if (req.path === '/stocks/AAPL/profile') return { body: profileFixture };
       if (req.path === '/stocks/AAPL/news/articles') return { body: articlesPageFixture([]) };
       return undefined;
     });
-    renderAt('/stock/AAPL?tab=news');
+    renderAt(`/stock/AAPL?tab=${tab}`);
     expect(await screen.findByRole('heading', { name: 'About Apple Inc.' })).toBeInTheDocument();
   });
 });
