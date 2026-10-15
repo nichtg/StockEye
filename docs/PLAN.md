@@ -481,3 +481,38 @@ The custom domain, Fly.io and is-a.dev were considered and declined.
     (foreign and null origins refused), only 22/80/443 open, a spoofed X-Forwarded-For can't dodge the login limit
     (429 after 10), backup upload via instance principal, container DNS.
 - [ ] Admin account created; a day later the memory check (DEPLOY.md step 3.6); lifecycle rule confirmed
+
+## Phase 6 (approved 2026-10-15): user feedback, fixes and new features
+
+Users reported, after the app had been live for a week:
+- Only the VWAP chip explains itself on hover.
+- The chart can't be moved or zoomed.
+- There are no company details.
+- The 1W change is hard to read.
+
+They asked for Discover (lesser-known stocks), sorting by country, a landing page, a News tab (last 6 months), and
+"Biggest news days" limited to the last 3 months.
+
+User decisions:
+- Discover uses Yahoo's screener (small and mid caps, refreshed nightly).
+- "Country" means the company's headquarters country.
+- The landing page is for signed-out visitors only.
+- The 3-month limit applies to the whole Biggest news days list; the 2-year statistics are unchanged.
+
+Delivery: five waves, by priority. Each wave is a backend PR from `main` plus a stacked frontend PR, merged when CI is
+green, and the user approves the `production` deploy. Sonnet implements and Opus reviews until approved.
+
+| Wave | Branches | Contents |
+|---|---|---|
+| 1 | `feat/backend-recent-news-days` → `feat/frontend-feedback-fixes` | A hover hint on every indicator chip (from `glossary.ts`); the 1W change as a tinted pill; Biggest news days limited to the past 3 months (`top_events_since`, macro cache schema 7) |
+| 2 | `feat/backend-chart-history` → `feat/frontend-chart-navigation` | The chart returns the full history plus `visible_from`; wheel and drag zoom and pan; zoom, pan and reset buttons; keyboard control |
+| 3 | `feat/backend-company-news` → `feat/frontend-company-news` | `GET /stocks/{symbol}/profile` (24 h cache) and an About section; `GET /stocks/{symbol}/news/articles` (182 days, cursor pages) and a News tab |
+| 4 | `feat/backend-discover` → `feat/frontend-discover` | Country, sector and market cap on watchlist rows; sortable and filterable tables; `GET /discover` (yfinance screener, nightly job, 24 h cache) and a `/discover` page |
+| 5 | `feat/frontend-landing` | A public landing page at `/` for signed-out visitors |
+
+### Phase 6 status
+- [ ] Wave 1: chip hints, 1W pill, 3-month Biggest news days
+- [ ] Wave 2: chart pan and zoom
+- [ ] Wave 3: company profile and News tab
+- [ ] Wave 4: country sorting and Discover
+- [ ] Wave 5: landing page

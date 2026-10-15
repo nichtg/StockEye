@@ -169,7 +169,7 @@ def test_macro_report_event_headlines_contain_no_recap_after_exclusion():
     stats: MacroStats = compute_stats(events, exclude_near_earnings=False)
 
     _, by_session = daily_sentiment(exclude_price_recaps(arts), cal)
-    report = build_macro_report(events, stats, stats, None, [], by_session)
+    report = build_macro_report(events, stats, stats, None, [], by_session, as_of=day)
 
     titles = [h.title for t in report.top_events for h in t.headlines]
     assert titles  # guards against a vacuous pass
