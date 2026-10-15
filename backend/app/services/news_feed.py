@@ -269,16 +269,18 @@ class NewsFeed:
                 symbol, since=window_start, after=position, limit=limit, until=until
             )
 
+        status_task = asyncio.ensure_future(self._status(symbol))
+
         async def months() -> list[NewsMonthOut] | None:
             if before is not None:
                 return None
-            return await self._month_counts(symbol, now, since, tz)
+            return await self._month_counts(symbol, now, since, tz, status_task)
 
         async def ignore() -> set[str]:
             return _ignore_tokens(symbol, await self._name_of(symbol, now))
 
         page, status, month_counts, skip = await asyncio.gather(
-            _collect_page(fetch, limit, start), self._status(symbol), months(), ignore()
+            _collect_page(fetch, limit, start), status_task, months(), ignore()
         )
         return NewsArticlesOut(
             articles=_grouped(page.articles, skip, tz),
@@ -299,11 +301,20 @@ class NewsFeed:
         return name
 
     async def _month_counts(
-        self, symbol: str, now: datetime, since: datetime, tz: ZoneInfo
+        self,
+        symbol: str,
+        now: datetime,
+        since: datetime,
+        tz: ZoneInfo,
+        status: Awaitable[DataStatus],
     ) -> list[NewsMonthOut]:
         """Per-month counts, cached for ``MONTHS_TTL`` per symbol and (UTC) window day.
 
         Concurrent cold calls for one key share a single scan (a lock, then a cache re-check).
+        Counts are cached only once news collection is finished (state "ok"): while it runs the
+        scan sees few or no articles, and the client stops refetching when collection completes,
+        so a cached partial result would hide the real counts for the whole TTL. The status is
+        awaited before the scan so a collection finishing mid-scan is never taken for complete.
         """
         key = (symbol, now.date())
         cached = self._months.get(key)
@@ -315,9 +326,11 @@ class NewsFeed:
             if cached is not None and now < cached[0]:
                 return cached[1]
             try:
+                complete = (await status).state == "ok"
                 counts = _month_counts(await self._repo.window_titles(symbol, since), tz)
-                self._months = {k: v for k, v in self._months.items() if now < v[0]}  # drop stale
-                self._months[key] = (now + MONTHS_TTL, counts)
+                if complete:
+                    self._months = {k: v for k, v in self._months.items() if now < v[0]}
+                    self._months[key] = (now + MONTHS_TTL, counts)
                 return counts
             finally:
                 self._month_locks.pop(key, None)  # also after a failed scan: no leaked lock
