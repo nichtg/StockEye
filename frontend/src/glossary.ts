@@ -48,6 +48,7 @@ export const TERM_IDS = [
   'news_effect',
   'news_sentiment',
   'market_cap',
+  'discover_lists',
   'pe_ratio',
   'dividend_yield',
   'week52_range',
@@ -248,6 +249,10 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   market_cap: {
     title: 'Market cap',
     body: 'The total value of all a company’s shares: the share price times the number of shares. It is a quick way to tell a large company from a small one.',
+  },
+  discover_lists: {
+    title: 'How the lists are picked',
+    body: 'Each list is a simple filter: small companies by market value, with steady trading so shares are easy to buy and sell. One list also keeps only shares priced low compared with the company’s earnings. They are filters, not recommendations.',
   },
   pe_ratio: {
     title: 'P/E ratio',

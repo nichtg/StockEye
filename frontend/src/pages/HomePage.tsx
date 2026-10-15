@@ -2,16 +2,21 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { QueryRegion } from '../components/QueryRegion';
+import { countryOptions } from '../components/StockTable/sortFilter';
+import { StockTable, StockTableSkeleton } from '../components/StockTable/StockTable';
+import { TableControls } from '../components/StockTable/TableControls';
+import { useTableState } from '../components/StockTable/useTableState';
 import { focusSearch } from '../features/search/focusSearch';
+import { RemoveButton } from '../features/watchlist/RemoveButton';
 import { useWatchlistOverview } from '../features/watchlist/useWatchlist';
 import { useWatchlistToggle } from '../features/watchlist/useWatchlistToggle';
-import { WatchlistSkeleton, WatchlistTable } from '../features/watchlist/WatchlistTable';
 import { useDocumentTitle } from '../hooks';
 
 export default function HomePage() {
   useDocumentTitle('Watchlist');
   const overview = useWatchlistOverview();
   const { toggle } = useWatchlistToggle();
+  const table = useTableState();
   const count = overview.data?.length ?? 0;
 
   return (
@@ -27,7 +32,7 @@ export default function HomePage() {
 
       <QueryRegion
         query={overview}
-        skeleton={<WatchlistSkeleton />}
+        skeleton={<StockTableSkeleton label="Loading watchlist…" />}
         errorTitle="We couldn’t load your watchlist"
       >
         {(rows) =>
@@ -41,12 +46,34 @@ export default function HomePage() {
               </Button>
             </Box>
           ) : (
-            <WatchlistTable
-              rows={rows}
-              onRemove={(symbol) => {
-                toggle(symbol, false);
-              }}
-            />
+            <>
+              <TableControls
+                countries={countryOptions(rows)}
+                country={table.country}
+                onCountry={table.setCountry}
+                sort={table.sort}
+                onSort={table.setSort}
+              />
+              <StockTable
+                rows={rows}
+                ariaLabel="Watchlist"
+                sort={table.sort}
+                onSort={table.toggleSort}
+                country={table.country}
+                onShowAllCountries={() => {
+                  table.setCountry(null);
+                }}
+                actionLabel="Remove"
+                renderAction={(row) => (
+                  <RemoveButton
+                    symbol={row.symbol}
+                    onRemove={(symbol) => {
+                      toggle(symbol, false);
+                    }}
+                  />
+                )}
+              />
+            </>
           )
         }
       </QueryRegion>

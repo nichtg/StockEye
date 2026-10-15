@@ -18,3 +18,4 @@ export const technicalKey = (symbol: string) => ['stock', symbol, 'technical'] a
 export const macroKey = (symbol: string) => ['stock', symbol, 'macro'] as const;
 export const searchKey = (q: string) => ['search', q] as const;
 export const watchlistKey = ['watchlist', 'symbols'] as const;
+export const discoverKey = ['discover'] as const;

@@ -16,6 +16,9 @@ const aapl: OverviewRow = {
   change_1w_pct: -2.2,
   sparkline: [1, 2, 3, 2, 3, 4],
   lean: 'bullish',
+  country: 'United States',
+  sector: 'Technology',
+  market_cap: 3.2e12,
   status: 'ok',
   status_reason: null,
 };
@@ -28,6 +31,9 @@ const broken: OverviewRow = {
   change_1w_pct: null,
   sparkline: [],
   lean: null,
+  country: null,
+  sector: null,
+  market_cap: null,
   status: 'unavailable',
   status_reason: 'Yahoo Finance could not find this symbol.',
 };
