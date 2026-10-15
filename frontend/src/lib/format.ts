@@ -24,6 +24,15 @@ function priceFormat(locale: string, currency: string): Intl.NumberFormat {
   return fmt;
 }
 
+/**
+ * Swaps the currency part for our own symbol when we have one ("S$" for SGD). Other currencies
+ * keep what Intl produced, and a code Intl rejects was already replaced by a bare number.
+ */
+function withCurrencySymbol(parts: Intl.NumberFormatPart[], code: string): string {
+  const symbol = CURRENCY_SYMBOLS[code];
+  return parts.map((p) => (p.type === 'currency' && symbol ? symbol : p.value)).join('');
+}
+
 /** "$333.69" for USD, "S$77.21" for SGD, in the exchange's number format. */
 export function formatPrice(
   value: number | null | undefined,
@@ -32,10 +41,7 @@ export function formatPrice(
 ): string {
   if (value == null) return '–';
   const code = currency ?? 'USD';
-  const parts = priceFormat(exchangeLocale(exchange), code).formatToParts(value);
-  const symbol = CURRENCY_SYMBOLS[code];
-  if (!symbol) return parts.map((p) => p.value).join('');
-  return parts.map((p) => (p.type === 'currency' ? symbol : p.value)).join('');
+  return withCurrencySymbol(priceFormat(exchangeLocale(exchange), code).formatToParts(value), code);
 }
 
 const numberFormats = new Map<string, Intl.NumberFormat>();
@@ -226,4 +232,72 @@ export function formatMonthRange(
   const b = formatMonthYear(last);
   if (!a || !b) return null;
   return a === b ? a : `${a} to ${b}`;
+}
+
+/** "$3.2T", "S$208.9B", "$850M": a large money amount in compact form, in the stock's own currency. */
+export function formatCompactCurrency(
+  value: number | null | undefined,
+  currency: string | null | undefined,
+  exchange: Exchange | null | undefined,
+): string {
+  if (value == null) return '–';
+  const code = currency ?? 'USD';
+  let fmt: Intl.NumberFormat;
+  try {
+    fmt = numberFormat(exchangeLocale(exchange), {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+      notation: 'compact',
+      // Three significant digits: "$5.05T" rather than a rounded "$5T", "S$209B".
+      maximumSignificantDigits: 3,
+    });
+  } catch {
+    // Intl rejects a code it doesn't know: show the bare compact number rather than fail.
+    return formatVolume(value, exchange);
+  }
+  return withCurrencySymbol(fmt.formatToParts(value), code);
+}
+
+/** A yield from a fraction: `0.0044` is "0.44%". */
+export function formatYield(fraction: number): string {
+  return formatPct(fraction * 100, { digits: 2 });
+}
+
+/** "$164.08 – $237.23"; null unless both ends are known. */
+export function formatPriceRange(
+  low: number | null | undefined,
+  high: number | null | undefined,
+  currency: string | null | undefined,
+  exchange: Exchange | null | undefined,
+): string | null {
+  if (low == null || high == null) return null;
+  return `${formatPrice(low, currency, exchange)} – ${formatPrice(high, currency, exchange)}`;
+}
+
+/** A whole number with thousands separators: 164,000. */
+export function formatCount(value: number, exchange?: Exchange | null): string {
+  return formatNumber(value, exchange, { digits: 0 });
+}
+
+/** The calendar day of an instant in the exchange's own zone, as "2026-10-03" (sorts and groups). */
+export function exchangeDay(iso: string, exchange: Exchange | null | undefined): string {
+  return dateFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: exchangeTimeZone(exchange),
+  }).format(new Date(iso));
+}
+
+/** "4:05 PM EDT" / "16:05 SGT": the time of day of an instant in the exchange's zone. */
+export function formatClock(iso: string, exchange: Exchange | null | undefined): string {
+  const date = new Date(iso);
+  const time = dateFormat(exchangeLocale(exchange), {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: hour12For(exchange),
+    timeZone: exchangeTimeZone(exchange),
+  }).format(date);
+  return `${time} ${zoneLabel(exchange, date)}`;
 }
