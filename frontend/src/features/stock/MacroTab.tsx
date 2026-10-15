@@ -122,7 +122,7 @@ function CollectionProgress({ progress }: { progress: Ingestion }) {
 
 /** Replaces the progress bar once every month is in: a quiet, permanent "all done". */
 function CollectionComplete({ progress }: { progress: Ingestion }) {
-  const updated = progress.updated_at ? ` · updated ${formatRelative(progress.updated_at)}` : '';
+  const updated = progress.updated_at ? `, updated ${formatRelative(progress.updated_at)}` : '';
   return (
     <Typography
       variant="body2"

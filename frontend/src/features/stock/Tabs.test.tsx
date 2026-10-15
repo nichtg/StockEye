@@ -138,7 +138,7 @@ describe('Macro tab', () => {
   it('replaces the bar with a quiet complete line, and no chip, once done', async () => {
     stubFetch((req) => (req.path === '/stocks/AAPL/macro' ? { body: macroFixture() } : undefined));
     renderApp(<MacroTab symbol="AAPL" exchange="US" />);
-    expect(await screen.findByText(/News complete: 24 months · updated .+/)).toBeInTheDocument();
+    expect(await screen.findByText(/News complete: 24 months, updated .+/)).toBeInTheDocument();
     expect(screen.queryByText('Preliminary')).not.toBeInTheDocument();
     expect(screen.queryByText(/Collecting news/)).not.toBeInTheDocument();
   });
