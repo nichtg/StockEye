@@ -19,8 +19,18 @@ export const SORT_LABELS: Record<SortKey, string> = {
 
 const OUTLOOK_ORDER = { bearish: 0, neutral: 1, bullish: 2 } as const;
 
-export function parseSortKey(value: string | null): SortKey | null {
-  return SORT_KEYS.find((k) => k === value) ?? null;
+export type TableColumns = 'watchlist' | 'discover';
+
+/** Market cap is shown, and so sortable, on Discover only. */
+export function sortKeysFor(columns: TableColumns): readonly SortKey[] {
+  return columns === 'discover' ? SORT_KEYS : SORT_KEYS.filter((k) => k !== 'cap');
+}
+
+export function parseSortKey(
+  value: string | null,
+  allowed: readonly SortKey[] = SORT_KEYS,
+): SortKey | null {
+  return allowed.find((k) => k === value) ?? null;
 }
 
 export function parseSortDir(value: string | null): SortDir {
@@ -83,11 +93,14 @@ export interface CountryOption {
   count: number;
 }
 
-/** Each country present in the rows with its row count, alphabetical. */
+/** Each country present in the rows with its row count, alphabetical. A symbol on several lists counts once. */
 export function countryOptions(rows: readonly OverviewRow[]): CountryOption[] {
   const counts = new Map<string, number>();
+  const seen = new Set<string>();
   for (const row of rows) {
-    if (row.country) counts.set(row.country, (counts.get(row.country) ?? 0) + 1);
+    if (!row.country || seen.has(row.symbol)) continue;
+    seen.add(row.symbol);
+    counts.set(row.country, (counts.get(row.country) ?? 0) + 1);
   }
   return [...counts]
     .map(([country, count]) => ({ country, count }))

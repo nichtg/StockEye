@@ -2,7 +2,6 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { QueryRegion } from '../components/QueryRegion';
-import { countryOptions } from '../components/StockTable/sortFilter';
 import { StockTable, StockTableSkeleton } from '../components/StockTable/StockTable';
 import { TableControls } from '../components/StockTable/TableControls';
 import { useTableState } from '../components/StockTable/useTableState';
@@ -16,7 +15,7 @@ export default function HomePage() {
   useDocumentTitle('Watchlist');
   const overview = useWatchlistOverview();
   const { toggle } = useWatchlistToggle();
-  const table = useTableState();
+  const table = useTableState({ columns: 'watchlist' });
   const count = overview.data?.length ?? 0;
 
   return (
@@ -47,22 +46,11 @@ export default function HomePage() {
             </Box>
           ) : (
             <>
-              <TableControls
-                countries={countryOptions(rows)}
-                country={table.country}
-                onCountry={table.setCountry}
-                sort={table.sort}
-                onSort={table.setSort}
-              />
+              <TableControls rows={rows} state={table} />
               <StockTable
                 rows={rows}
                 ariaLabel="Watchlist"
-                sort={table.sort}
-                onSort={table.toggleSort}
-                country={table.country}
-                onShowAllCountries={() => {
-                  table.setCountry(null);
-                }}
+                state={table}
                 actionLabel="Remove"
                 renderAction={(row) => (
                   <RemoveButton

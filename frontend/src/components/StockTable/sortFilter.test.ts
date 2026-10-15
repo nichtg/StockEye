@@ -101,3 +101,10 @@ describe('nextSort', () => {
     expect(nextSort(b, 'symbol')).toEqual({ key: 'symbol', dir: 'asc' });
   });
 });
+
+describe('countryOptions with repeated symbols', () => {
+  it('counts a symbol that appears on several lists once', () => {
+    const rows = [row('A', { country: 'Singapore' }), row('A', { country: 'Singapore' })];
+    expect(countryOptions(rows)).toEqual([{ country: 'Singapore', count: 1 }]);
+  });
+});

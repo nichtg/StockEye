@@ -1,8 +1,13 @@
+import { useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import { QueryRegion } from '../components/QueryRegion';
-import { countryOptions } from '../components/StockTable/sortFilter';
-import { StockTable, StockTableSkeleton } from '../components/StockTable/StockTable';
+import { filterRows } from '../components/StockTable/sortFilter';
+import {
+  NoStocksFromCountry,
+  StockTable,
+  StockTableSkeleton,
+} from '../components/StockTable/StockTable';
 import { TableControls } from '../components/StockTable/TableControls';
 import { useTableState } from '../components/StockTable/useTableState';
 import { Term } from '../components/Term';
@@ -20,9 +25,10 @@ export default function DiscoverPage() {
   useDocumentTitle('Discover');
   const discover = useDiscover();
   const symbols = useWatchlistSymbols();
-  const { toggle } = useWatchlistToggle();
+  const { toggle, isPending } = useWatchlistToggle();
   // One namespaced sort and country filter for the whole page, kept in the URL.
-  const table = useTableState('discover');
+  const table = useTableState({ namespace: 'discover', columns: 'discover' });
+  const allRows = useMemo(() => discover.data?.lists.flatMap((l) => l.rows) ?? [], [discover.data]);
 
   return (
     <Box>
@@ -48,23 +54,28 @@ export default function DiscoverPage() {
               </Typography>
             );
           }
-          const allRows = data.lists.flatMap((list) => list.rows);
+          const nothingShown =
+            table.country != null && filterRows(allRows, table.country).length === 0;
           const inWatchlist = new Set(symbols.data ?? []);
           return (
             <>
               {data.updated_at && (
-                <Typography variant="body2" sx={{ color: 'ink3', mb: 3 }}>
+                <Typography variant="body2" sx={{ color: 'ink3' }}>
                   Updated {formatRelative(data.updated_at)}
                 </Typography>
               )}
-              <TableControls
-                countries={countryOptions(allRows)}
-                country={table.country}
-                onCountry={table.setCountry}
-                sort={table.sort}
-                onSort={table.setSort}
-                showMarketCap
-              />
+              <DataStatusLine statuses={[data.data_status]} />
+              <Box sx={{ mt: 3 }}>
+                <TableControls rows={allRows} state={table} />
+              </Box>
+              {nothingShown && table.country && (
+                <NoStocksFromCountry
+                  country={table.country}
+                  onShowAll={() => {
+                    table.setCountry(null);
+                  }}
+                />
+              )}
               {data.lists.map((list) => (
                 <Box component="section" key={list.id} sx={{ mt: 6, '&:first-of-type': { mt: 3 } }}>
                   <Typography variant="h2" component="h2">
@@ -83,19 +94,14 @@ export default function DiscoverPage() {
                       <StockTable
                         rows={list.rows}
                         ariaLabel={list.title}
-                        sort={table.sort}
-                        onSort={table.toggleSort}
-                        country={table.country}
-                        onShowAllCountries={() => {
-                          table.setCountry(null);
-                        }}
-                        showMarketCap
+                        state={table}
+                        quietWhenEmpty
                         actionLabel="Watchlist"
                         renderAction={(row) => (
                           <WatchStar
                             symbol={row.symbol}
                             inList={inWatchlist.has(row.symbol)}
-                            disabled={symbols.isPending}
+                            disabled={symbols.isPending || isPending(row.symbol)}
                             onToggle={toggle}
                           />
                         )}

@@ -13,6 +13,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
+import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import type { OverviewRow } from '../../api/types';
@@ -25,20 +26,26 @@ import { radius } from '../../theme/tokens';
 import { Direction } from '../Direction';
 import { Term } from '../Term';
 import { filterRows, sortRows, type SortKey, type SortState } from './sortFilter';
+import type { TableState } from './useTableState';
 
-export interface StockTableProps {
+interface ListProps {
   rows: OverviewRow[];
   /** Names the table (and the mobile list) for assistive tech. */
   ariaLabel: string;
-  sort: SortState | null;
-  onSort: (key: SortKey) => void;
-  country: string | null;
-  onShowAllCountries: () => void;
   /** The per-row control: remove for the watchlist, a star toggle for Discover. */
   renderAction: (row: OverviewRow) => ReactNode;
   /** Names the action column for screen readers, since its header is visually empty. */
   actionLabel: string;
-  showMarketCap?: boolean;
+}
+
+export interface StockTableProps extends ListProps {
+  state: TableState;
+  /** Render nothing when the country filter hides every row (the page explains it once). */
+  quietWhenEmpty?: boolean;
+}
+
+interface ViewProps extends ListProps {
+  state: TableState;
 }
 
 const UNAVAILABLE = 'Data unavailable';
@@ -144,8 +151,10 @@ function SortHeader({
   );
 }
 
-function DesktopTable(props: StockTableProps & { rows: OverviewRow[] }) {
-  const { rows, ariaLabel, sort, onSort, renderAction, actionLabel, showMarketCap } = props;
+function DesktopTable(props: ViewProps) {
+  const { rows, ariaLabel, state, renderAction, actionLabel } = props;
+  const { sort, toggleSort: onSort } = state;
+  const showMarketCap = state.columns === 'discover';
   const navigate = useNavigate();
   // Everything between the symbol and the action column.
   const dataColumns = showMarketCap ? 6 : 5;
@@ -244,7 +253,7 @@ function DesktopTable(props: StockTableProps & { rows: OverviewRow[] }) {
   );
 }
 
-function MobileList({ rows, ariaLabel, renderAction }: StockTableProps & { rows: OverviewRow[] }) {
+function MobileList({ rows, ariaLabel, renderAction }: ListProps) {
   return (
     <Box
       component="ul"
@@ -297,28 +306,48 @@ function MobileList({ rows, ariaLabel, renderAction }: StockTableProps & { rows:
  * compact list on phones. Sort and filter state live with the caller (in the URL), so one control
  * bar can drive several tables.
  */
-export function StockTable(props: StockTableProps) {
+export function StockTable({ quietWhenEmpty = false, ...props }: StockTableProps) {
   const theme = useTheme();
   const compact = useMediaQuery(theme.breakpoints.down('sm'));
-  const rows = sortRows(
-    filterRows(props.rows, props.country),
-    props.sort?.key ?? null,
-    props.sort?.dir ?? 'asc',
+  const { state } = props;
+  const sortKey = state.sort?.key ?? null;
+  const sortDir = state.sort?.dir ?? 'asc';
+  const rows = useMemo(
+    () => sortRows(filterRows(props.rows, state.country), sortKey, sortDir),
+    [props.rows, state.country, sortKey, sortDir],
   );
 
-  if (rows.length === 0 && props.country) {
+  if (rows.length === 0 && state.country) {
+    if (quietWhenEmpty) return null;
     return (
-      <Box sx={{ py: 2 }}>
-        <Typography sx={{ mb: 1.5 }}>No stocks from {props.country} here.</Typography>
-        <Button variant="outlined" size="small" onClick={props.onShowAllCountries}>
-          Show all countries
-        </Button>
-      </Box>
+      <NoStocksFromCountry
+        country={state.country}
+        onShowAll={() => {
+          state.setCountry(null);
+        }}
+      />
     );
   }
   return compact ? <MobileList {...props} rows={rows} /> : <DesktopTable {...props} rows={rows} />;
 }
 
+/** The line shown when the country filter leaves nothing to list. */
+export function NoStocksFromCountry({
+  country,
+  onShowAll,
+}: {
+  country: string;
+  onShowAll: () => void;
+}) {
+  return (
+    <Box sx={{ py: 2 }}>
+      <Typography sx={{ mb: 1.5 }}>No stocks from {country} here.</Typography>
+      <Button variant="outlined" size="small" onClick={onShowAll}>
+        Show all countries
+      </Button>
+    </Box>
+  );
+}
 export function StockTableSkeleton({ label }: { label: string }) {
   return (
     <Box aria-busy="true" role="status" aria-label={label}>

@@ -76,6 +76,27 @@ describe('DiscoverPage', () => {
     expect(screen.getByRole('table', { name: 'Under the radar in Singapore' })).toBeInTheDocument();
   });
 
+  it('shows the page-level status when the whole cache is stale', async () => {
+    serve(
+      page({
+        data_status: {
+          state: 'stale',
+          reason: 'These lists did not refresh overnight. Showing the last saved version.',
+        },
+      }),
+    );
+    renderApp(<DiscoverPage />, { route: '/discover' });
+    expect(await screen.findByText(/These lists did not refresh overnight/)).toBeInTheDocument();
+  });
+
+  it('drops an unknown country from the link and explains an empty filter once', async () => {
+    const body = page();
+    serve(body);
+    renderApp(<DiscoverPage />, { route: '/discover?discoverCountry=Peru' });
+    await screen.findByRole('table', { name: 'Small caps on the move' });
+    expect(screen.queryByText(/No stocks from Peru/)).not.toBeInTheDocument();
+  });
+
   it('shares one country filter across every list', async () => {
     const user = userEvent.setup();
     serve(page());
@@ -89,7 +110,7 @@ describe('DiscoverPage', () => {
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Country' }), 'Singapore');
     expect(screen.getByRole('table', { name: 'Under the radar in Singapore' })).toBeInTheDocument();
-    expect(screen.getByText('No stocks from Singapore here.')).toBeInTheDocument();
+    expect(screen.queryByText(/No stocks from/)).not.toBeInTheDocument();
   });
 
   it('adds a row to the watchlist with the star', async () => {

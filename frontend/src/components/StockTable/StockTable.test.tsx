@@ -1,11 +1,10 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
 import type { OverviewRow } from '../../api/types';
 import { RemoveButton } from '../../features/watchlist/RemoveButton';
 import { WatchStar } from '../../features/discover/WatchStar';
 import { renderApp } from '../../test/render';
-import { countryOptions } from './sortFilter';
 import { StockTable } from './StockTable';
 import { TableControls } from './TableControls';
 import { useTableState } from './useTableState';
@@ -57,34 +56,23 @@ function Harness({
   namespace = '',
   marketCap = false,
   star = false,
+  controls = true,
 }: {
   rows?: OverviewRow[];
   namespace?: string;
   marketCap?: boolean;
   star?: boolean;
+  controls?: boolean;
 }) {
-  const table = useTableState(namespace);
+  const table = useTableState({ namespace, columns: marketCap ? 'discover' : 'watchlist' });
   return (
     <>
       <Probe />
-      <TableControls
-        countries={countryOptions(rows)}
-        country={table.country}
-        onCountry={table.setCountry}
-        sort={table.sort}
-        onSort={table.setSort}
-        showMarketCap={marketCap}
-      />
+      {controls && <TableControls rows={rows} state={table} />}
       <StockTable
         rows={rows}
         ariaLabel="Test list"
-        sort={table.sort}
-        onSort={table.toggleSort}
-        country={table.country}
-        onShowAllCountries={() => {
-          table.setCountry(null);
-        }}
-        showMarketCap={marketCap}
+        state={table}
         actionLabel={star ? 'Watchlist' : 'Remove'}
         renderAction={(r) =>
           star ? (
@@ -108,7 +96,7 @@ const order = () =>
     .getAllByRole('link')
     .map((a) => a.textContent);
 
-describe('StockTable sorting', { timeout: 20_000 }, () => {
+describe('StockTable sorting', () => {
   it('cycles ascending, descending, off and sets aria-sort on the active header', async () => {
     const user = userEvent.setup();
     renderApp(<Harness />);
@@ -139,6 +127,20 @@ describe('StockTable sorting', { timeout: 20_000 }, () => {
       'aria-sort',
       'descending',
     );
+  });
+
+  it('ignores a sort key the columns do not have', () => {
+    renderApp(<Harness />, { route: '/?sort=cap&dir=desc' });
+    expect(order()).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
+    expect(document.querySelector('[aria-sort]')).toBeNull();
+  });
+
+  it('drops a URL country that matches no row once the controls have the rows', async () => {
+    renderApp(<Harness />, { route: '/?country=Peru' });
+    await waitFor(() => {
+      expect(screen.getByTestId('loc')).toHaveTextContent(/^$/);
+    });
+    expect(order()).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
   });
 
   it('ignores an unknown sort key', () => {
@@ -178,7 +180,7 @@ describe('StockTable country filter', () => {
 
   it('shows an empty line with a way back when the filter hides every row', async () => {
     const user = userEvent.setup();
-    renderApp(<Harness />, { route: '/?country=Peru' });
+    renderApp(<Harness controls={false} />, { route: '/?country=Peru' });
     expect(screen.getByText('No stocks from Peru here.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Show all countries' }));
     expect(order()).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
@@ -254,7 +256,7 @@ describe('StockTable on a phone', () => {
         .map((a) => a.textContent),
     ).toEqual(['DDD', 'BBB', 'CCC', 'AAA']);
     expect(screen.getByTestId('loc')).toHaveTextContent('?sort=last&dir=asc');
-    await user.click(screen.getByRole('button', { name: /switch to descending/ }));
+    await user.click(screen.getByRole('button', { name: 'Sort descending' }));
     expect(screen.getByTestId('loc')).toHaveTextContent('dir=desc');
   });
 });

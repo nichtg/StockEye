@@ -5,40 +5,33 @@ import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
-import {
-  SORT_KEYS,
-  SORT_LABELS,
-  parseSortKey,
-  type CountryOption,
-  type SortState,
-} from './sortFilter';
+import { useEffect, useMemo } from 'react';
+import type { OverviewRow } from '../../api/types';
+import { SORT_LABELS, countryOptions, parseSortKey, sortKeysFor } from './sortFilter';
+import type { TableState } from './useTableState';
 
 interface Props {
-  countries: CountryOption[];
-  country: string | null;
-  onCountry: (country: string | null) => void;
-  sort: SortState | null;
-  onSort: (next: SortState | null) => void;
-  showMarketCap?: boolean;
+  /** Every row the controls govern (all lists on Discover); the country options come from these. */
+  rows: readonly OverviewRow[];
+  state: TableState;
 }
 
 /**
  * The country filter, plus a "Sort by" select on phones (where there are no column headers to
  * click). Native selects: they work well on touch and for screen readers.
  */
-export function TableControls({
-  countries,
-  country,
-  onCountry,
-  sort,
-  onSort,
-  showMarketCap = false,
-}: Props) {
+export function TableControls({ rows, state }: Props) {
+  const { columns, country, sort, setCountry, setSort } = state;
   const theme = useTheme();
   const compact = useMediaQuery(theme.breakpoints.down('sm'));
-  const keys = SORT_KEYS.filter((k) => showMarketCap || k !== 'cap');
-  // A country from a shared link may not be in the rows; keep it selectable so the state is visible.
-  const hasCountry = country != null && countries.some((c) => c.country === country);
+  const countries = useMemo(() => countryOptions(rows), [rows]);
+  const keys = sortKeysFor(columns);
+  const known = country == null || countries.some((c) => c.country === country);
+
+  // A country from an old or hand-edited link that matches no row would only show an empty page.
+  useEffect(() => {
+    if (!known) setCountry(null);
+  }, [known, setCountry]);
 
   return (
     <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5, mb: 2 }}>
@@ -46,15 +39,14 @@ export function TableControls({
         select
         size="small"
         label="Country"
-        value={country ?? ''}
+        value={known ? (country ?? '') : ''}
         onChange={(e) => {
-          onCountry(e.target.value || null);
+          setCountry(e.target.value || null);
         }}
         slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
         sx={{ minWidth: 200 }}
       >
         <option value="">All countries</option>
-        {country && !hasCountry && <option value={country}>{country} (0)</option>}
         {countries.map((c) => (
           <option key={c.country} value={c.country}>
             {c.country} ({c.count})
@@ -69,8 +61,8 @@ export function TableControls({
             label="Sort by"
             value={sort?.key ?? ''}
             onChange={(e) => {
-              const key = parseSortKey(e.target.value);
-              onSort(key ? { key, dir: sort?.dir ?? 'asc' } : null);
+              const key = parseSortKey(e.target.value, keys);
+              setSort(key ? { key, dir: sort?.dir ?? 'asc' } : null);
             }}
             slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
             sx={{ minWidth: 150 }}
@@ -84,13 +76,10 @@ export function TableControls({
           </TextField>
           {sort && (
             <IconButton
-              aria-label={
-                sort.dir === 'asc'
-                  ? 'Ascending, switch to descending'
-                  : 'Descending, switch to ascending'
-              }
+              aria-label={sort.dir === 'asc' ? 'Sort descending' : 'Sort ascending'}
+              title={sort.dir === 'asc' ? 'Sort descending' : 'Sort ascending'}
               onClick={() => {
-                onSort({ key: sort.key, dir: sort.dir === 'asc' ? 'desc' : 'asc' });
+                setSort({ key: sort.key, dir: sort.dir === 'asc' ? 'desc' : 'asc' });
               }}
             >
               {sort.dir === 'asc' ? (
