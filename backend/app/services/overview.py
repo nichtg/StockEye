@@ -6,7 +6,8 @@ from pydantic import BaseModel
 
 from app.domain.technical.outlook import Lean
 from app.logging_setup import get_logger
-from app.providers.models import Exchange
+from app.providers.errors import ProviderError
+from app.providers.models import CompanyProfile, Exchange
 from app.services.analysis import AnalysisService
 from app.services.errors import AppError
 from app.services.market_data import MarketDataService
@@ -29,6 +30,9 @@ class OverviewRow(BaseModel):
     change_1w_pct: float | None  # last close versus the close 5 sessions earlier, in percent
     sparkline: list[float]  # last 20 daily closes, oldest first
     lean: Lean | None
+    country: str | None  # headquarters country
+    sector: str | None
+    market_cap: float | None  # in ``currency``
     status: State
     status_reason: str | None
 
@@ -43,6 +47,9 @@ def _failed(symbol: str, reason: str) -> OverviewRow:
         change_1w_pct=None,
         sparkline=[],
         lean=None,
+        country=None,
+        sector=None,
+        market_cap=None,
         status="unavailable",
         status_reason=reason,
     )
@@ -57,9 +64,26 @@ async def _outlook(analysis: AnalysisService, symbol: str) -> TechnicalReport | 
         return None
 
 
+async def _profile(market: MarketDataService, symbol: str) -> CompanyProfile | None:
+    """Company facts, or None: they are garnish, so their failure must never fail the row."""
+    try:
+        found, _ = await market.profile(symbol)
+    except (AppError, ProviderError) as exc:
+        log.info("overview_no_profile", symbol=symbol, reason=str(exc))
+        return None
+    return found
+
+
 async def _row(market: MarketDataService, analysis: AnalysisService, symbol: str) -> OverviewRow:
-    (frame, price_status), (quote, quote_status), technical = await asyncio.gather(
-        market.daily_history(symbol), market.quote(symbol), _outlook(analysis, symbol)
+    """One summary row; raises ``AppError`` when the price history or quote is unavailable.
+
+    The company profile adds about one vendor call per symbol per day (it is cached 24 hours).
+    """
+    (frame, price_status), (quote, quote_status), technical, profile = await asyncio.gather(
+        market.daily_history(symbol),
+        market.quote(symbol),
+        _outlook(analysis, symbol),
+        _profile(market, symbol),
     )
     statuses = [price_status, quote_status]
     lean: Lean | None = None
@@ -82,16 +106,25 @@ async def _row(market: MarketDataService, analysis: AnalysisService, symbol: str
         change_1w_pct=change,
         sparkline=closes[-SPARKLINE_POINTS:],
         lean=lean,
+        country=profile.country if profile else None,
+        sector=profile.sector if profile else None,
+        market_cap=profile.market_cap if profile else None,
         status=overall.state,
         status_reason=overall.reason,
     )
 
 
 async def build_overview(
-    market: MarketDataService, analysis: AnalysisService, symbols: list[str]
+    market: MarketDataService,
+    analysis: AnalysisService,
+    symbols: list[str],
+    concurrency: int = CONCURRENCY,
 ) -> list[OverviewRow]:
-    """Rows in the order of ``symbols``; a failing symbol becomes an "unavailable" row."""
-    gate = asyncio.Semaphore(CONCURRENCY)
+    """Rows in the order of ``symbols``; a failing symbol becomes an "unavailable" row.
+
+    ``concurrency`` bounds how many rows build at once (each row makes about 3 vendor calls).
+    """
+    gate = asyncio.Semaphore(concurrency)
 
     async def one(symbol: str) -> OverviewRow:
         async with gate:

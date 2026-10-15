@@ -4,16 +4,22 @@ import IconButton from '@mui/material/IconButton';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Typography from '@mui/material/Typography';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 import { useId, useState } from 'react';
-import { Link as RouterLink, useNavigate } from 'react-router';
+import { Link as RouterLink, NavLink, useNavigate } from 'react-router';
 import type { User } from '../api/types';
 import { DeleteAccountDialog } from '../features/auth/DeleteAccountDialog';
 import { useLogout } from '../features/auth/useAuth';
+import { NAV_ITEMS } from './navItems';
 
 export function AccountMenu({ user }: { user: User }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [deleting, setDeleting] = useState(false);
   const menuId = useId();
+  const theme = useTheme();
+  // Mounted only on phones: items hidden by CSS would still trap the arrow keys (see MainNav).
+  const compact = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
   const logout = useLogout();
   const close = () => {
@@ -54,6 +60,20 @@ export function AccountMenu({ user }: { user: User }) {
           </Typography>
         </Typography>
         <Divider />
+        {/* Phones only: the top bar has no room for these links there (see MainNav). */}
+        {compact &&
+          NAV_ITEMS.map((item) => (
+            <MenuItem
+              key={item.to}
+              component={NavLink}
+              to={item.to}
+              end={item.to === '/'}
+              onClick={close}
+              sx={{ '&[aria-current="page"]': { fontWeight: 600 } }}
+            >
+              {item.label}
+            </MenuItem>
+          ))}
         {user.role === 'admin' && (
           <MenuItem component={RouterLink} to="/admin" onClick={close}>
             Admin

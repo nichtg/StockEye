@@ -14,7 +14,14 @@ from pymongo.errors import DuplicateKeyError
 from app.config import ProviderLimits
 from app.db import Database, Document
 from app.logging_setup import get_logger
-from app.providers.quota import Priority, QuotaDecision, QuotaSnapshot, Window, daily_cap
+from app.providers.quota import (
+    Priority,
+    QuotaDecision,
+    QuotaSnapshot,
+    Window,
+    daily_cap,
+    minute_cap,
+)
 
 log = get_logger(__name__)
 
@@ -75,22 +82,26 @@ class QuotaLedger:
         """Consume one call from the minute then the day window; log loudly near/at the limit.
 
         Interactive calls stop at their share of the day (see ``daily_cap``); scheduled calls may
-        use all of it.
+        use all of it but only their share of each minute (see ``minute_cap``), so users keep
+        headroom while a background job runs.
         """
         minute = _minute_start(now)
         day = _day_start(now)
         resets_at = day + timedelta(days=1)
 
         minute_doc = await self._bump(
-            provider, "minute", minute, limits.per_minute, timedelta(hours=1)
+            provider, "minute", minute, minute_cap(limits.per_minute, priority), timedelta(hours=1)
         )
         if minute_doc is None:
             retry_at = minute + timedelta(minutes=1)
-            if await self._flag_once(provider, "minute", minute, "blocked_logged"):
+            # One flag per priority: a scheduled block must not hide a real interactive one.
+            if await self._flag_once(provider, "minute", minute, f"blocked_logged_{priority}"):
                 log.warning(
                     "provider_rate_throttled",
                     provider=provider,
+                    priority=priority,
                     limit_per_minute=limits.per_minute,
+                    cap_applied=minute_cap(limits.per_minute, priority),
                     retry_at=retry_at.isoformat(),
                 )
             return QuotaDecision(

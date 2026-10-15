@@ -105,6 +105,22 @@ class BarsRepository:
         )
         return [_to_bar(doc) async for doc in cursor]
 
+    async def idle_symbols(self, before: datetime) -> list[str]:
+        """Symbols whose newest fetch (over every interval) is older than ``before``."""
+        cursor = await self._state.aggregate(
+            [
+                {"$group": {"_id": "$symbol", "last": {"$max": "$last_fetched_at"}}},
+                {"$match": {"last": {"$lt": before}}},
+            ]
+        )
+        return sorted([doc["_id"] async for doc in cursor])
+
+    async def delete_symbol(self, symbol: str) -> int:
+        """Delete every stored bar and fetch-state of ``symbol``; returns the bars removed."""
+        removed = await self._bars.delete_many({"meta.symbol": symbol})
+        await self._state.delete_many({"symbol": symbol})
+        return removed.deleted_count
+
     async def get_state(self, symbol: str, interval: Interval) -> FetchState | None:
         doc = await self._state.find_one({"symbol": symbol, "interval": interval})
         return None if doc is None else _to_state(doc)

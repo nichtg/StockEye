@@ -17,6 +17,8 @@ from app.providers.models import (
     NewsItem,
     NewsQuery,
     Quote,
+    ScreenMatch,
+    ScreenQuery,
     SymbolMatch,
 )
 
@@ -35,6 +37,8 @@ class MarketDataProvider(Protocol):
     async def events(self, symbol: str, start: datetime, end: datetime) -> list[CorporateEvent]: ...
 
     async def profile(self, symbol: str) -> CompanyProfile: ...
+
+    async def screen(self, query: ScreenQuery) -> list[ScreenMatch]: ...
 
 
 class NewsProvider(Protocol):

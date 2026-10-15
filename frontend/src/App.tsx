@@ -13,6 +13,7 @@ import RegisterPage from './pages/RegisterPage';
 // Declarative routing: all data lives in React Query, so route loaders would add nothing here.
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const StockPage = lazy(() => import('./pages/StockPage'));
+const DiscoverPage = lazy(() => import('./pages/DiscoverPage'));
 
 function AdminRoute() {
   const me = useMe();
@@ -36,6 +37,7 @@ export function App() {
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
           <Route path="/stock/:symbol" element={<StockPage />} />
+          <Route path="/discover" element={<DiscoverPage />} />
           <Route path="/admin" element={<AdminRoute />} />
           <Route path="*" element={<NotFoundView />} />
         </Route>

@@ -26,6 +26,7 @@ from app.repositories.quotas import QuotaLedger
 from app.sentiment.finbert_onnx import FinBertOnnxScorer
 from app.services.admission import NewSymbolAdmission
 from app.services.analysis import AnalysisService
+from app.services.discover import DiscoverService
 from app.services.market_data import MarketDataService
 from app.services.news import NewsService
 from app.services.news_feed import NewsFeed
@@ -39,6 +40,7 @@ class Services:
     admission: NewSymbolAdmission
     guard: ProviderGuard
     news_feed: NewsFeed
+    discover: DiscoverService
     http: httpx.AsyncClient | None = None
 
     async def aclose(self) -> None:
@@ -78,7 +80,8 @@ async def build_services(settings: Settings, db: Database) -> Services:
     )
     analysis = AnalysisService(db, market, news, admission)
     feed = NewsFeed(NewsRepository(db), utc_now, news.status)
-    return Services(market, news, analysis, admission, guard, feed, http)
+    discover = DiscoverService(db, market, analysis)
+    return Services(market, news, analysis, admission, guard, feed, discover, http)
 
 
 def get_services(request: Request) -> Services:

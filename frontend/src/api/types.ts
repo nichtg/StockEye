@@ -60,3 +60,5 @@ export interface ErrorEnvelope {
     details: FieldIssue[] | null;
   };
 }
+export type DiscoverOut = S['DiscoverOut'];
+export type DiscoverList = S['DiscoverList'];

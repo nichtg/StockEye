@@ -9,13 +9,13 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-from app.api import admin, auth, health, me, providers_status, stocks, watchlist
+from app.api import admin, auth, discover, health, me, providers_status, stocks, watchlist
 from app.api.errors import install_error_handlers
 from app.api.limits import RateLimiter
 from app.api.middleware import RequestContextMiddleware
 from app.config import Settings, get_settings
 from app.db import IndexInstaller, create_client, ensure_indexes
-from app.jobs.scheduler import build_scheduler
+from app.jobs.scheduler import build_scheduler, schedule_startup_discover
 from app.logging_setup import configure_logging, get_logger
 from app.repositories import (
     bars,
@@ -38,6 +38,7 @@ ROUTERS: list[APIRouter] = [
     admin.router,
     providers_status.router,
     stocks.router,
+    discover.router,
 ]
 
 INDEX_INSTALLERS: list[IndexInstaller] = [
@@ -78,6 +79,10 @@ def create_app(
         scheduler = build_scheduler(services, db) if settings.scheduler_enabled else None
         if scheduler is not None:
             scheduler.start()
+            try:
+                await schedule_startup_discover(scheduler, services)
+            except Exception:  # a cache hiccup must not stop the app from starting
+                log.exception("discover_startup_schedule_failed")
         log.info("startup_complete", database=settings.mongodb_db)
         try:
             yield
