@@ -1,63 +1,129 @@
 """Near-duplicate headline grouping: pure rules, no I/O."""
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from app.domain.news import cluster_stories, title_tokens
+import pytest
+
+from app.domain.news import InvalidMonthError, cluster_stories, month_window
 
 DAY = date(2026, 10, 2)
 NEXT_DAY = date(2026, 10, 1)
-
-NEUTRON_A = "Rocket Lab delays Neutron debut to 2027"
-NEUTRON_B = "Rocket Lab's Neutron rocket delayed to 2027"
-NEUTRON_C = "Neutron launch pushed to 2027, Rocket Lab says"
-CONTRACT = "Rocket Lab wins $200M Space Force contract"
+IGNORE = {"rklb", "rocket", "lab"}  # ticker and company name, as the feed passes them
 
 
 def _groups(titles: list[str], days: list[date] | None = None) -> list[list[int]]:
-    tokens = [title_tokens(t, {"rklb"}) for t in titles]
-    return cluster_stories(days or [DAY] * len(titles), tokens)
+    days = days or [DAY] * len(titles)
+    return cluster_stories(list(zip(days, titles, strict=True)), IGNORE)
 
 
-def test_title_tokens_lowercases_strips_punctuation_stop_words_and_ignored() -> None:
-    tokens = title_tokens("The RKLB Stock, Is Up! (again)", {"rklb"})
-
-    assert tokens == frozenset({"stock", "up", "again"})
-
-
-def test_cluster_stories_neutron_delay_from_three_outlets_groups() -> None:
-    groups = _groups([NEUTRON_A, NEUTRON_B, NEUTRON_C])
+def test_cluster_stories_same_neutron_delay_from_three_outlets_groups() -> None:
+    groups = _groups(
+        [
+            "Rocket Lab delays Neutron launch to 2027",
+            "Rocket Lab's Neutron rocket delayed to 2027",
+            "Rocket Lab delays Neutron debut to 2027",
+        ]
+    )
 
     assert groups == [[0, 1, 2]]
 
 
-def test_cluster_stories_different_stories_about_one_company_stay_apart() -> None:
-    groups = _groups([NEUTRON_A, CONTRACT])
+def test_cluster_stories_loosely_worded_reports_stay_apart_for_precision() -> None:
+    # Realistic rewrites of one story share too few words to merge safely.
+    groups = _groups(
+        [
+            "Rocket Lab delays Neutron rocket's first launch to 2027, updating its development "
+            "timeline.",
+            "Rocket Lab Updates Neutron Development Schedule, Targets Inaugural Launch in 2027",
+            "Rocket Lab Announces Delay of Neutron Rocket's Maiden Launch to Next Year",
+        ]
+    )
 
-    assert groups == [[0], [1]]
+    assert groups == [[0], [1], [2]]
 
 
-def test_cluster_stories_containment_rule_groups_a_short_title_inside_a_long_one() -> None:
-    long = "Apple unveils new iPhone lineup with faster chips and better cameras at event"
-    short = "Apple unveils iPhone lineup"  # Jaccard is low, but all its tokens are in the long one
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        ("Rocket Lab stock soars", "Rocket Lab stock falls"),
+        ("Rocket Lab upgraded at Morgan Stanley", "Rocket Lab downgraded at Morgan Stanley"),
+        ("Should you buy Rocket Lab stock?", "Should you sell Rocket Lab stock?"),
+        ("Rocket Lab Q1 results beat estimates", "Rocket Lab Q2 results beat estimates"),
+        ("Rocket Lab wins $100M contract", "Rocket Lab wins $50M contract"),
+        ("Rocket Lab (RKLB)", "Rocket Lab stock jumps on launch news"),
+        ("Rocket Lab Neutron update", "Rocket Lab Neutron launch succeeds"),
+        ("Rocket Lab beats earnings estimates", "Rocket Lab misses earnings estimates"),
+        ("Rocket Lab raises full-year guidance", "Rocket Lab cuts full-year guidance"),
+        ("Rocket Lab shares rise on Neutron news", "Rocket Lab shares fall on Neutron news"),
+    ],
+)
+def test_cluster_stories_opposite_or_different_stories_do_not_group(a: str, b: str) -> None:
+    assert _groups([a, b]) == [[0], [1]]
+
+
+def test_cluster_stories_contains_rule_needs_three_tokens_in_the_smaller_title() -> None:
+    long = "Apple unveils iPhone lineup with faster chips and better cameras at big event"
+    short = "Apple unveils iPhone lineup"
 
     assert _groups([long, short]) == [[0, 1]]
+    assert _groups([long, "Apple unveils"]) == [[0], [1]]
 
 
 def test_cluster_stories_same_story_on_different_days_is_not_grouped() -> None:
-    groups = _groups([NEUTRON_A, NEUTRON_B], [DAY, NEXT_DAY])
+    titles = ["Rocket Lab delays Neutron launch to 2027", "Rocket Lab delays Neutron debut to 2027"]
 
-    assert groups == [[0], [1]]
+    assert _groups(titles, [DAY, NEXT_DAY]) == [[0], [1]]
 
 
 def test_cluster_stories_keeps_input_order_with_newest_as_main() -> None:
-    groups = _groups([CONTRACT, NEUTRON_A, "Unrelated Fed news", NEUTRON_B])
+    groups = _groups(
+        [
+            "Rocket Lab wins Space Force contract",
+            "Rocket Lab delays Neutron launch to 2027",
+            "Unrelated Fed rate decision looms",
+            "Rocket Lab delays Neutron debut to 2027",
+        ]
+    )
 
     assert groups == [[0], [1, 3], [2]]
 
 
-def test_cluster_stories_titles_differing_only_by_a_number_stay_apart() -> None:
-    assert _groups(["headline 1", "headline 2"]) == [[0], [1]]
-
-
 def test_cluster_stories_empty_token_sets_never_group() -> None:
     assert _groups(["the", "the"]) == [[0], [1]]
+
+
+NY = ZoneInfo("America/New_York")
+NOW = datetime(2026, 10, 3, 12, tzinfo=timezone.utc)  # noqa: UP017
+SINCE = NOW - timedelta(days=182)
+
+
+def test_month_window_returns_exchange_local_bounds_in_utc() -> None:
+    start, end = month_window("2026-09", NY, NOW, SINCE)
+
+    assert start == datetime(2026, 9, 1, 4, tzinfo=timezone.utc)  # noqa: UP017
+    assert end == datetime(2026, 10, 1, 4, tzinfo=timezone.utc)  # noqa: UP017
+
+
+def test_month_window_clips_the_start_to_the_window() -> None:
+    start, _ = month_window("2026-04", NY, NOW, SINCE)
+
+    assert start == SINCE
+
+
+@pytest.mark.parametrize(
+    "month",
+    [
+        "2026-9",
+        "2026-13",
+        "٢٠٢٦-١٠",  # noqa: RUF001
+        "2026-10-01",
+        "0000-01",
+        "9999-12",
+        "2026-03",
+        "2026-11",
+    ],
+)
+def test_month_window_rejects_malformed_and_out_of_window_months(month: str) -> None:
+    with pytest.raises(InvalidMonthError):
+        month_window(month, NY, NOW, SINCE)

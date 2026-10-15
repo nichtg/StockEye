@@ -6,10 +6,13 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.db import Database
+from app.repositories.news import NewsRepository
 from app.services.container import Services
 from app.services.errors import AppError
+from app.services.news_feed import NewsFeed
 from app.services.reports import NewsArticleOut
-from tests.services.fakes import CLOSED_NOW
+from app.services.status import DataStatus, ok
+from tests.services.fakes import CLOSED_NOW, FakeClock
 from tests.services.test_news_feed import RECAP, seed
 
 pytestmark = pytest.mark.integration
@@ -208,3 +211,24 @@ async def test_page_does_not_group_across_exchange_local_days(
 
     assert len(page.articles) == 2
     assert all(a.similar == [] for a in page.articles)
+
+
+async def test_months_counts_are_cached_for_five_minutes(db: Database) -> None:
+    clock = FakeClock()
+
+    async def status(_symbol: str) -> DataStatus:
+        return ok()
+
+    feed = NewsFeed(NewsRepository(db), clock, status)
+    await seed(db, "AAPL", "oct one", datetime(2026, 10, 2, 15, tzinfo=UTC))
+
+    first = await feed.page("AAPL")
+    await seed(db, "AAPL", "oct two", datetime(2026, 10, 2, 16, tzinfo=UTC))
+    cached = await feed.page("AAPL")
+    clock.now += timedelta(minutes=5, seconds=1)
+    fresh = await feed.page("AAPL")
+
+    assert first.months is not None and cached.months is not None and fresh.months is not None
+    assert [m.count for m in first.months] == [1]
+    assert [m.count for m in cached.months] == [1]
+    assert [m.count for m in fresh.months] == [2]

@@ -1,7 +1,8 @@
 """Near-duplicate headline detection (pure).
 
 Lives in ``domain/news`` so the rule is testable without Mongo and stays under the
-import-linter purity contract.
+import-linter purity contract. It favours precision: a false merge hides one story behind
+another (and averages opposite sentiments), while a missed merge only costs a repeated row.
 """
 
 import re
@@ -9,6 +10,8 @@ from collections.abc import Collection, Hashable, Sequence
 
 JACCARD_MIN = 0.5
 CONTAINMENT_MIN = 0.8
+MIN_SHARED = 2  # a match needs at least this many shared tokens
+MIN_CONTAINMENT_SIZE = 3  # containment only counts when the smaller set is at least this big
 
 _WORDS = re.compile(r"[a-z0-9]+")
 _STOP_WORDS = frozenset(
@@ -18,43 +21,88 @@ _STOP_WORDS = frozenset(
         *("their", "this", "to", "was", "were", "will", "with", "after", "over", "new"),
     }
 )
+_SUFFIXES = ("ing", "ed", "es", "s")
+_MIN_STEM = 3
 
 
-def title_tokens(title: str, ignore: Collection[str] = ()) -> frozenset[str]:
-    """Lowercase word set of ``title`` without punctuation, stop-words or ``ignore`` tokens.
+def _stem(word: str) -> str:
+    """Crude plural/tense stripping so "delays" and "delayed" meet; digits are left alone."""
+    for suffix in _SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= _MIN_STEM:
+            return word[: -len(suffix)]
+    return word
 
-    ``ignore`` is for the company ticker/name, which every headline about the symbol shares.
-    Apostrophes split words, so a possessive yields the noun and a one-letter token, which
-    is dropped along with other one-letter words (digits stay).
+
+def _stems(words: str) -> frozenset[str]:
+    return frozenset(_stem(w) for w in words.split())
+
+
+# Opposite-direction words. If one headline has a word from one side and the other a word
+# from the other side (and neither shares it), the stories disagree and never merge.
+_POSITIVE = _stems(
+    "up rise rises rose rising risen soar soars soared soaring surge surges surged jump "
+    "jumps jumped gain gains gained rally rallies rallied upgrade upgrades upgraded buy "
+    "buys bullish beat beats raise raises raised climb climbs climbed"
+)
+_NEGATIVE = _stems(
+    "down fall falls fell falling plunge plunges plunged slump slumps slumped sink sinks "
+    "sank drop drops dropped lose loses lost losing downgrade downgrades downgraded sell "
+    "sells bearish miss misses missed cut cuts slide slides slid tumble tumbles tumbled"
+)
+
+
+def _title_tokens(title: str, ignore: Collection[str] = ()) -> frozenset[str]:
+    """Stemmed word set of ``title`` without punctuation, stop-words or ``ignore`` words.
+
+    ``ignore`` is for the company name and ticker, which every headline about the symbol
+    shares. Apostrophes split words; one-letter words are dropped (digits stay).
     """
-    words = _WORDS.findall(title.lower())
     skip = _STOP_WORDS | {w.lower() for w in ignore}
-    return frozenset(w for w in words if (len(w) > 1 or w.isdigit()) and w not in skip)
+    words = (w for w in _WORDS.findall(title.lower()) if w not in skip)
+    return frozenset(_stem(w) for w in words if len(w) > 1 or w.isdigit())
 
 
-def are_similar(a: frozenset[str], b: frozenset[str]) -> bool:
-    """Jaccard >= 0.5, or the smaller set has at least 80% of its tokens in the other."""
-    if not a or not b:
+def _opposed(only_a: frozenset[str], only_b: frozenset[str]) -> bool:
+    return bool(
+        (only_a & _POSITIVE and only_b & _NEGATIVE) or (only_a & _NEGATIVE and only_b & _POSITIVE)
+    )
+
+
+def _are_similar(a: frozenset[str], b: frozenset[str]) -> bool:
+    shared = a & b
+    if len(shared) < MIN_SHARED:
         return False
-    shared = len(a & b)
-    if shared / len(a | b) >= JACCARD_MIN:
+    only_a, only_b = a - b, b - a
+    # Headlines that differ in a number (Q1/Q2, $100M/$50M) are different stories.
+    if any(any(c.isdigit() for c in t) for t in only_a | only_b):
+        return False
+    if _opposed(only_a, only_b):
+        return False
+    if len(shared) / len(a | b) >= JACCARD_MIN:
         return True
-    return shared / min(len(a), len(b)) >= CONTAINMENT_MIN
+    smaller = min(len(a), len(b))
+    return smaller >= MIN_CONTAINMENT_SIZE and len(shared) / smaller >= CONTAINMENT_MIN
 
 
-def cluster_stories(days: Sequence[Hashable], tokens: Sequence[frozenset[str]]) -> list[list[int]]:
-    """Groups of indexes of same-``days`` entries with similar ``tokens``.
+def cluster_stories(
+    items: Sequence[tuple[Hashable, str]], ignore: Collection[str] = ()
+) -> list[list[int]]:
+    """Groups of indexes of near-duplicate headlines published on the same day.
 
-    Input is newest first, so the first index of a group is its main (newest) article and
-    the rest keep that order. Each entry is compared with the main article of each existing
-    group of its day (no chaining, so groups cannot drift). Every index appears exactly
-    once; groups are ordered by their main index.
+    ``items`` are ``(day, title)`` newest first, so the first index of a group is its main
+    (newest) article and the rest keep that order. ``ignore`` holds company-name and ticker
+    words. Two headlines match when they share at least two tokens, differ in no number and
+    no opposite-direction word pair, and have Jaccard >= 0.5 or (for sets of 3+) one holds
+    >= 80% of the other. Each entry is compared with the main article of each existing group
+    of its day (no chaining, so groups cannot drift). Every index appears exactly once;
+    groups are ordered by their main index.
     """
+    tokens = [_title_tokens(title, ignore) for _, title in items]
     groups: list[list[int]] = []
-    for i, day in enumerate(days):
+    for i, (day, _) in enumerate(items):
         for group in groups:
             head = group[0]
-            if days[head] == day and are_similar(tokens[head], tokens[i]):
+            if items[head][0] == day and _are_similar(tokens[head], tokens[i]):
                 group.append(i)
                 break
         else:

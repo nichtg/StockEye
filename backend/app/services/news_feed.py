@@ -16,10 +16,11 @@ from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from app.domain.macro import bucket_of, is_price_recap
-from app.domain.news import cluster_stories, title_tokens
+from app.domain.news import InvalidMonthError, cluster_stories, month_window
 from app.repositories.news import RecentArticle
 from app.services.calendars import exchange_tz
 from app.services.errors import AppError
+from app.services.news import core_name
 from app.services.reports import (
     NewsArticleOut,
     NewsArticlesOut,
@@ -37,6 +38,7 @@ MAX_LIMIT = 50
 # that (a stream of mostly recaps), it is returned as is with a cursor to continue from, so a
 # page can be short or even empty while ``next_cursor`` is set.
 MAX_ROUNDS = 5
+MONTHS_TTL = timedelta(minutes=5)
 _EARLIEST_CURSOR = datetime(2000, 1, 1, tzinfo=UTC)
 _CURSOR_FUTURE_SLACK = timedelta(days=1)
 
@@ -97,31 +99,13 @@ def _sentiment_label(score: float | None) -> SentimentLabel:
     return "not_scored" if score is None else bucket_of(score)
 
 
-_MONTH = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
 _MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
 def _bad_month() -> AppError:
     return AppError(
-        422,
-        "validation_error",
-        f"month must be YYYY-MM within the last {NEWS_TAB_DAYS} days.",
+        422, "validation_error", f"month must be YYYY-MM within the last {NEWS_TAB_DAYS} days."
     )
-
-
-def _month_bounds(month: str, tz: ZoneInfo) -> tuple[datetime, datetime]:
-    """UTC ``[start, end)`` of the exchange-local calendar ``month`` ("YYYY-MM")."""
-    match = _MONTH.fullmatch(month)
-    if match is None:
-        raise _bad_month()
-    year, number = int(match[1]), int(match[2])
-    following = (year + number // 12, number % 12 + 1)
-    try:
-        start = datetime(year, number, 1, tzinfo=tz).astimezone(UTC)
-        end = datetime(following[0], following[1], 1, tzinfo=tz).astimezone(UTC)
-    except (ValueError, OverflowError) as exc:  # year 0000 or 9999: outside datetime's range
-        raise _bad_month() from exc
-    return start, end
 
 
 def _month_key(moment: datetime, tz: ZoneInfo) -> str:
@@ -144,9 +128,13 @@ def _month_counts(titles: list[tuple[datetime, str]], tz: ZoneInfo) -> list[News
     ]
 
 
-def _ticker_tokens(symbol: str) -> set[str]:
-    """Ticker words every headline about the symbol shares ("D05.SI" gives d05 and si)."""
-    return {part for part in re.split(r"[^a-z0-9]+", symbol.lower()) if part}
+def _ignore_tokens(symbol: str, company_name: str | None) -> set[str]:
+    """Words every headline about the symbol shares: ticker parts and the company's core name.
+
+    ("D05.SI" gives d05 and si; "Rocket Lab Holdings, Inc." gives rocket and lab.)
+    """
+    text = symbol if company_name is None else f"{symbol} {core_name(company_name)}"
+    return {part for part in re.split(r"[^a-z0-9]+", text.lower()) if part}
 
 
 def _group_out(members: list[RecentArticle]) -> NewsArticleOut:
@@ -174,16 +162,14 @@ def _group_out(members: list[RecentArticle]) -> NewsArticleOut:
     )
 
 
-def _grouped(articles: list[RecentArticle], symbol: str, tz: ZoneInfo) -> list[NewsArticleOut]:
+def _grouped(articles: list[RecentArticle], ignore: set[str], tz: ZoneInfo) -> list[NewsArticleOut]:
     """Collapse same-exchange-day near-duplicate stories within one page (newest first).
 
     Grouping only sees the page it is given, so a story can split across a page edge; that
     is accepted rather than paying for look-ahead.
     """
-    ignore = _ticker_tokens(symbol)
-    days: list[date] = [a.published_at.astimezone(tz).date() for a in articles]
-    tokens = [title_tokens(a.title, ignore) for a in articles]
-    return [_group_out([articles[i] for i in g]) for g in cluster_stories(days, tokens)]
+    items = [(a.published_at.astimezone(tz).date(), a.title) for a in articles]
+    return [_group_out([articles[i] for i in g]) for g in cluster_stories(items, ignore)]
 
 
 @dataclass(frozen=True)
@@ -229,10 +215,15 @@ class NewsFeed:
         repo: _ArticleSource,
         clock: Callable[[], datetime],
         status: Callable[[str], Awaitable[DataStatus]],
+        company_name: Callable[[str], Awaitable[str]] | None = None,
     ) -> None:
         self._repo = repo
         self._clock = clock
         self._status = status
+        self._company_name = company_name
+        # (symbol, window day) -> (expires_at, counts). A client can omit the cursor on every
+        # call, so the whole-window scan is cached rather than repeated.
+        self._months: dict[tuple[str, date], tuple[datetime, list[NewsMonthOut]]] = {}
 
     async def page(
         self,
@@ -262,10 +253,10 @@ class NewsFeed:
         until: datetime | None = None
         window_start = since
         if month is not None:
-            month_start, until = _month_bounds(month, tz)
-            if until <= since or month_start > now:
-                raise _bad_month()
-            window_start = max(month_start, since)
+            try:
+                window_start, until = month_window(month, tz, now, since)
+            except InvalidMonthError as exc:
+                raise _bad_month() from exc
 
         async def fetch(position: _Position | None) -> list[RecentArticle]:
             return await self._repo.recent(
@@ -275,15 +266,32 @@ class NewsFeed:
         async def months() -> list[NewsMonthOut] | None:
             if before is not None:
                 return None
-            return _month_counts(await self._repo.window_titles(symbol, since), tz)
+            return await self._month_counts(symbol, now, since, tz)
 
-        page, status, month_counts = await asyncio.gather(
-            _collect_page(fetch, limit, start), self._status(symbol), months()
+        async def ignore() -> set[str]:
+            name = None if self._company_name is None else await self._company_name(symbol)
+            return _ignore_tokens(symbol, name)
+
+        page, status, month_counts, skip = await asyncio.gather(
+            _collect_page(fetch, limit, start), self._status(symbol), months(), ignore()
         )
         return NewsArticlesOut(
-            articles=_grouped(page.articles, symbol, tz),
+            articles=_grouped(page.articles, skip, tz),
             next_cursor=None if page.next_position is None else _encode_cursor(page.next_position),
             since=since,
             status=status,
             months=month_counts,
         )
+
+    async def _month_counts(
+        self, symbol: str, now: datetime, since: datetime, tz: ZoneInfo
+    ) -> list[NewsMonthOut]:
+        """Per-month counts, cached for ``MONTHS_TTL`` per symbol and (UTC) window day."""
+        key = (symbol, now.date())
+        cached = self._months.get(key)
+        if cached is not None and now < cached[0]:
+            return cached[1]
+        counts = _month_counts(await self._repo.window_titles(symbol, since), tz)
+        self._months = {k: v for k, v in self._months.items() if now < v[0]}  # drop stale
+        self._months[key] = (now + MONTHS_TTL, counts)
+        return counts

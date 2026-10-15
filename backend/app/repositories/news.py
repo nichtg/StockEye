@@ -237,6 +237,7 @@ class NewsRepository:
         rule, so the caller counts. Cost: a two-field projection, a few thousand titles at
         most per symbol over six months.
         """
+        # No ``until``: deliberately the whole window, whichever month the tab shows.
         cursor = self._articles.find(
             _recent_query(symbol, since, None), {"title": 1, "published_at": 1}
         )
