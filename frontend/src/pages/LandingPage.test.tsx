@@ -10,17 +10,21 @@ describe('LandingPage', () => {
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'The week ahead, in one line',
       'What the news really did',
-      'Find stocks people overlook',
+      'Find smaller companies to look into',
       'Start with one stock',
     ]);
   });
 
   it('links the calls to action to register and login', () => {
     renderApp(<LandingPage />);
-    for (const link of screen.getAllByRole('link', { name: 'Create a free account' })) {
+    const create = screen.getAllByRole('link', { name: 'Create a free account' });
+    const signIn = screen.getAllByRole('link', { name: 'Sign in' });
+    expect(create).toHaveLength(2);
+    expect(signIn).toHaveLength(2);
+    for (const link of create) {
       expect(link).toHaveAttribute('href', '/register');
     }
-    for (const link of screen.getAllByRole('link', { name: 'Sign in' })) {
+    for (const link of signIn) {
       expect(link).toHaveAttribute('href', '/login');
     }
   });

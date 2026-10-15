@@ -2,10 +2,11 @@ import { lazy } from 'react';
 import { Route, Routes } from 'react-router';
 import { AppShell } from './components/AppShell';
 import { NotFoundView } from './components/NotFoundView';
-import { HomeRoute } from './features/auth/HomeRoute';
 import { PublicOnly } from './features/auth/PublicOnly';
 import { RequireAuth } from './features/auth/RequireAuth';
 import { useMe } from './features/auth/useAuth';
+import HomePage from './pages/HomePage';
+import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 
@@ -26,7 +27,12 @@ export function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
       </Route>
-      <Route index element={<HomeRoute />} />
+      {/* The home route also serves signed-out visitors, with the landing page. */}
+      <Route element={<RequireAuth signedOut={<LandingPage />} />}>
+        <Route element={<AppShell />}>
+          <Route index element={<HomePage />} />
+        </Route>
+      </Route>
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
           <Route path="/stock/:symbol" element={<StockPage />} />

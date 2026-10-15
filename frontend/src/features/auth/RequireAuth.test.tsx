@@ -2,6 +2,7 @@ import { screen, waitFor } from '@testing-library/react';
 import { useLocation } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../App';
+import { signedOutOnPurposeKey } from '../../api/keys';
 import { REFRESH_KEY } from '../../api/tokens';
 import { stubFetch } from '../../test/mockApi';
 import { renderApp } from '../../test/render';
@@ -22,7 +23,7 @@ function storeSession() {
   localStorage.setItem(REFRESH_KEY, JSON.stringify({ t: 'refresh', u: 'u1' }));
 }
 
-describe('HomeRoute', () => {
+describe('RequireAuth on the home route', () => {
   it('shows the landing page at once, with no /me request, when no session is stored', () => {
     const seen = stubFetch(() => undefined);
     renderApp(<App />);
@@ -87,6 +88,26 @@ describe('HomeRoute', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('loc')).toHaveTextContent('/login?next=%2Fstock%2FAAPL');
+    });
+  });
+
+  it('goes to /login, not the landing page, after the account was deleted here', async () => {
+    storeSession();
+    stubFetch((req) =>
+      req.path === '/me'
+        ? { status: 401, body: { error: { code: 'unauthorized', message: 'no' } } }
+        : undefined,
+    );
+    const { client } = renderApp(
+      <>
+        <App />
+        <Probe />
+      </>,
+    );
+    client.setQueryData(signedOutOnPurposeKey, true);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loc').textContent).toBe('/login');
     });
   });
 });

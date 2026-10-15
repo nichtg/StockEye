@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 
-export function useDocumentTitle(title: string): void {
+/** Matches the static title in index.html, so the landing page and a fresh load agree. */
+export const DEFAULT_TITLE = 'StockEye – plain-English stock analysis';
+
+export function useDocumentTitle(title = ''): void {
   useEffect(() => {
-    document.title = title ? `${title} – StockEye` : 'StockEye';
+    document.title = title ? `${title} – StockEye` : DEFAULT_TITLE;
   }, [title]);
 }
 
