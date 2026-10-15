@@ -119,7 +119,17 @@ class ProviderGuard:
             raise ValueError(f"no quota limits configured for provider {provider!r}")
 
     async def call[T](self, provider: str, operation: Callable[[], Awaitable[T]]) -> T:
-        """Run ``operation`` under breaker, quota and retry. Raises only ``ProviderError``s."""
+        """Run ``operation`` under breaker, quota and retry. Raises only ``ProviderError``s.
+
+        Scheduled work (see ``scheduled_calls``) waits out a per-minute block instead of failing:
+        nobody is waiting on it, and a dropped call would silently thin a nightly build. A daily
+        block still raises, since waiting cannot help.
+        """
+        if current_priority() == "scheduled":
+            return await self.call_patiently(provider, operation)
+        return await self._call_once(provider, operation)
+
+    async def _call_once[T](self, provider: str, operation: Callable[[], Awaitable[T]]) -> T:
         breaker = self.breaker(provider)
         if not breaker.allow():
             raise CircuitOpenError(provider, "circuit breaker is open; call skipped")
@@ -178,7 +188,7 @@ class ProviderGuard:
         waits = 0
         while True:
             try:
-                return await self.call(provider, operation)
+                return await self._call_once(provider, operation)
             except QuotaExhaustedError as exc:
                 waits += 1
                 if exc.window != "minute" or waits > MAX_QUOTA_WAITS:

@@ -72,7 +72,7 @@ async def test_screen_builds_the_query_with_region_exchanges_cap_and_volume(
     ops = _operands(capture)
     assert {"operator": "EQ", "operands": ["region", "us"]} in ops
     assert {"operator": "BTWN", "operands": ["intradaymarketcap", 3e8, 2e9]} in ops
-    assert {"operator": "GT", "operands": ["avgdailyvol3m", 200_000]} in ops
+    assert {"operator": "GTE", "operands": ["avgdailyvol3m", 200_000]} in ops
     exchange_op = next(o for o in ops if o["operator"] == "OR")
     codes = {e["operands"][1] for e in exchange_op["operands"]}
     assert {"NMS", "NYQ"} <= codes
@@ -90,7 +90,7 @@ async def test_screen_pe_limit_also_requires_a_positive_pe(
 
     ops = _operands(capture)
     assert {"operator": "GT", "operands": ["peratio.lasttwelvemonths", 0]} in ops
-    assert {"operator": "LT", "operands": ["peratio.lasttwelvemonths", 15.0]} in ops
+    assert {"operator": "LTE", "operands": ["peratio.lasttwelvemonths", 15.0]} in ops
 
 
 async def test_screen_singapore_restricts_to_the_sgx_exchange(
@@ -132,6 +132,27 @@ async def test_screen_drops_otc_etf_and_malformed_quotes_and_maps_the_rest(
     assert short.market_cap is None
     assert sgp.exchange == "SGX"
     assert sgp.pe_ratio is None
+
+
+async def test_screen_skips_odd_symbols_and_caps_long_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use(
+        monkeypatch,
+        [
+            _quote(symbol="OK.B-1", longName="N" * 500),
+            _quote(symbol="lower"),
+            _quote(symbol="../etc"),
+            _quote(symbol="A B"),
+            _quote(symbol="TOOLONGSYMBOL12345"),
+            _quote(symbol="A\nB"),
+        ],
+    )
+
+    result = await YahooMarketData().screen(_query())
+
+    assert [m.symbol for m in result] == ["OK.B-1"]
+    assert len(result[0].name) == 200
 
 
 async def test_screen_vendor_rate_limit_maps_to_the_taxonomy(

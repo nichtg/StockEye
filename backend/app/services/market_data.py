@@ -20,7 +20,16 @@ from app.db import Database
 from app.logging_setup import get_logger
 from app.providers.base import MarketDataProvider
 from app.providers.errors import ProviderDataError, ProviderError, SymbolNotFoundError
-from app.providers.models import Bar, CompanyProfile, CorporateEvent, Interval, Quote, SymbolMatch
+from app.providers.models import (
+    Bar,
+    CompanyProfile,
+    CorporateEvent,
+    Interval,
+    Quote,
+    ScreenMatch,
+    ScreenQuery,
+    SymbolMatch,
+)
 from app.repositories.bars import BarsRepository, FetchState
 from app.repositories.cache import CacheEntry, CacheRepository
 from app.repositories.events import EventsFetchState, EventsRepository
@@ -167,6 +176,20 @@ class MarketDataService:
             lambda: self._provider.profile(symbol),
         )
         return profile, degraded or ok()
+
+    async def screen(self, query: ScreenQuery) -> list[ScreenMatch]:
+        """Screener hits for ``query``, uncached (the Discover build is the only caller).
+
+        Raises ``AppError`` (503) when the provider fails; nothing is saved to fall back on here.
+        """
+        try:
+            return await self._provider.screen(query)
+        except ProviderError as exc:
+            raise AppError(
+                503,
+                "data_unavailable",
+                f"Stock screening is temporarily unavailable ({describe_failure(exc)}).",
+            ) from exc
 
     async def search(self, query: str) -> list[SymbolMatch]:
         """Matches for ``query``; a stale fallback is logged (the endpoint returns a bare list)."""

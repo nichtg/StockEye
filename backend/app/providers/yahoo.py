@@ -49,6 +49,9 @@ _MAX_SEARCH_RESULTS = 8
 _EARNINGS_LIMIT = 40  # about ten years of quarters
 _DESCRIPTION_MAX = 4000
 _SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
+# Screener symbols become URL paths and cache keys, so only plain tickers pass.
+_SYMBOL_RE = re.compile(r"[A-Z0-9][A-Z0-9.\-]{0,14}")
+_SCREEN_NAME_MAX = 200
 
 
 def _exchange_of(code: object) -> Exchange | None:
@@ -301,11 +304,11 @@ def _equity_query(query: ScreenQuery) -> yf.EquityQuery:
         yf.EquityQuery("eq", ["region", query.region]),
         yf.EquityQuery("is-in", ["exchange", *exchanges]),
         yf.EquityQuery("btwn", ["intradaymarketcap", query.min_market_cap, query.max_market_cap]),
-        yf.EquityQuery("gt", ["avgdailyvol3m", query.min_avg_volume]),
+        yf.EquityQuery("gte", ["avgdailyvol3m", query.min_avg_volume]),
     ]
     if query.max_pe is not None:
         parts.append(yf.EquityQuery("gt", ["peratio.lasttwelvemonths", 0]))
-        parts.append(yf.EquityQuery("lt", ["peratio.lasttwelvemonths", query.max_pe]))
+        parts.append(yf.EquityQuery("lte", ["peratio.lasttwelvemonths", query.max_pe]))
     return yf.EquityQuery("and", parts)
 
 
@@ -317,13 +320,13 @@ def _matches_of(quotes: list[dict[str, Any]]) -> list[ScreenMatch]:
             continue  # re-checked here: the query filter alone is not trusted
         symbol = _text(item.get("symbol"))
         name = _text(item.get("longName")) or _text(item.get("shortName"))
-        if symbol is None or name is None:
-            log.info("screen_quote_skipped", reason="missing symbol or name", symbol=symbol)
+        if symbol is None or name is None or not _SYMBOL_RE.fullmatch(symbol):
+            log.info("screen_quote_skipped", reason="missing or malformed symbol or name")
             continue
         matches.append(
             ScreenMatch(
                 symbol=symbol,
-                name=name,
+                name=name[:_SCREEN_NAME_MAX],
                 exchange=exchange,
                 currency=_text(item.get("currency")),
                 market_cap=_number(item.get("marketCap")),

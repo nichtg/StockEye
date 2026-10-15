@@ -323,5 +323,5 @@ def build_fake_services(
     )
     analysis = AnalysisService(db, market, news, admission, clock)
     feed = NewsFeed(NewsRepository(db), clock, news.status)
-    discover = DiscoverService(db, provider, market, analysis, clock)
+    discover = DiscoverService(db, market, analysis, clock)
     return Services(market, news, analysis, admission, guard, feed, discover)

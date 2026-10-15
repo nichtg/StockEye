@@ -74,10 +74,11 @@ async def _profile(market: MarketDataService, symbol: str) -> CompanyProfile | N
     return found
 
 
-async def build_row(
-    market: MarketDataService, analysis: AnalysisService, symbol: str
-) -> OverviewRow:
-    """One summary row; raises ``AppError`` when the price history or quote is unavailable."""
+async def _row(market: MarketDataService, analysis: AnalysisService, symbol: str) -> OverviewRow:
+    """One summary row; raises ``AppError`` when the price history or quote is unavailable.
+
+    The company profile adds about one vendor call per symbol per day (it is cached 24 hours).
+    """
     (frame, price_status), (quote, quote_status), technical, profile = await asyncio.gather(
         market.daily_history(symbol),
         market.quote(symbol),
@@ -114,15 +115,21 @@ async def build_row(
 
 
 async def build_overview(
-    market: MarketDataService, analysis: AnalysisService, symbols: list[str]
+    market: MarketDataService,
+    analysis: AnalysisService,
+    symbols: list[str],
+    concurrency: int = CONCURRENCY,
 ) -> list[OverviewRow]:
-    """Rows in the order of ``symbols``; a failing symbol becomes an "unavailable" row."""
-    gate = asyncio.Semaphore(CONCURRENCY)
+    """Rows in the order of ``symbols``; a failing symbol becomes an "unavailable" row.
+
+    ``concurrency`` bounds how many rows build at once (each row makes about 3 vendor calls).
+    """
+    gate = asyncio.Semaphore(concurrency)
 
     async def one(symbol: str) -> OverviewRow:
         async with gate:
             try:
-                return await build_row(market, analysis, symbol)
+                return await _row(market, analysis, symbol)
             except AppError as exc:
                 return _failed(symbol, exc.message)
             except Exception:
