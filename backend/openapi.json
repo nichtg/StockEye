@@ -948,6 +948,25 @@
               "default": 30,
               "title": "Limit"
             }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 7
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exchange-local month YYYY-MM within the six months",
+              "title": "Month"
+            },
+            "description": "Exchange-local month YYYY-MM within the six months"
           }
         ],
         "responses": {
@@ -2409,6 +2428,14 @@
               }
             ],
             "title": "Sentiment"
+          },
+          "similar": {
+            "items": {
+              "$ref": "#/components/schemas/SimilarArticleOut"
+            },
+            "type": "array",
+            "title": "Similar",
+            "default": []
           }
         },
         "type": "object",
@@ -2449,6 +2476,20 @@
           },
           "status": {
             "$ref": "#/components/schemas/DataStatus"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NewsMonthOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
           }
         },
         "type": "object",
@@ -2460,6 +2501,29 @@
         ],
         "title": "NewsArticlesOut",
         "description": "One page of the News tab, newest first."
+      },
+      "NewsMonthOut": {
+        "properties": {
+          "month": {
+            "type": "string",
+            "title": "Month"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "month",
+          "label",
+          "count"
+        ],
+        "title": "NewsMonthOut"
       },
       "NewsProgressOut": {
         "properties": {
@@ -3294,6 +3358,36 @@
           "detail"
         ],
         "title": "SignalOut"
+      },
+      "SimilarArticleOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "url",
+          "source",
+          "published_at"
+        ],
+        "title": "SimilarArticleOut",
+        "description": "A near-duplicate of a group's main article (same story, another outlet)."
       },
       "Status": {
         "type": "string",

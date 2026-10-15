@@ -296,10 +296,19 @@ class _ScriptedSource:
         ]
 
     async def recent(
-        self, symbol: str, *, since: datetime, after: tuple[datetime, str] | None, limit: int
+        self,
+        symbol: str,
+        *,
+        since: datetime,
+        after: tuple[datetime, str] | None,
+        limit: int,
+        until: datetime | None = None,
     ) -> list[RecentArticle]:
         rows = [r for r in self.rows if after is None or r.position < after]
         return rows[: limit + 1]
+
+    async def window_titles(self, symbol: str, since: datetime) -> list[tuple[datetime, str]]:
+        return [(r.published_at, r.title) for r in self.rows]
 
 
 async def test_page_when_recaps_exhaust_the_rounds_pages_still_return_every_article_once() -> None:
@@ -310,7 +319,10 @@ async def test_page_when_recaps_exhaust_the_rounds_pages_still_return_every_arti
     async def status(_symbol: str) -> DataStatus:
         return ok()
 
-    feed = NewsFeed(source, lambda: NOW, status)
+    async def name(_symbol: str) -> str:
+        return "Apple Inc."
+
+    feed = NewsFeed(source, lambda: NOW, status, name)
     assert MAX_ROUNDS * 2 < 20  # limit 1 scans 2 rows a round, so the real rows are out of reach
     pages = []
     cursor: str | None = None

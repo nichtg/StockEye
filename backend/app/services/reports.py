@@ -234,13 +234,31 @@ class NewsProgressOut(IngestionOut):
 SentimentLabel = Literal["positive", "negative", "neutral", "not_scored"]
 
 
+class SimilarArticleOut(BaseModel):
+    """A near-duplicate of a group's main article (same story, another outlet)."""
+
+    title: str
+    url: str  # always http(s)
+    source: str
+    published_at: datetime
+
+
 class NewsArticleOut(BaseModel):
     published_at: datetime
     title: str
     url: str  # always http(s)
     source: str
+    # For a group: the mean score of its scored members (main article included).
     sentiment_label: SentimentLabel
     sentiment: float | None  # [-1, 1]; None until the article is scored
+    # Same-day near-duplicates of this article, newest first; [] when nothing groups.
+    similar: list[SimilarArticleOut] = []
+
+
+class NewsMonthOut(BaseModel):
+    month: str  # "YYYY-MM", exchange-local
+    label: str  # "Oct 2026"
+    count: int  # articles the feed would show (price recaps excluded); always > 0
 
 
 class NewsArticlesOut(BaseModel):
@@ -252,6 +270,9 @@ class NewsArticlesOut(BaseModel):
     next_cursor: str | None
     since: datetime  # start of the window (UTC)
     status: DataStatus  # news ingestion status
+    # Per-month counts over the whole window, newest first, whatever month is selected.
+    # Only on the first page (no cursor); null on later pages.
+    months: list[NewsMonthOut] | None = None
 
 
 class MacroResponse(BaseModel):
