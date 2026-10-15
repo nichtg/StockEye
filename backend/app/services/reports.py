@@ -277,6 +277,7 @@ class ChartData(BaseModel):
     symbol: str
     range: RangeKey
     interval: Interval
+    visible_from: str | int  # time of the first candle of the chosen range (initial left edge)
     candles: list[Candle]
     indicators: dict[str, list[SeriesPoint]]
     markers: list[Marker]

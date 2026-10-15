@@ -68,11 +68,11 @@ describe('useNewsProgress', () => {
 
     await tick();
     expect(await screen.findByText('16 months')).toBeInTheDocument();
-    expect(invalidated()).toEqual(['macro']);
+    expect(invalidated()).toEqual(['macro', 'news-articles']);
 
     await tick();
     expect(await screen.findByText('24 months')).toBeInTheDocument();
-    expect(invalidated()).toEqual(['macro', 'macro', 'chart']);
+    expect(invalidated()).toEqual(['macro', 'news-articles', 'macro', 'news-articles', 'chart']);
     expect(await screen.findByText(FINISHED)).toBeInTheDocument();
 
     // Done: polling stops.
@@ -80,6 +80,26 @@ describe('useNewsProgress', () => {
     await tick();
     await tick();
     expect(seen.length).toBe(before);
+  });
+
+  it('refetches the news articles when a month lands', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let calls = 0;
+    stubFetch((req) => {
+      if (req.path !== '/stocks/AAPL/news') return undefined;
+      calls += 1;
+      return { body: progress(false, calls + 1) };
+    });
+    const { client } = renderApp(<Poller symbol="AAPL" />);
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const articleCalls = () =>
+      spy.mock.calls.filter(([filters]) => filters?.queryKey?.[2] === 'news-articles').length;
+
+    expect(await screen.findByText('2 months')).toBeInTheDocument();
+    expect(articleCalls()).toBe(0);
+    await tick();
+    expect(await screen.findByText('3 months')).toBeInTheDocument();
+    expect(articleCalls()).toBe(1);
   });
 
   it('refreshes the chart once when the first few months land, and again at the finish', async () => {

@@ -1,9 +1,15 @@
 import { screen } from '@testing-library/react';
 import { useEffect } from 'react';
-import { Route, Routes } from 'react-router';
+import { Route, Routes, useLocation } from 'react-router';
 import type { FullStatuses } from '../api/types';
 import { stubFetch } from '../test/mockApi';
-import { stockFixture } from '../test/fixtures';
+import userEvent from '@testing-library/user-event';
+import {
+  articleFixture,
+  articlesPageFixture,
+  profileFixture,
+  stockFixture,
+} from '../test/fixtures';
 import { renderApp } from '../test/render';
 import StockPage from './StockPage';
 
@@ -23,6 +29,69 @@ vi.mock('../features/chart/StockChart', () => ({
     return null;
   },
 }));
+
+function LocationProbe() {
+  return <output data-testid="search">{useLocation().search}</output>;
+}
+
+describe('Stock page tabs', () => {
+  function stub() {
+    return stubFetch((req) => {
+      if (req.path === '/stocks/AAPL') return { body: stockFixture };
+      if (req.path === '/stocks/AAPL/news/articles') {
+        return { body: articlesPageFixture([articleFixture({ title: 'A headline' })]) };
+      }
+      return undefined;
+    });
+  }
+  function renderAt(route: string) {
+    return renderApp(
+      <>
+        <LocationProbe />
+        <Routes>
+          <Route path="/stock/:symbol" element={<StockPage />} />
+        </Routes>
+      </>,
+      { route },
+    );
+  }
+
+  it('selects the News tab from ?tab=news and loads its articles', async () => {
+    const seen = stub();
+    renderAt('/stock/AAPL?tab=news');
+    const tab = await screen.findByRole('tab', { name: 'News (6 months)' });
+    expect(tab).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByText('A headline')).toBeInTheDocument();
+    expect(seen.some((r) => r.path === '/stocks/AAPL/news/articles')).toBe(true);
+  });
+
+  it('does not fetch articles on another tab, and switching to News gets them', async () => {
+    const user = userEvent.setup();
+    const seen = stub();
+    renderAt('/stock/AAPL');
+    await screen.findByRole('tab', { name: 'News (6 months)' });
+    expect(seen.some((r) => r.path === '/stocks/AAPL/news/articles')).toBe(false);
+
+    await user.click(screen.getByRole('tab', { name: 'News (6 months)' }));
+    expect(screen.getByRole('tab', { name: 'News (6 months)' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByTestId('search')).toHaveTextContent('?tab=news');
+    expect(await screen.findByText('A headline')).toBeInTheDocument();
+  });
+
+  it.each(['technical', 'macro', 'news'])('shows About on the %s tab', async (tab) => {
+    stubFetch((req) => {
+      if (req.path === '/stocks/AAPL') return { body: stockFixture };
+      if (req.path === '/stocks/AAPL/profile') return { body: profileFixture };
+      if (req.path === '/stocks/AAPL/news/articles') return { body: articlesPageFixture([]) };
+      return undefined;
+    });
+    renderAt(`/stock/AAPL?tab=${tab}`);
+    expect(await screen.findByRole('heading', { name: 'About Apple Inc.' })).toBeInTheDocument();
+  });
+});
 
 describe('Stock page header status', () => {
   it('keeps price and events problems, and takes the news line from the live poller only', async () => {

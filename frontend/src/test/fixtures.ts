@@ -1,4 +1,52 @@
-import type { MacroResponse, StockOut, TechnicalReport } from '../api/types';
+import type {
+  MacroResponse,
+  NewsArticle,
+  NewsArticlesPage,
+  Profile,
+  StockOut,
+  TechnicalReport,
+} from '../api/types';
+
+export const profileFixture: Profile = {
+  description: 'Apple designs, makes and sells smartphones, computers and services worldwide.',
+  sector: 'Technology',
+  industry: 'Consumer Electronics',
+  country: 'United States',
+  website: 'https://www.apple.com',
+  employees: 164000,
+  market_cap: 3.2e12,
+  pe_ratio: 31.46,
+  dividend_yield: 0.0044,
+  week52_low: 164.08,
+  week52_high: 237.23,
+  avg_volume: 55_300_000,
+  currency: 'USD',
+  data_status: { state: 'ok' },
+};
+
+export function articleFixture(overrides: Partial<NewsArticle> = {}): NewsArticle {
+  return {
+    published_at: '2026-10-03T15:00:00Z',
+    title: 'Apple unveils a new chip',
+    url: 'https://example.com/chip',
+    source: 'Wire',
+    sentiment_label: 'positive',
+    sentiment: 0.6,
+    ...overrides,
+  };
+}
+
+export function articlesPageFixture(
+  articles: NewsArticle[],
+  nextCursor: string | null = null,
+): NewsArticlesPage {
+  return {
+    articles,
+    next_cursor: nextCursor,
+    since: '2026-04-03T00:00:00Z',
+    status: { state: 'ok' },
+  };
+}
 
 export const stockFixture: StockOut = {
   symbol: 'AAPL',

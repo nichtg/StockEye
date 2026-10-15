@@ -1,11 +1,13 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { api } from '../../api/client';
 import {
   chartKey,
   chartRootKey,
   macroKey,
+  newsArticlesKey,
   newsKey,
+  profileKey,
   searchKey,
   stockKey,
   technicalKey,
@@ -15,7 +17,9 @@ import { ALL_INDICATORS } from '../chart/indicators';
 import type {
   ChartData,
   MacroResponse,
+  NewsArticlesPage,
   NewsProgress,
+  Profile,
   RangeKey,
   StockOut,
   SymbolMatch,
@@ -30,6 +34,36 @@ export function useStock(symbol: string) {
   return useQuery({
     queryKey: stockKey(symbol),
     queryFn: ({ signal }) => api.get<StockOut>(`/stocks/${encodeURIComponent(symbol)}`, { signal }),
+  });
+}
+
+/** The server caches the profile for 24 h, so a long staleTime saves round trips. */
+export const PROFILE_STALE_MS = 60 * 60 * 1000;
+export const NEWS_PAGE_SIZE = 30;
+
+export function useProfile(symbol: string) {
+  return useQuery({
+    queryKey: profileKey(symbol),
+    staleTime: PROFILE_STALE_MS,
+    queryFn: ({ signal }) =>
+      api.get<Profile>(`/stocks/${encodeURIComponent(symbol)}/profile`, { signal }),
+  });
+}
+
+/**
+ * The News tab's articles, newest first, one cursor page at a time. Reads only: collection is
+ * started by useNewsProgress, which also refetches these pages as months land.
+ */
+export function useNewsArticles(symbol: string) {
+  return useInfiniteQuery({
+    queryKey: newsArticlesKey(symbol),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ signal, pageParam }) =>
+      api.get<NewsArticlesPage>(`/stocks/${encodeURIComponent(symbol)}/news/articles`, {
+        signal,
+        query: { limit: NEWS_PAGE_SIZE, before: pageParam },
+      }),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
 }
 
@@ -95,6 +129,7 @@ export function useNewsProgress(symbol: string) {
     const finished = before.inProgress && !data.in_progress;
     if (finished || data.months_done > before.monthsDone) {
       void client.invalidateQueries({ queryKey: macroKey(symbol) });
+      void client.invalidateQueries({ queryKey: newsArticlesKey(symbol) });
     }
     // The backend rebuilds markers on every month, so refresh the chart once early, not each time.
     const firstDots =

@@ -77,7 +77,8 @@ async def test_chart_returns_candles_and_requested_indicators(user: httpx.AsyncC
     assert resp.status_code == 200
     assert body["interval"] == "1d"
     assert set(body["indicators"]) == {"sma20", "rsi"}
-    assert len(body["indicators"]["sma20"]) == len(body["candles"])
+    assert 0 < len(body["indicators"]["sma20"]) < len(body["candles"])  # starts after warm-up
+    assert body["visible_from"] in {c["time"] for c in body["candles"]}
     assert set(body["data_status"]) == {"prices", "events", "news", "overall"}
     assert isinstance(body["candles"][0]["time"], str)
 
