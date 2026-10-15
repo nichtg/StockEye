@@ -153,6 +153,7 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
     mean: number | null,
     ci: [number, number] | null,
     label: 'clear_effect' | 'possible_effect' | 'no_clear_effect' | null,
+    p: number | null,
   ) => ({
     bucket,
     n,
@@ -164,17 +165,18 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
     mean_car_pre_5: null,
     n_car_pre_5: n,
     t: null,
-    p_value: ci ? 0.2 : null,
+    p_value: p,
     label,
     ci_low_0_1: ci?.[0] ?? null,
     ci_high_0_1: ci?.[1] ?? null,
   });
   const primaryStats = {
     ...emptyStats,
+    n_used: 37,
     buckets: {
-      positive: bucketStats('positive', 21, 0.01, [-0.004, 0.024], 'no_clear_effect'),
-      neutral: bucketStats('neutral', 12, -0.012, [-0.02, -0.004], 'clear_effect'),
-      negative: bucketStats('negative', 4, null, null, null),
+      positive: bucketStats('positive', 21, 0.01, [-0.004, 0.024], 'no_clear_effect', 0.31),
+      neutral: bucketStats('neutral', 12, -0.012, [-0.02, -0.004], 'clear_effect', 0.002),
+      negative: bucketStats('negative', 4, null, null, null, null),
     },
   };
   return {

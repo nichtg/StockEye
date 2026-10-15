@@ -5,12 +5,10 @@ import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
-import Typography from '@mui/material/Typography';
 import type { MacroStatsOut, Reliability } from '../../api/types';
 import { Term } from '../../components/Term';
 import { formatPct, formatSigned } from '../../lib/format';
 import { RELIABILITY_LABEL, SCOPE_NAME, pValueText, type Scope } from './macroText';
-import { ScopeLabel } from './ScopeLabel';
 
 interface Row {
   measure: string;
@@ -63,9 +61,6 @@ function rowsOf(stats: MacroStatsOut): Row[] {
 export function ScopeTable({ scope, stats }: { scope: Scope; stats: MacroStatsOut }) {
   return (
     <Box sx={{ mb: 3 }}>
-      <Typography variant="subtitle1" sx={{ color: 'ink', px: 2, pt: 1.5 }}>
-        <ScopeLabel scope={scope} />
-      </Typography>
       <TableContainer>
         <Table aria-label={SCOPE_NAME[scope]}>
           <TableHead>

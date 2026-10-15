@@ -172,10 +172,13 @@ describe('Macro tab', () => {
     );
     renderApp(<MacroTab symbol="AAPL" exchange="US" />);
     await expandMethod();
-    expect((await screen.findAllByText('Clear news effect')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Possible news effect').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('No clear news effect').length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'What is News effect?' })).toHaveLength(4); // 3 findings + the table header
+    const list = (await screen.findByText('Finding for clear_effect.')).closest(
+      'ul',
+    ) as HTMLElement;
+    expect(within(list).getByText('Clear news effect')).toBeInTheDocument();
+    expect(within(list).getByText('Possible news effect')).toBeInTheDocument();
+    expect(within(list).getByText('No clear news effect')).toBeInTheDocument();
+    expect(within(list).getAllByRole('button', { name: 'What is News effect?' })).toHaveLength(3);
   });
 
   it('shows the earnings note under the findings only when there is one', async () => {
@@ -259,7 +262,7 @@ describe('Macro tab', () => {
     const user = userEvent.setup();
     renderApp(<MacroTab symbol="AAPL" exchange="US" />);
     await user.click(await screen.findByRole('button', { name: METHOD }));
-    expect((await screen.findAllByText(/Excluding days near/)).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Excluding days near/)).toBeInTheDocument();
     expect((await screen.findAllByText('All news days')).length).toBeGreaterThan(0);
   });
 

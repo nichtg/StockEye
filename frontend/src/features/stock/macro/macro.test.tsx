@@ -130,7 +130,7 @@ describe('How this was worked out', () => {
     expect(await screen.findByText(/Based on news from/)).toBeInTheDocument();
     expect(screen.getByText(/Across 34 news days studied/)).toBeInTheDocument();
     expect(screen.getByText(/would appear by chance about 4 in 100 times/)).toBeInTheDocument();
-    expect(screen.getAllByText(/Excluding days near/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Excluding days near/)).toBeInTheDocument();
   });
 
   it('keeps the empty state when there is nothing to analyse', async () => {
@@ -141,5 +141,79 @@ describe('How this was worked out', () => {
     expect(
       screen.queryByRole('button', { name: 'How this was worked out' }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('Thin and edge states', () => {
+  const insufficient = (id: 'good_news' | 'bad_news' | 'overall', question: string) => ({
+    id,
+    question,
+    answer: 'Not enough data',
+    answer_kind: 'insufficient' as const,
+    detail: 'Only 1 day so far; at least 10 are needed.',
+  });
+
+  it('collapses all-insufficient answers with no tested bucket into one line and no chart', async () => {
+    const data = macroFixture();
+    if (!data.report) throw new Error('fixture has no report');
+    data.report.verdicts = [
+      insufficient('good_news', 'Does good news lift the price?'),
+      insufficient('bad_news', 'Does bad news drag it down?'),
+      insufficient('overall', 'Do good-news days beat bad-news days?'),
+    ];
+    data.report.stats_ex_earnings = { ...data.report.stats_ex_earnings, buckets: {} };
+    show(data);
+    expect(
+      await screen.findByText('Not enough news yet to analyse this stock.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Answers' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /Average market-adjusted/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Faded: could be chance/)).not.toBeInTheDocument();
+  });
+
+  it('says there is no usable reading, not "not enough", for an untested bucket with enough days', async () => {
+    const data = macroFixture();
+    if (!data.report) throw new Error('fixture has no report');
+    const b = data.report.stats_ex_earnings.buckets;
+    data.report.stats_ex_earnings = {
+      ...data.report.stats_ex_earnings,
+      buckets: { ...b, negative: { ...b.negative!, n: 12 } },
+    };
+    show(data);
+    expect(
+      within(await screen.findByTestId('bucket-row-negative')).getByText(
+        'No usable reading yet (12 days)',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('draws a move that rounds to zero as flat: no glyph, no up or down colour', async () => {
+    const data = macroFixture();
+    if (!data.report) throw new Error('fixture has no report');
+    const b = data.report.stats_ex_earnings.buckets;
+    data.report.stats_ex_earnings = {
+      ...data.report.stats_ex_earnings,
+      buckets: {
+        ...b,
+        positive: { ...b.positive!, mean_car_0_1: 0.0003, ci_low_0_1: -0.01, ci_high_0_1: 0.01 },
+      },
+    };
+    show(data);
+    const row = await screen.findByTestId('bucket-row-positive');
+    expect(within(row).queryByText('▲')).not.toBeInTheDocument();
+    expect(row.querySelector('rect')).toHaveAttribute('fill', 'var(--se-ink3)');
+  });
+
+  it('drops the Faded note when no bar is faded', async () => {
+    const data = macroFixture();
+    if (!data.report) throw new Error('fixture has no report');
+    const b = data.report.stats_ex_earnings.buckets;
+    data.report.stats_ex_earnings = {
+      ...data.report.stats_ex_earnings,
+      buckets: { ...b, positive: { ...b.positive!, label: 'clear_effect' } },
+    };
+    show(data);
+    await screen.findByTestId('bucket-row-positive');
+    expect(screen.queryByText(/Faded: could be chance/)).not.toBeInTheDocument();
   });
 });

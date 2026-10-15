@@ -12,8 +12,9 @@ import { Term } from '../../components/Term';
 import type { Exchange } from '../../lib/exchange';
 import { formatRelative } from '../../lib/format';
 import { radius } from '../../theme/tokens';
-import { NOT_ENOUGH_NEWS, regimeSentence } from './macroText';
+import { NOT_ENOUGH_NEWS, primaryStatsOf, regimeSentence } from './macroText';
 import { BucketChart } from './macro/BucketChart';
+import { hasTestedBucket } from './macro/chartScale';
 import { MethodDetails } from './macro/MethodDetails';
 import { VerdictList } from './macro/VerdictList';
 import { TopEvents } from './TopEvents';
@@ -34,9 +35,15 @@ function Results({
   const empty =
     report.events_total === 0 && report.top_events.length === 0 && report.timeline.length === 0;
   if (empty && !collecting) return <Typography>{NOT_ENOUGH_NEWS}</Typography>;
-  const answered = report.verdicts.length > 0;
-  const primaryStats =
-    report.primary_scope === 'excluding_earnings' ? report.stats_ex_earnings : report.stats_all;
+  const primaryStats = primaryStatsOf(report);
+  // One headline state: all-insufficient answers with no tested bucket collapse to a single line.
+  const tested = hasTestedBucket(primaryStats);
+  const thin =
+    report.verdicts.length > 0 &&
+    !tested &&
+    report.verdicts.every((v) => v.answer_kind === 'insufficient');
+  const showAnswers = report.verdicts.length > 0 && !thin;
+  const noAnswer = thin || (report.verdicts.length === 0 && report.primary_findings.length === 0);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -53,22 +60,22 @@ function Results({
           )}
         </Box>
         {report.value_statement && (
-          <Typography sx={{ color: 'ink2', mb: 2.5, maxWidth: 720 }}>
+          <Typography sx={{ color: 'ink2', mb: 3, maxWidth: 720 }}>
             {report.value_statement}
           </Typography>
         )}
-        {answered && (
+        {showAnswers && (
           <>
             <VerdictList verdicts={report.verdicts} />
-            <Box sx={{ mt: 3, maxWidth: 720 }}>
-              <BucketChart stats={primaryStats} />
-            </Box>
+            {tested && (
+              <Box sx={{ mt: 3, maxWidth: 720 }}>
+                <BucketChart stats={primaryStats} />
+              </Box>
+            )}
           </>
         )}
-        {!answered && report.primary_findings.length === 0 && (
-          <Typography>{NOT_ENOUGH_NEWS}</Typography>
-        )}
-        {(answered || report.primary_findings.length > 0) && (
+        {noAnswer && <Typography>{NOT_ENOUGH_NEWS}</Typography>}
+        {(showAnswers || report.primary_findings.length > 0) && (
           <Box sx={{ mt: 3 }}>
             <MethodDetails report={report} />
           </Box>

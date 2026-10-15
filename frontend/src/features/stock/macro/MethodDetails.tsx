@@ -7,6 +7,7 @@ import { formatMonthRange } from '../../../lib/format';
 import { FindingList } from '../FindingList';
 import { ScopeLabel } from '../ScopeLabel';
 import { ScopeTable } from '../ScopeTable';
+import { primaryStatsOf } from '../macroText';
 
 /**
  * The period and the size of the evidence behind a set of findings, from the very stats the
@@ -80,43 +81,44 @@ function detailsLine(report: MacroReportOut): string {
 
 /**
  * "How this was worked out": the method and the full evidence behind the headline answers. It is
- * demoted here, not removed: scope, period, day counts, findings with their chance sentences, the
- * earnings note, the second scope and the numbers table.
+ * demoted here, not removed. One block per scope: its label, period and day counts, findings with
+ * their chance sentences and the numbers table; then the earnings note.
  */
 export function MethodDetails({ report }: { report: MacroReportOut }) {
   const showScopes = report.secondary_scope != null;
-  const primaryStats =
-    report.primary_scope === 'excluding_earnings' ? report.stats_ex_earnings : report.stats_all;
+  const primaryStats = primaryStatsOf(report);
   return (
     <DetailsAccordion title="How this was worked out" unmountOnExit>
       <Box sx={{ p: 2 }}>
-        <Typography variant="caption" component="p" sx={{ color: 'ink3', mb: 0.5 }}>
+        <Typography variant="subtitle1" sx={{ color: 'ink', mb: 0.5 }}>
           <ScopeLabel scope={report.primary_scope} />
         </Typography>
         <NewsBasis stats={primaryStats} />
+        <Typography variant="caption" component="p" sx={{ color: 'ink3', mb: 1.5, maxWidth: 720 }}>
+          {detailsLine(report)}
+        </Typography>
         <FindingList findings={report.primary_findings} />
-        {report.earnings_note && (
-          <Typography variant="body2" sx={{ color: 'ink2', mt: 1.5, maxWidth: 720 }}>
-            <Term id="earnings" label="Earnings">
-              {report.earnings_note}
-            </Term>
-          </Typography>
-        )}
       </Box>
-      {showScopes && (
-        <Box sx={{ p: 2 }}>
-          <Typography variant="subtitle1" sx={{ color: 'ink', mb: 0.5 }}>
-            <ScopeLabel scope={report.secondary_scope} />
-          </Typography>
-          <NewsBasis stats={report.stats_all} />
-          <FindingList findings={report.secondary_findings} />
-        </Box>
-      )}
       <ScopeTable scope={report.primary_scope} stats={primaryStats} />
-      {showScopes && <ScopeTable scope="all_events" stats={report.stats_all} />}
-      <Typography variant="body2" sx={{ px: 2, pb: 2, color: 'ink2' }}>
-        {detailsLine(report)}
-      </Typography>
+      {showScopes && (
+        <>
+          <Box sx={{ p: 2 }}>
+            <Typography variant="subtitle1" sx={{ color: 'ink', mb: 0.5 }}>
+              <ScopeLabel scope={report.secondary_scope} />
+            </Typography>
+            <NewsBasis stats={report.stats_all} />
+            <FindingList findings={report.secondary_findings} />
+          </Box>
+          <ScopeTable scope="all_events" stats={report.stats_all} />
+        </>
+      )}
+      {report.earnings_note && (
+        <Typography variant="body2" sx={{ px: 2, pb: 2, color: 'ink2', maxWidth: 720 }}>
+          <Term id="earnings" label="Earnings">
+            {report.earnings_note}
+          </Term>
+        </Typography>
+      )}
     </DetailsAccordion>
   );
 }
