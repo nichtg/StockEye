@@ -1,15 +1,16 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
-import type { OverviewRow } from '../../api/types';
+import type { DiscoverRow } from '../../api/types';
 import { RemoveButton } from '../../features/watchlist/RemoveButton';
 import { WatchStar } from '../../features/discover/WatchStar';
 import { renderApp } from '../../test/render';
+import { WATCHLIST_COLUMNS, discoverColumns, type ExtraColumnId } from './columns';
 import { StockTable } from './StockTable';
 import { TableControls } from './TableControls';
 import { useTableState } from './useTableState';
 
-function row(symbol: string, over: Partial<OverviewRow> = {}): OverviewRow {
+function row(symbol: string, over: Partial<DiscoverRow> = {}): DiscoverRow {
   return {
     symbol,
     name: `${symbol} Corp`,
@@ -22,6 +23,8 @@ function row(symbol: string, over: Partial<OverviewRow> = {}): OverviewRow {
     country: 'United States',
     sector: null,
     market_cap: 1e9,
+    pe_ratio: 10,
+    avg_traded_value: 1.2e6,
     status: 'ok',
     status_reason: null,
     ...over,
@@ -55,9 +58,11 @@ function Harness({
   rows = ROWS,
   namespace = '',
   marketCap = false,
+  extra,
   star = false,
 }: {
-  rows?: OverviewRow[];
+  rows?: DiscoverRow[];
+  extra?: ExtraColumnId;
   namespace?: string;
   marketCap?: boolean;
   star?: boolean;
@@ -69,6 +74,7 @@ function Harness({
       <TableControls rows={rows} state={table} />
       <StockTable
         rows={rows}
+        columns={marketCap ? discoverColumns(extra) : WATCHLIST_COLUMNS}
         ariaLabel="Test list"
         state={table}
         actionLabel={star ? 'Watchlist' : 'Remove'}
@@ -229,6 +235,53 @@ describe('StockTable columns and actions', () => {
     expect(within(aaa).getByRole('button', { name: 'Add AAA to watchlist' })).toBeInTheDocument();
   });
 
+  it('has no P/E or trading column on the watchlist, even with a metric sort in the URL', () => {
+    renderApp(<Harness />, { route: '/?sort=pe&dir=desc' });
+    const table = screen.getByRole('table', { name: 'Test list' });
+    expect(within(table).queryByRole('columnheader', { name: /P\/E/ })).toBeNull();
+    expect(within(table).queryByRole('columnheader', { name: /Avg daily trading/ })).toBeNull();
+  });
+
+  it('adds only the chosen metric column, with its term, to a Discover table', () => {
+    renderApp(<Harness marketCap extra="pe" />);
+    const table = screen.getByRole('table', { name: 'Test list' });
+    expect(within(table).getByRole('columnheader', { name: /P\/E/ })).toBeInTheDocument();
+    expect(within(table).getByRole('button', { name: /What is P\/E ratio/ })).toBeInTheDocument();
+    expect(within(table).queryByRole('columnheader', { name: /Avg daily trading/ })).toBeNull();
+    expect(within(table).getAllByText('10.0')).toHaveLength(4);
+  });
+
+  it('shows average daily trading as compact currency and sorts it both ways', async () => {
+    const user = userEvent.setup({ delay: null });
+    const sg = { country: 'Singapore', exchange: 'SGX', currency: 'SGD' } as const;
+    const rows = [
+      row('AAA', { ...sg, avg_traded_value: 1.2e6 }),
+      row('BBB', { ...sg, avg_traded_value: 3e5 }),
+      row('CCC', { ...sg, avg_traded_value: 2.5e6 }),
+    ];
+    renderApp(<Harness rows={rows} marketCap extra="traded" />);
+    const table = screen.getByRole('table', { name: 'Test list' });
+    expect(within(table).getByText('S$1.2M')).toBeInTheDocument();
+    expect(
+      within(table).getByRole('button', { name: /What is Avg daily trading/ }),
+    ).toBeInTheDocument();
+    const order = () =>
+      within(screen.getByRole('table', { name: 'Test list' }))
+        .getAllByRole('link')
+        .map((a) => a.textContent);
+    const header = within(table).getByRole('button', { name: 'Avg daily trading' });
+    await user.click(header);
+    expect(order()).toEqual(['BBB', 'AAA', 'CCC']);
+    await user.click(header);
+    expect(order()).toEqual(['CCC', 'AAA', 'BBB']);
+  });
+
+  it('leaves a table without the sorted column in its own order', () => {
+    renderApp(<Harness marketCap />, { route: '/?sort=pe&dir=desc' });
+    const links = within(screen.getByRole('table', { name: 'Test list' })).getAllByRole('link');
+    expect(links.map((a) => a.textContent)).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
+  });
+
   it('encodes the symbol in the stock link and renders names as plain text', () => {
     const evil = row('A/B?<x>', { name: '<img src=x onerror=alert(1)>' });
     renderApp(<Harness rows={[evil]} />);
@@ -257,6 +310,13 @@ describe('StockTable on a phone', () => {
           onchange: null,
         }) as MediaQueryList,
     );
+  });
+
+  it('shows the metric under the price with its term', () => {
+    renderApp(<Harness marketCap extra="pe" />);
+    const list = screen.getByRole('list', { name: 'Test list' });
+    expect(within(list).getAllByRole('button', { name: /What is P\/E/ })).toHaveLength(4);
+    expect(within(list).getAllByText('10.0')).toHaveLength(4);
   });
 
   it('shows the country under the name and a Sort by select', async () => {

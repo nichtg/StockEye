@@ -50,6 +50,7 @@ export const TERM_IDS = [
   'market_cap',
   'discover_lists',
   'pe_ratio',
+  'avg_traded_value',
   'dividend_yield',
   'week52_range',
   'near_earnings',
@@ -257,6 +258,10 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   pe_ratio: {
     title: 'P/E ratio',
     body: 'The share price divided by the company’s yearly profit per share. A higher number means investors pay more for each dollar of profit, often because they expect growth.',
+  },
+  avg_traded_value: {
+    title: 'Avg daily trading',
+    body: 'The typical amount of money that changes hands in this stock each day, over the past three months: shares traded times price. A higher figure means the shares are easier to buy and sell.',
   },
   dividend_yield: {
     title: 'Dividend yield',

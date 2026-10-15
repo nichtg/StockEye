@@ -2,6 +2,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { QueryRegion } from '../components/QueryRegion';
+import { WATCHLIST_COLUMNS } from '../components/StockTable/columns';
 import { StockTable, StockTableSkeleton } from '../components/StockTable/StockTable';
 import { TableControls } from '../components/StockTable/TableControls';
 import { useTableState } from '../components/StockTable/useTableState';
@@ -48,6 +49,7 @@ export default function HomePage() {
             <>
               <TableControls rows={rows} state={table} />
               <StockTable
+                columns={WATCHLIST_COLUMNS}
                 rows={rows}
                 ariaLabel="Watchlist"
                 state={table}

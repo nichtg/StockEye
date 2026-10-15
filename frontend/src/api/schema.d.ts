@@ -548,8 +548,10 @@ export interface components {
       title: string;
       /** Description */
       description: string;
+      /** Order Label */
+      order_label: string;
       /** Rows */
-      rows: components['schemas']['OverviewRow'][];
+      rows: components['schemas']['DiscoverRow'][];
       status: components['schemas']['DataStatus'];
     };
     /** DiscoverOut */
@@ -559,6 +561,45 @@ export interface components {
       /** Updated At */
       updated_at: string | null;
       data_status: components['schemas']['DataStatus'];
+    };
+    /**
+     * DiscoverRow
+     * @description A watchlist-style row plus the figures Discover ranks by (money in the row's currency).
+     */
+    DiscoverRow: {
+      /** Symbol */
+      symbol: string;
+      /** Name */
+      name: string | null;
+      /** Exchange */
+      exchange: ('US' | 'SGX') | null;
+      /** Currency */
+      currency: string | null;
+      /** Last Price */
+      last_price: number | null;
+      /** Change 1W Pct */
+      change_1w_pct: number | null;
+      /** Sparkline */
+      sparkline: number[];
+      /** Lean */
+      lean: ('bullish' | 'bearish' | 'neutral') | null;
+      /** Country */
+      country: string | null;
+      /** Sector */
+      sector: string | null;
+      /** Market Cap */
+      market_cap: number | null;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'ok' | 'stale' | 'partial' | 'unavailable';
+      /** Status Reason */
+      status_reason: string | null;
+      /** Pe Ratio */
+      pe_ratio: number | null;
+      /** Avg Traded Value */
+      avg_traded_value: number | null;
     };
     /** EventPointOut */
     EventPointOut: {
