@@ -11,7 +11,7 @@ export interface IndicatorDef {
   label: string;
   term: TermId;
   /** One plain-English line shown on hover and keyboard focus of the toolbar chip. */
-  hint: (range: RangeKey) => string;
+  hint: (range: RangeKey, since?: string) => string;
   /** Line style on the chart; the legend swatch is drawn from the same value. */
   lineStyle: LineStyle;
   /** Pixels. Half pixels are valid on the canvas even though the typings only list integers. */
@@ -41,7 +41,7 @@ export const INDICATORS: IndicatorDef[] = [
     id: 'vwap',
     label: 'VWAP',
     term: 'vwap',
-    hint: (range) => vwapVariant(range).hint,
+    hint: (range, since) => vwapVariant(range, since).hint,
     lineStyle: LineStyle.Dotted,
     width: 2,
     tone: 'ink',
@@ -135,9 +135,13 @@ export function dashArray(style: LineStyle): string | undefined {
 
 /**
  * Daily ranges (6M and longer) have no intraday session to reset on, so the API anchors VWAP at
- * the first bar of the range. The short ranges use hourly bars and a daily VWAP.
+ * the start of the chosen range (`since`, a formatted date), which is not the first bar the chart
+ * holds, since the viewer can pan further back. The short ranges use hourly bars and a daily VWAP.
  */
-export function vwapVariant(range: RangeKey): { label: string; term: TermId; hint: string } {
+export function vwapVariant(
+  range: RangeKey,
+  since?: string,
+): { label: string; term: TermId; hint: string } {
   if (range === '1W' || range === '1M') {
     return {
       label: 'VWAP (daily)',
@@ -148,7 +152,9 @@ export function vwapVariant(range: RangeKey): { label: string; term: TermId; hin
   return {
     label: 'VWAP (from range start)',
     term: 'anchored_vwap',
-    hint: 'Average price paid since the first day shown on the chart, weighted by volume.',
+    hint: since
+      ? `Average price paid since ${since}, weighted by volume.`
+      : 'Average price paid since the start of the chosen range, weighted by volume.',
   };
 }
 

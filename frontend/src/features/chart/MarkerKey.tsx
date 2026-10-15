@@ -12,11 +12,14 @@ import { MARKER_DEFS, emptyMarkerText, type MarkerKind } from './markers';
 export function MarkerKey({
   shown,
   counts,
+  totals,
   onToggle,
 }: {
   shown: MarkerKind[];
   /** Markers of each kind in the chart's current range; absent while the chart has no data. */
   counts: Record<MarkerKind, number> | undefined;
+  /** Markers of each kind in all the history the chart holds; a kind is dimmed only when this is 0. */
+  totals?: Record<MarkerKind, number>;
   onToggle: (kind: MarkerKind) => void;
 }) {
   return (
@@ -36,7 +39,7 @@ export function MarkerKey({
     >
       {MARKER_DEFS.map((m) => {
         const count = counts?.[m.kind];
-        const empty = count === 0;
+        const empty = (totals?.[m.kind] ?? count) === 0;
         const on = shown.includes(m.kind) && !empty;
         return (
           <Box key={m.kind} component="li" sx={{ display: 'inline-flex', alignItems: 'center' }}>
