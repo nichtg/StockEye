@@ -26,6 +26,8 @@ from app.providers.models import (
     NewsItem,
     NewsQuery,
     Quote,
+    ScreenMatch,
+    ScreenQuery,
     SymbolMatch,
 )
 from app.providers.quota import Priority, QuotaDecision, QuotaSnapshot, scheduled_calls
@@ -350,6 +352,10 @@ class _Market:
         self._run("profile")
         return CompanyProfile()
 
+    async def screen(self, query: ScreenQuery) -> list[ScreenMatch]:
+        self._run("screen")
+        return []
+
 
 class _News:
     name = "p"
@@ -363,6 +369,15 @@ class _News:
         return []
 
 
+SCREEN = ScreenQuery(
+    region="us",
+    min_market_cap=3e8,
+    max_market_cap=2e9,
+    min_avg_volume=1,
+    sort_field="percentchange",
+    sort_asc=False,
+    size=5,
+)
 QUERY = NewsQuery(symbol="AAPL", exchange="US", company_name="Apple", start=NOW, end=NOW)
 
 
@@ -375,10 +390,11 @@ async def test_wrap_market_routes_every_method_through_the_guard() -> None:
     await market.bars("AAPL", "1d", NOW, NOW)
     await market.events("AAPL", NOW, NOW)
     await market.profile("AAPL")
+    await market.screen(SCREEN)
 
     assert market.name == "p"
-    assert adapter.ran == ["search", "bars", "events", "profile"]
-    assert h.ledger.consumed == 4
+    assert adapter.ran == ["search", "bars", "events", "profile", "screen"]
+    assert h.ledger.consumed == 5  # a screener call spends vendor quota like any other
 
 
 async def test_wrap_market_failure_trips_the_breaker_of_the_adapters_name() -> None:
@@ -486,3 +502,69 @@ async def test_statuses_reserve_in_use_says_user_requests_are_paused() -> None:
     assert status.level == "warning"
     assert "reserve" in status.message.lower()
     assert "20" in status.message
+
+
+async def _real_guard(db: Database, per_minute: int) -> tuple[ProviderGuard, Clock, list[float]]:
+    await install_indexes(db)
+    clock = Clock()
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock.now += timedelta(seconds=seconds)  # time really passes while the guard waits
+
+    limits = {"p": ProviderLimits(per_minute=per_minute, per_day=1000)}
+    return ProviderGuard(QuotaLedger(db), limits, 0.8, sleep=fake_sleep, clock=clock), clock, sleeps
+
+
+async def test_scheduled_calls_wait_out_the_minute_share_and_all_succeed(db: Database) -> None:
+    guard, _, sleeps = await _real_guard(db, per_minute=10)
+
+    with scheduled_calls():
+        results = [await guard.call("p", _flaky(str(i))) for i in range(10)]
+
+    assert results == [str(i) for i in range(10)]
+    assert sleeps == [60.0]  # 7 fit in the first minute (70% of 10), the rest waited for the next
+
+
+async def test_scheduled_calls_leave_their_reserved_minute_share_to_interactive(
+    db: Database,
+) -> None:
+    guard, _, sleeps = await _real_guard(db, per_minute=10)
+
+    with scheduled_calls():
+        for i in range(7):
+            await guard.call("p", _flaky(str(i)))
+    for i in range(3):  # the reserved 30% is still there for users
+        await guard.call("p", _flaky(str(i)))
+    with pytest.raises(QuotaExhaustedError) as caught:
+        await guard.call("p", _flaky("x"))
+
+    assert caught.value.window == "minute"
+    assert sleeps == []  # interactive calls never wait
+
+
+async def test_scheduled_calls_still_fail_on_a_daily_block(db: Database) -> None:
+    await install_indexes(db)
+    clock = Clock()
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    guard = ProviderGuard(
+        QuotaLedger(db),
+        {"p": ProviderLimits(per_minute=100, per_day=2)},
+        0.8,
+        sleep=fake_sleep,
+        clock=clock,
+    )
+
+    with scheduled_calls():
+        await guard.call("p", _flaky("a"))
+        await guard.call("p", _flaky("b"))
+        with pytest.raises(QuotaExhaustedError) as caught:
+            await guard.call("p", _flaky("c"))
+
+    assert caught.value.window == "day"
+    assert sleeps == []

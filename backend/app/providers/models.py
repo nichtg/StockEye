@@ -8,7 +8,7 @@ from datetime import date, datetime
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, HttpUrl, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 Exchange = Literal["US", "SGX"]
 Interval = Literal["1d", "1h"]
@@ -109,3 +109,28 @@ class NewsQuery(_Frozen):
     company_name: str
     start: datetime
     end: datetime
+
+
+class ScreenQuery(_Frozen):
+    """A Yahoo screener request. Money fields are in the region's own currency."""
+
+    region: Literal["us", "sg"]
+    min_market_cap: float
+    max_market_cap: float
+    min_avg_volume: int  # shares per day, 3-month average; at least this many
+    max_pe: float | None = None  # when set, a trailing P/E above 0 and at most this is required
+    sort_field: str
+    sort_asc: bool
+    size: int = Field(ge=1, le=25)
+
+
+class ScreenMatch(_Frozen):
+    """One screener hit; numbers are None when Yahoo sent nothing usable."""
+
+    symbol: str
+    name: str
+    exchange: Exchange
+    currency: str | None
+    market_cap: float | None
+    pe_ratio: float | None
+    price: float | None

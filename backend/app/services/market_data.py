@@ -20,7 +20,17 @@ from app.db import Database
 from app.logging_setup import get_logger
 from app.providers.base import MarketDataProvider
 from app.providers.errors import ProviderDataError, ProviderError, SymbolNotFoundError
-from app.providers.models import Bar, CompanyProfile, CorporateEvent, Interval, Quote, SymbolMatch
+from app.providers.models import (
+    Bar,
+    CompanyProfile,
+    CorporateEvent,
+    Interval,
+    Quote,
+    ScreenMatch,
+    ScreenQuery,
+    SymbolMatch,
+)
+from app.providers.quota import current_priority
 from app.repositories.bars import BarsRepository, FetchState
 from app.repositories.cache import CacheEntry, CacheRepository
 from app.repositories.events import EventsFetchState, EventsRepository
@@ -30,8 +40,8 @@ from app.services.calendars import (
     root_ticker,
 )
 from app.services.errors import AppError
-from app.services.singleflight import SingleFlight
-from app.services.status import DataStatus, describe_failure, ok, stale_status
+from app.services.singleflight import FlightPending, SingleFlight
+from app.services.status import DataStatus, age_phrase, describe_failure, ok, stale_status
 
 log = get_logger(__name__)
 
@@ -40,6 +50,9 @@ EVENTS_REFRESH_AFTER = timedelta(hours=24)
 QUOTE_TTL = timedelta(seconds=60)
 UNKNOWN_SYMBOL_TTL = timedelta(hours=6)  # how long "no such stock" is remembered
 SEARCH_TTL = timedelta(hours=1)
+# An interactive caller that joins a flight a background job started waits this long (seconds)
+# for it when it has saved data to show instead: that flight may be pacing itself for minutes.
+JOIN_PATIENCE = 8.0
 _COLUMNS = ["open", "high", "low", "close", "volume"]
 
 
@@ -122,6 +135,22 @@ def _fresh_hit[M: BaseModel](entry: CacheEntry | None, now: datetime, model: typ
     return _saved(entry, model)
 
 
+def _patience() -> float | None:
+    """How long this caller may wait on a shared flight: users briefly, background work forever."""
+    return JOIN_PATIENCE if current_priority() == "interactive" else None
+
+
+def _still_refreshing(label: str, noun: str, then: datetime, now: datetime) -> DataStatus:
+    return DataStatus(
+        state="stale",
+        as_of=then,
+        reason=(
+            f"{label} is {age_phrase(then, now)} old: a refresh is still running. "
+            f"Showing the last saved {noun}."
+        ),
+    )
+
+
 def _status(
     label: str, noun: str, state: _HasFetchTime, now: datetime, failure: ProviderError | None
 ) -> DataStatus:
@@ -168,6 +197,20 @@ class MarketDataService:
         )
         return profile, degraded or ok()
 
+    async def screen(self, query: ScreenQuery) -> list[ScreenMatch]:
+        """Screener hits for ``query``, uncached (the Discover build is the only caller).
+
+        Raises ``AppError`` (503) when the provider fails; nothing is saved to fall back on here.
+        """
+        try:
+            return await self._provider.screen(query)
+        except ProviderError as exc:
+            raise AppError(
+                503,
+                "data_unavailable",
+                f"Stock screening is temporarily unavailable ({describe_failure(exc)}).",
+            ) from exc
+
     async def search(self, query: str) -> list[SymbolMatch]:
         """Matches for ``query``; a stale fallback is logged (the endpoint returns a bare list)."""
         text = query.strip()
@@ -199,12 +242,20 @@ class MarketDataService:
         entry = await self._cache.lookup(key)
         if (hit := _fresh_hit(entry, now, model)) is not None:
             return hit, None
+        saved = _saved(entry, model)  # an expired "unknown" is no fallback
         try:
             value = await self._cache_flights.run(
-                key, lambda: self._fetch_and_store(kind, key, model, fetch)
+                key,
+                lambda: self._fetch_and_store(kind, key, model, fetch),
+                # Only worth giving up on when there is something to show instead.
+                patience=_patience() if saved is not None else None,
             )
+        except FlightPending:
+            if entry is None or saved is None:  # unreachable: patience is None without a copy
+                raise
+            status = _still_refreshing(kind.what.capitalize(), kind.noun, entry.created_at, now)
+            return saved, status
         except ProviderError as exc:
-            saved = _saved(entry, model)  # an expired "unknown" is no fallback
             if entry is None or saved is None:
                 raise _unavailable(f"The {kind.what}", subject, exc) from exc
             log.warning("cache_stale_fallback", key=key, error=str(exc))
@@ -251,21 +302,55 @@ class MarketDataService:
         start = window_start(interval, now)
         end = now + timedelta(days=1)
         try:
-            state, failure = await self._bar_flights.run(
-                (symbol, interval), lambda: self._refresh_bars(symbol, interval)
-            )
-        except ProviderError as exc:
-            raise _unavailable("Price data", symbol, exc) from exc
+            state, failure = await self._bars_state(symbol, interval, patience=_patience())
+        except FlightPending:
+            if (late := await self._saved_bars(symbol, interval, now)) is not None:
+                return late
+            state, failure = await self._bars_state(symbol, interval, patience=None)
         stored = await self._bars.get_range(symbol, interval, start, end)
         bars = completed(symbol, interval, stored, now)
+        if not bars and failure is None and state.last_bar_at is not None:
+            # The fetch state says bars were saved, yet none are (a clean-up removed them under
+            # it): refetch everything rather than call a known stock unknown.
+            state, failure = await self._bars_state(symbol, interval, force=True, patience=None)
+            stored = await self._bars.get_range(symbol, interval, start, end)
+            bars = completed(symbol, interval, stored, now)
         if not bars:
             if failure is not None:
                 raise _unavailable("Price data", symbol, failure)
             raise _not_found()
         return bars, _status("Price data", "prices", state, now, failure)
 
+    async def _bars_state(
+        self, symbol: str, interval: Interval, *, force: bool = False, patience: float | None
+    ) -> tuple[FetchState, ProviderError | None]:
+        """Join (or start) the one refresh flight of a series; raises ``FlightPending`` if slow."""
+        try:
+            return await self._bar_flights.run(
+                (symbol, interval, force),
+                lambda: self._refresh_bars(symbol, interval, force),
+                patience=patience,
+            )
+        except ProviderError as exc:
+            raise _unavailable("Price data", symbol, exc) from exc
+
+    async def _saved_bars(
+        self, symbol: str, interval: Interval, now: datetime
+    ) -> tuple[list[Bar], DataStatus] | None:
+        """What is saved, marked stale, for a caller that stopped waiting; None if nothing is."""
+        state = await self._bars.get_state(symbol, interval)
+        if state is None:
+            return None
+        stored = await self._bars.get_range(
+            symbol, interval, window_start(interval, now), now + timedelta(days=1)
+        )
+        bars = completed(symbol, interval, stored, now)
+        if not bars:
+            return None
+        return bars, _still_refreshing("Price data", "prices", state.last_fetched_at, now)
+
     async def _refresh_bars(
-        self, symbol: str, interval: Interval
+        self, symbol: str, interval: Interval, force: bool = False
     ) -> tuple[FetchState, ProviderError | None]:
         """Bring the saved bars up to date if they need it (the body of one single flight).
 
@@ -276,7 +361,8 @@ class MarketDataService:
         now = self._clock()
         start = window_start(interval, now)
         end = now + timedelta(days=1)
-        state = await self._bars.get_state(symbol, interval)
+        # ``force`` ignores the saved state: used when it claims bars that are no longer there.
+        state = None if force else await self._bars.get_state(symbol, interval)
 
         async def fetch() -> FetchState:
             try:
@@ -302,17 +388,30 @@ class MarketDataService:
         Never raises for provider trouble: events are optional.
         """
         now = self._clock()
+        today = now.astimezone(UTC).date()
         try:
-            state, failure = await self._event_flights.run(
-                symbol, lambda: self._refresh_events(symbol)
-            )
+            try:
+                state, failure = await self._event_flights.run(
+                    symbol, lambda: self._refresh_events(symbol), patience=_patience()
+                )
+            except FlightPending:
+                # A background refresh is still running: show what is saved, or wait if nothing is.
+                if (late := await self._events.get_state(symbol)) is not None:
+                    events = await self._events.get_range(
+                        symbol, today - timedelta(days=EVENTS_START_DAYS), today
+                    )
+                    return events, _still_refreshing(
+                        "Corporate event data", "events", late.last_fetched_at, now
+                    )
+                state, failure = await self._event_flights.run(
+                    symbol, lambda: self._refresh_events(symbol)
+                )
         except ProviderError as exc:
             reason = (
                 f"Corporate events are unavailable: {describe_failure(exc)}. "
                 "Earnings, dividend and split markers are hidden for now."
             )
             return [], DataStatus(state="unavailable", as_of=None, reason=reason)
-        today = now.astimezone(UTC).date()
         events = await self._events.get_range(
             symbol, today - timedelta(days=EVENTS_START_DAYS), today
         )

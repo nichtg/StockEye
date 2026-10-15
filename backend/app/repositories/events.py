@@ -85,6 +85,12 @@ class EventsRepository:
             async for doc in cursor
         ]
 
+    async def delete_symbol(self, symbol: str) -> int:
+        """Delete every stored event and the fetch-state of ``symbol``; returns events removed."""
+        removed = await self._events.delete_many({"symbol": symbol})
+        await self._state.delete_many({"symbol": symbol})
+        return removed.deleted_count
+
     async def get_state(self, symbol: str) -> EventsFetchState | None:
         doc = await self._state.find_one({"symbol": symbol})
         return None if doc is None else _to_state(doc)
