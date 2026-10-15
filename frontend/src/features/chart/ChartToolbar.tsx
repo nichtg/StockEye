@@ -6,6 +6,8 @@ import Tooltip from '@mui/material/Tooltip';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { RangeKey } from '../../api/types';
 import { radius } from '../../theme/tokens';
+import { ChartNav } from './ChartNav';
+import type { ChartNavigator } from './navigation';
 import { INDICATORS, type IndicatorId } from './indicators';
 import { RANGES } from './useChartSettings';
 
@@ -105,14 +107,20 @@ interface ChartToolbarProps {
   onRangeChange: (range: RangeKey) => void;
   selection: IndicatorId[];
   onToggleIndicator: (id: IndicatorId) => void;
+  /** Zoom and pan actions of the chart on screen; null while there is none. */
+  nav?: ChartNavigator | null;
+  /** The start of the chosen range, formatted, for the VWAP hint. */
+  visibleFromLabel?: string;
 }
 
-/** Range selector on the left, indicator toggles on the right. */
+/** Range selector and chart navigation on the left, indicator toggles on the right. */
 export function ChartToolbar({
   range,
   onRangeChange,
   selection,
   onToggleIndicator,
+  nav = null,
+  visibleFromLabel,
 }: ChartToolbarProps) {
   return (
     <Box
@@ -126,28 +134,31 @@ export function ChartToolbar({
         minWidth: 0,
       }}
     >
-      <ToggleButtonGroup
-        exclusive
-        size="small"
-        value={range}
-        aria-label="Chart range"
-        onChange={(_e, value: RangeKey | null) => {
-          if (value) onRangeChange(value);
-        }}
-        sx={RANGE_BUTTON_SX}
-      >
-        {RANGES.map((r) => (
-          <ToggleButton key={r} value={r} aria-label={`${r} range`}>
-            {r}
-          </ToggleButton>
-        ))}
-      </ToggleButtonGroup>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          value={range}
+          aria-label="Chart range"
+          onChange={(_e, value: RangeKey | null) => {
+            if (value) onRangeChange(value);
+          }}
+          sx={RANGE_BUTTON_SX}
+        >
+          {RANGES.map((r) => (
+            <ToggleButton key={r} value={r} aria-label={`${r} range`}>
+              {r}
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+        <ChartNav nav={nav} range={range} />
+      </Box>
 
       <ChipRow>
         {INDICATORS.map((ind) => {
           const on = selection.includes(ind.id);
           return (
-            <Tooltip key={ind.id} title={ind.hint(range)} describeChild>
+            <Tooltip key={ind.id} title={ind.hint(range, visibleFromLabel)} describeChild>
               <Chip
                 label={ind.label}
                 clickable

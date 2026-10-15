@@ -5,24 +5,29 @@ import type { Exchange } from '../../lib/exchange';
 import { formatPrice, formatVolume } from '../../lib/format';
 import { barLabel } from './tooltip';
 
-const VISIBLE_BARS = 10;
-
 interface Props {
+  /** The bars of the chosen range, oldest first: the chart holds more, only for panning. */
   candles: Candle[];
+  visibleFrom: string | number;
   currency: string;
   exchange: Exchange;
   /** Spoken (politely) when the keyboard cursor moves to a bar. */
   announcement: string;
 }
 
-/** The latest bars as a real table, plus the live region, for people who cannot see the canvas. */
-export function ChartA11yTable({ candles, currency, exchange, announcement }: Props) {
-  const bars = candles.slice(-VISIBLE_BARS);
+/** The bars of the chosen range as a real table, plus the live region, for people who cannot see the canvas. */
+export function ChartA11yTable({
+  candles: bars,
+  visibleFrom,
+  currency,
+  exchange,
+  announcement,
+}: Props) {
   const money = (v: number) => formatPrice(v, currency, exchange);
   return (
     <Box sx={visuallyHidden}>
       <table>
-        <caption>Last {bars.length} bars</caption>
+        <caption>{`${String(bars.length)} bars since ${barLabel(visibleFrom, exchange)}`}</caption>
         <thead>
           <tr>
             <th>Date</th>

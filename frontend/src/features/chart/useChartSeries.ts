@@ -11,6 +11,7 @@ import {
 } from 'lightweight-charts';
 import { useEffect, useRef, useState } from 'react';
 import { BandFill } from './bandFill';
+import { showView, type View } from './navigation';
 import { SUB_PANE_HEIGHT, type SeriesSpec, type SpecOf } from './model';
 
 export interface Live {
@@ -97,13 +98,15 @@ export class SeriesSet {
 
 /**
  * Keeps the chart's series matching `specs` and returns the candle series. The chart is fitted
- * to the content only when `fitKey` changes (a new symbol or range), never when indicators toggle.
+ * to `view` (the range the viewer chose, from `visible_from` to the last bar) only when `fitKey`
+ * changes (a new symbol or range), never when indicators toggle. Without a view it fits the content.
  */
 export function useChartSeries(
   chart: IChartApi | null,
   specs: SeriesSpec[],
   baseHeight: number,
   fitKey: string,
+  view?: View,
 ): ISeriesApi<'Candlestick'> | null {
   const set = useRef(new SeriesSet());
   const fitted = useRef<string | null>(null);
@@ -121,11 +124,12 @@ export function useChartSeries(
       // Adding a pane makes the chart re-anchor to the latest bar; put the viewer's zoom back.
       chart.timeScale().setVisibleLogicalRange(kept);
     } else {
-      chart.timeScale().fitContent();
+      if (view) showView(chart, view);
+      else chart.timeScale().fitContent();
       fitted.current = fitKey;
     }
     setCandles(set.current.candles);
-  }, [chart, specs, baseHeight, fitKey]);
+  }, [chart, specs, baseHeight, fitKey, view]);
 
   useEffect(() => {
     const current = set.current;

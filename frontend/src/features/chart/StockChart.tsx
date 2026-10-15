@@ -3,13 +3,15 @@ import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FullStatuses, StockOut } from '../../api/types';
 import { QueryRegion } from '../../components/QueryRegion';
 import { exchangeCurrency, exchangeOfSymbol } from '../../lib/exchange';
 import { radius } from '../../theme/tokens';
 import { usePatternReliability } from '../stock/usePatternReliability';
 import { useChart } from '../stock/useStockData';
+import type { ChartNavigator } from './navigation';
+import { barLabel } from './tooltip';
 import { ChartToolbar } from './ChartToolbar';
 import { IndicatorLegend } from './IndicatorLegend';
 import { MarkerKey } from './MarkerKey';
@@ -40,8 +42,15 @@ export function StockChart({ symbol, stock, onStatus }: Props) {
     onStatus(status);
   }, [onStatus, status]);
 
+  const [nav, setNav] = useState<ChartNavigator | null>(null);
+
   const markers = chart.data?.markers;
-  const counts = useMemo(() => (markers ? markerCounts(markers) : undefined), [markers]);
+  const visibleFrom = chart.data?.visible_from;
+  // Counts cover the chosen range; markers in the history before it are only reached by panning.
+  const counts = useMemo(
+    () => (markers ? markerCounts(markers, visibleFrom) : undefined),
+    [markers, visibleFrom],
+  );
 
   const exchange = stock?.exchange ?? exchangeOfSymbol(symbol);
   const currency = stock?.currency ?? exchangeCurrency(exchange);
@@ -53,6 +62,8 @@ export function StockChart({ symbol, stock, onStatus }: Props) {
         onRangeChange={settings.setRange}
         selection={settings.selection}
         onToggleIndicator={settings.toggleIndicator}
+        nav={nav}
+        visibleFromLabel={visibleFrom === undefined ? undefined : barLabel(visibleFrom, exchange)}
       />
       <IndicatorLegend selection={settings.selection} range={settings.range} />
 
@@ -98,6 +109,7 @@ export function StockChart({ symbol, stock, onStatus }: Props) {
                 baseHeight={baseHeight}
                 sentences={sentences}
                 shownMarkers={settings.shownMarkers}
+                onNavReady={setNav}
               />
             </Box>
           )

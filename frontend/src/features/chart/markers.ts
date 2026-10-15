@@ -1,5 +1,6 @@
 import type { ChartMarker, RangeKey } from '../../api/types';
 import type { TermId } from '../../glossary';
+import { onOrAfter, type BarTime } from './visible';
 import { readStored, writeStored } from '../../lib/storage';
 
 export type MarkerKind = ChartMarker['kind'];
@@ -37,8 +38,14 @@ export function isDrawnMarker(m: ChartMarker): boolean {
   return m.kind !== 'pattern' || m.bias === 'bullish' || m.bias === 'bearish';
 }
 
-/** How many markers of each kind the chart draws for this data, whether switched on or not. */
-export function markerCounts(markers: ChartMarker[]): Record<MarkerKind, number> {
+/**
+ * How many markers of each kind the chosen range holds (from `visibleFrom`; all of them without
+ * it), whether switched on or not. Markers further back belong to the history the viewer pans to.
+ */
+export function markerCounts(
+  markers: ChartMarker[],
+  visibleFrom?: BarTime,
+): Record<MarkerKind, number> {
   const counts: Record<MarkerKind, number> = {
     earnings: 0,
     dividend: 0,
@@ -46,7 +53,10 @@ export function markerCounts(markers: ChartMarker[]): Record<MarkerKind, number>
     pattern: 0,
     news: 0,
   };
-  for (const m of markers) if (isDrawnMarker(m)) counts[m.kind] += 1;
+  for (const m of markers) {
+    if (visibleFrom !== undefined && !onOrAfter(m.time, visibleFrom)) continue;
+    if (isDrawnMarker(m)) counts[m.kind] += 1;
+  }
   return counts;
 }
 

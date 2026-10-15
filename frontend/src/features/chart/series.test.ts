@@ -14,6 +14,7 @@ const data: ChartData = {
   symbol: 'AAPL',
   range: '6M',
   interval: '1d',
+  visible_from: '2026-10-02',
   candles: [1, 2, 3].map((d) => ({
     time: `2026-10-0${d}`,
     open: 10,
@@ -130,6 +131,7 @@ function fakeChart() {
   const stretch = [1, 2, 3].map(() => vi.fn<(factor: number) => void>());
   const timeScale = {
     fitContent: vi.fn(),
+    setVisibleRange: vi.fn(),
     getVisibleLogicalRange: vi.fn(() => ({ from: 10, to: 40 })),
     setVisibleLogicalRange: vi.fn(),
   };
@@ -225,5 +227,36 @@ describe('useChartSeries', () => {
 
     rerender({ selection: ['rsi'], fitKey: 'AAPL|1W' });
     expect(timeScale.fitContent).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('useChartSeries view', () => {
+  const view = { from: '2026-10-02', to: '2026-10-03' };
+
+  it('shows the chosen range, not the whole history, for a new symbol or range', () => {
+    const { chart, timeScale } = fakeChart();
+    const specs = buildSeriesSpecs(data, [], p);
+    renderHook(() => useChartSeries(chart, specs, 420, 'AAPL|6M', view));
+    expect(timeScale.setVisibleRange).toHaveBeenCalledWith(view);
+    expect(timeScale.fitContent).not.toHaveBeenCalled();
+    // The empty space right of the latest bar is kept: the fake reports 40, plus the offset.
+    expect(timeScale.setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 10, to: 42 });
+  });
+
+  it('keeps the zoom when indicators toggle, and resets for a new range', () => {
+    const { chart, timeScale } = fakeChart();
+    const { rerender } = renderHook(
+      ({ selection, fitKey }) =>
+        useChartSeries(chart, buildSeriesSpecs(data, selection, p), 420, fitKey, view),
+      { initialProps: { selection: [] as IndicatorId[], fitKey: 'AAPL|6M' } },
+    );
+    expect(timeScale.setVisibleRange).toHaveBeenCalledTimes(1);
+
+    rerender({ selection: ['rsi'], fitKey: 'AAPL|6M' });
+    expect(timeScale.setVisibleRange).toHaveBeenCalledTimes(1);
+    expect(timeScale.setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 10, to: 40 });
+
+    rerender({ selection: ['rsi'], fitKey: 'AAPL|1Y' });
+    expect(timeScale.setVisibleRange).toHaveBeenCalledTimes(2);
   });
 });
