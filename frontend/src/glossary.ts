@@ -47,6 +47,7 @@ export const TERM_IDS = [
   'statistical_reliability',
   'news_effect',
   'news_sentiment',
+  'grouped_stories',
   'market_cap',
   'discover_lists',
   'pe_ratio',
@@ -246,6 +247,10 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   news_sentiment: {
     title: 'News sentiment',
     body: 'A language model scores each headline from −1 to +1. Above +0.3 shows as Positive, below −0.3 as Negative, and anything between as Neutral. “Not scored yet” means the model has not read that headline yet.',
+  },
+  grouped_stories: {
+    title: 'Grouped stories',
+    body: 'Headlines from the same day with very similar wording are usually one story told by several outlets. We show them as one row, and its label is the average of their sentiment.',
   },
   market_cap: {
     title: 'Market cap',

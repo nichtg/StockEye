@@ -4,6 +4,7 @@ import type { NewsProgress } from '../../api/types';
 import { articleFixture, articlesPageFixture } from '../../test/fixtures';
 import { stubFetch } from '../../test/mockApi';
 import { renderApp } from '../../test/render';
+import { useLocation } from 'react-router';
 import { NewsTab } from './NewsTab';
 
 const idle: NewsProgress = {
@@ -13,8 +14,43 @@ const idle: NewsProgress = {
   status: { state: 'ok' },
 };
 
-function show(news: NewsProgress | undefined = idle) {
-  return renderApp(<NewsTab symbol="AAPL" name="Apple Inc." exchange="US" news={news} />);
+function Where() {
+  return <output data-testid="search">{useLocation().search}</output>;
+}
+
+function show(news: NewsProgress | undefined = idle, route = '/') {
+  return renderApp(
+    <>
+      <NewsTab symbol="AAPL" name="Apple Inc." exchange="US" news={news} />
+      <Where />
+    </>,
+    { route },
+  );
+}
+
+const MONTHS = [
+  { month: '2026-10', label: 'Oct 2026', count: 42 },
+  { month: '2026-09', label: 'Sep 2026', count: 1 },
+];
+
+/** First page of "All" carries the chips; a month page (and later pages) has none. */
+function monthsApi(
+  extra?: (req: { search: URLSearchParams }) => ReturnType<typeof articlesPageFixture> | undefined,
+) {
+  return stubFetch((req) => {
+    if (req.path !== '/stocks/AAPL/news/articles') return undefined;
+    const month = req.search.get('month');
+    const custom = extra?.(req);
+    if (custom) return { body: custom };
+    if (month) {
+      return {
+        body: articlesPageFixture([
+          articleFixture({ title: `Month ${month}`, url: `https://example.com/${month}` }),
+        ]),
+      };
+    }
+    return { body: articlesPageFixture([articleFixture({ title: 'All news' })], null, MONTHS) };
+  });
 }
 
 describe('NewsTab', () => {
@@ -188,5 +224,111 @@ describe('NewsTab', () => {
     );
     show();
     expect(await screen.findByText('News is 3 hours old.')).toBeInTheDocument();
+  });
+
+  describe('month chips', () => {
+    it('renders from months with article counts and loads one month', async () => {
+      const user = userEvent.setup();
+      const seen = monthsApi();
+      show();
+      await screen.findByText('All news');
+      const group = screen.getByRole('radiogroup', { name: 'Filter by month' });
+      expect(within(group).getByRole('radio', { name: 'All months' })).toBeChecked();
+      expect(within(group).getByRole('radio', { name: 'October 2026, 42 articles' })).toBeVisible();
+      expect(within(group).getByRole('radio', { name: 'September 2026, 1 article' })).toBeVisible();
+
+      await user.click(within(group).getByRole('radio', { name: 'October 2026, 42 articles' }));
+      expect(await screen.findByText('Month 2026-10')).toBeInTheDocument();
+      expect(screen.getByTestId('search')).toHaveTextContent('?month=2026-10');
+      expect(seen.at(-1)?.search.get('month')).toBe('2026-10');
+      expect(
+        screen.getByText(/News about Apple Inc. in October 2026, newest first./),
+      ).toBeVisible();
+      expect(screen.getByRole('radio', { name: 'October 2026, 42 articles' })).toBeChecked();
+
+      await user.click(screen.getByRole('radio', { name: 'All months' }));
+      expect(await screen.findByText('All news')).toBeInTheDocument();
+      expect(screen.getByTestId('search')).toHaveTextContent('');
+      expect(screen.getByTestId('search').textContent).toBe('');
+    });
+
+    it('starts from a month in the URL, and falls back to All for an unknown one', async () => {
+      const seen = monthsApi();
+      const first = show(idle, '/?tab=news&month=2026-09');
+      expect(await screen.findByText('Month 2026-09')).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: 'September 2026, 1 article' })).toBeChecked();
+      first.unmount();
+
+      seen.length = 0;
+      show(idle, '/?month=1999-01');
+      expect(await screen.findByText('All news')).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: 'All months' })).toBeChecked();
+      expect(seen.some((r) => r.search.has('month'))).toBe(false);
+    });
+
+    it('keeps the chip row on the second page of a month', async () => {
+      const user = userEvent.setup();
+      monthsApi((req) =>
+        req.search.get('before') === 'c2'
+          ? articlesPageFixture([
+              articleFixture({ title: 'Month page two', url: 'https://example.com/p2' }),
+            ])
+          : req.search.get('month')
+            ? articlesPageFixture([articleFixture({ title: 'Month page one' })], 'c2')
+            : undefined,
+      );
+      show(idle, '/?month=2026-10');
+      await screen.findByText('Month page one');
+      await user.click(screen.getByRole('button', { name: 'Load more' }));
+      expect(await screen.findByText('Month page two')).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: 'October 2026, 42 articles' })).toBeChecked();
+      expect(screen.getByRole('radio', { name: 'All months' })).toBeVisible();
+    });
+  });
+
+  describe('grouped stories', () => {
+    it('expands and collapses the similar stories as links', async () => {
+      const user = userEvent.setup();
+      stubFetch((req) =>
+        req.path === '/stocks/AAPL/news/articles'
+          ? {
+              body: articlesPageFixture([
+                articleFixture({
+                  title: 'Main story',
+                  similar: [
+                    {
+                      title: 'Same story, outlet B',
+                      url: 'https://example.com/b',
+                      source: 'B',
+                      published_at: '2026-10-03T16:00:00Z',
+                    },
+                    {
+                      title: 'Same story, outlet C',
+                      url: 'https://example.com/c',
+                      source: 'C',
+                      published_at: '2026-10-03T17:00:00Z',
+                    },
+                  ],
+                }),
+              ]),
+            }
+          : undefined,
+      );
+      show();
+      const button = await screen.findByRole('button', { name: '+2 similar stories' });
+      expect(button).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByRole('link', { name: 'Same story, outlet B' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'What is grouped stories?' })).toBeVisible();
+
+      await user.click(button);
+      expect(button).toHaveAttribute('aria-expanded', 'true');
+      const link = screen.getByRole('link', { name: 'Same story, outlet B' });
+      expect(link).toHaveAttribute('href', 'https://example.com/b');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+
+      await user.click(button);
+      expect(button).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByRole('link', { name: 'Same story, outlet B' })).not.toBeInTheDocument();
+    });
   });
 });

@@ -6,15 +6,17 @@ import { segmentedStyles } from '../theme/segmented';
 import { countSx, type Choice } from './Choice';
 
 /** The Newest/Biggest-move look, applied to a group of radio buttons. */
-const groupSx = (theme: Theme) => {
+const groupSx = (scroll: boolean) => (theme: Theme) => {
   const seg = segmentedStyles(theme.palette);
   return {
     ...seg.track,
     display: 'flex',
-    flexWrap: 'wrap',
     gap: 0.5,
     maxWidth: '100%',
+    // A long row scrolls inside its own track instead of widening the page.
+    ...(scroll ? { flexWrap: 'nowrap', overflowX: 'auto' } : { flexWrap: 'wrap' }),
     '& .choice': {
+      ...(scroll ? { flexShrink: 0, whiteSpace: 'nowrap' } : {}),
       ...seg.item,
       display: 'inline-flex',
       alignItems: 'baseline',
@@ -26,7 +28,7 @@ const groupSx = (theme: Theme) => {
   };
 };
 
-const stocks = (n: number) => `${String(n)} ${n === 1 ? 'stock' : 'stocks'}`;
+const STOCKS: readonly [string, string] = ['stock', 'stocks'];
 
 /**
  * A single-choice radio group in a segmented track. Arrow keys move the choice (and the focus)
@@ -37,11 +39,17 @@ export function SegmentedChoice({
   choices,
   value,
   onChange,
+  unit = STOCKS,
+  scroll = false,
 }: {
   label: string;
   choices: Choice[];
   value: string;
   onChange: (value: string) => void;
+  /** What the counts count, singular then plural, for the spoken name ("42 articles"). */
+  unit?: readonly [string, string];
+  /** One line that scrolls sideways when it is too long, rather than wrapping. */
+  scroll?: boolean;
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -66,7 +74,7 @@ export function SegmentedChoice({
   };
 
   return (
-    <Box role="radiogroup" aria-label={label} onKeyDown={onKeyDown} sx={groupSx}>
+    <Box role="radiogroup" aria-label={label} onKeyDown={onKeyDown} sx={groupSx(scroll)}>
       {choices.map((c, i) => {
         const checked = c.value === value;
         return (
@@ -78,7 +86,11 @@ export function SegmentedChoice({
             className="choice"
             role="radio"
             aria-checked={checked}
-            aria-label={c.count === undefined ? undefined : `${c.label}, ${stocks(c.count)}`}
+            aria-label={
+              c.count === undefined
+                ? c.name
+                : `${c.name ?? c.label}, ${String(c.count)} ${c.count === 1 ? unit[0] : unit[1]}`
+            }
             tabIndex={checked ? 0 : -1}
             onClick={() => {
               onChange(c.value);

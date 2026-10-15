@@ -6,6 +6,7 @@ import {
   chartRootKey,
   macroKey,
   newsArticlesKey,
+  newsArticlesMonthKey,
   newsKey,
   profileKey,
   searchKey,
@@ -51,17 +52,19 @@ export function useProfile(symbol: string) {
 }
 
 /**
- * The News tab's articles, newest first, one cursor page at a time. Reads only: collection is
+ * The News tab's articles, newest first, one cursor page at a time. `month` ("YYYY-MM") narrows
+ * them to one month; the first page of the unfiltered list also carries the month chips' counts. Reads only: collection is
  * started by useNewsProgress, which also refetches these pages as months land.
  */
-export function useNewsArticles(symbol: string) {
+export function useNewsArticles(symbol: string, month?: string, enabled = true) {
   return useInfiniteQuery({
-    queryKey: newsArticlesKey(symbol),
+    queryKey: newsArticlesMonthKey(symbol, month),
+    enabled,
     initialPageParam: undefined as string | undefined,
     queryFn: ({ signal, pageParam }) =>
       api.get<NewsArticlesPage>(`/stocks/${encodeURIComponent(symbol)}/news/articles`, {
         signal,
-        query: { limit: NEWS_PAGE_SIZE, before: pageParam },
+        query: { limit: NEWS_PAGE_SIZE, before: pageParam, month },
       }),
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });

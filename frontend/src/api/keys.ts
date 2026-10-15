@@ -14,6 +14,9 @@ export const chartRootKey = (symbol: string) => ['stock', symbol, 'chart'] as co
 export const newsKey = (symbol: string) => ['stock', symbol, 'news'] as const;
 export const profileKey = (symbol: string) => ['stock', symbol, 'profile'] as const;
 export const newsArticlesKey = (symbol: string) => ['stock', symbol, 'news-articles'] as const;
+/** One news-articles list of a stock: all months (undefined) or a single "YYYY-MM". Extends newsArticlesKey. */
+export const newsArticlesMonthKey = (symbol: string, month: string | undefined) =>
+  ['stock', symbol, 'news-articles', month ?? 'all'] as const;
 export const technicalKey = (symbol: string) => ['stock', symbol, 'technical'] as const;
 export const macroKey = (symbol: string) => ['stock', symbol, 'macro'] as const;
 export const searchKey = (q: string) => ['search', q] as const;

@@ -32,6 +32,7 @@ export function articleFixture(overrides: Partial<NewsArticle> = {}): NewsArticl
     source: 'Wire',
     sentiment_label: 'positive',
     sentiment: 0.6,
+    similar: [],
     ...overrides,
   };
 }
@@ -39,12 +40,14 @@ export function articleFixture(overrides: Partial<NewsArticle> = {}): NewsArticl
 export function articlesPageFixture(
   articles: NewsArticle[],
   nextCursor: string | null = null,
+  months: NewsArticlesPage['months'] = null,
 ): NewsArticlesPage {
   return {
     articles,
     next_cursor: nextCursor,
     since: '2026-04-03T00:00:00Z',
     status: { state: 'ok' },
+    months,
   };
 }
 
