@@ -158,7 +158,7 @@ function DesktopTable({ rows, onRemove }: Props) {
                       <StaleNote row={row} />
                     </TableCell>
                     <TableCell sx={numCell}>
-                      <Direction value={row.change_1w_pct} />
+                      <Direction value={row.change_1w_pct} variant="pill" />
                     </TableCell>
                     <TableCell>
                       <Sparkline values={row.sparkline} />
@@ -214,7 +214,7 @@ function MobileList({ rows, onRemove }: Props) {
                     {formatPrice(row.last_price, row.currency, row.exchange)}
                   </Box>
                   <Typography variant="body2" component="div">
-                    <Direction value={row.change_1w_pct} />
+                    <Direction value={row.change_1w_pct} variant="pill" />
                   </Typography>
                 </Box>
                 <Sparkline values={row.sparkline} width={64} />

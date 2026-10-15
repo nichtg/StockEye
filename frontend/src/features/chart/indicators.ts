@@ -10,6 +10,8 @@ export interface IndicatorDef {
   id: IndicatorId;
   label: string;
   term: TermId;
+  /** One plain-English line shown on hover and keyboard focus of the toolbar chip. */
+  hint: string;
   /** Line style on the chart; the legend swatch is drawn from the same value. */
   lineStyle: LineStyle;
   /** Pixels. Half pixels are valid on the canvas even though the typings only list integers. */
@@ -25,25 +27,103 @@ const line = (
   id: IndicatorId,
   label: string,
   term: TermId,
+  hint: string,
   lineStyle: LineStyle,
   width: number,
   tone: IndicatorDef['tone'],
-): IndicatorDef => ({ id, label, term, lineStyle, width, tone, pane: 'overlay', seriesKeys: [id] });
+): IndicatorDef => ({
+  id,
+  label,
+  term,
+  hint,
+  lineStyle,
+  width,
+  tone,
+  pane: 'overlay',
+  seriesKeys: [id],
+});
 
 /** The single source of truth for how each indicator looks, in legend and chart alike. */
 export const INDICATORS: IndicatorDef[] = [
-  line('vwap', 'VWAP', 'vwap', LineStyle.Dotted, 2, 'ink'),
-  line('sma20', 'SMA 20', 'sma', LineStyle.Solid, 1, 'ink2'),
-  line('sma50', 'SMA 50', 'sma', LineStyle.Solid, 2, 'ink'),
-  line('ema9', 'EMA 9', 'ema', LineStyle.Dashed, 1, 'ink3'),
-  line('ema21', 'EMA 21', 'ema', LineStyle.Dashed, 1.5, 'ink'),
+  line(
+    'vwap',
+    'VWAP',
+    'vwap',
+    'Average price paid, weighted by volume.',
+    LineStyle.Dotted,
+    2,
+    'ink',
+  ),
+  line(
+    'sma20',
+    'SMA 20',
+    'sma',
+    'Average closing price over the last 20 trading days.',
+    LineStyle.Solid,
+    1,
+    'ink2',
+  ),
+  line(
+    'sma50',
+    'SMA 50',
+    'sma',
+    'Average closing price over the last 50 trading days, a slower trend line.',
+    LineStyle.Solid,
+    2,
+    'ink',
+  ),
+  line(
+    'ema9',
+    'EMA 9',
+    'ema',
+    'Average of the last 9 days that weights recent days more, so it turns quickly.',
+    LineStyle.Dashed,
+    1,
+    'ink3',
+  ),
+  line(
+    'ema21',
+    'EMA 21',
+    'ema',
+    'Average of the last 21 days that weights recent days more.',
+    LineStyle.Dashed,
+    1.5,
+    'ink',
+  ),
   {
-    ...line('bollinger', 'Bollinger', 'bollinger', LineStyle.Solid, 1, 'ink3'),
+    ...line(
+      'bollinger',
+      'Bollinger',
+      'bollinger',
+      'A band around the 20-day average that widens when the price swings more.',
+      LineStyle.Solid,
+      1,
+      'ink3',
+    ),
     seriesKeys: ['bollinger_upper', 'bollinger_lower'],
   },
-  { ...line('rsi', 'RSI', 'rsi', LineStyle.Solid, 1.5, 'ink'), pane: 'sub' },
   {
-    ...line('macd', 'MACD', 'macd', LineStyle.Solid, 1.5, 'ink'),
+    ...line(
+      'rsi',
+      'RSI',
+      'rsi',
+      'A 0 to 100 gauge of recent buying or selling pressure; shown in its own panel.',
+      LineStyle.Solid,
+      1.5,
+      'ink',
+    ),
+    pane: 'sub',
+  },
+  {
+    ...line(
+      'macd',
+      'MACD',
+      'macd',
+      'Momentum from the gap between a fast and a slow average; shown in its own panel.',
+      LineStyle.Solid,
+      1.5,
+      'ink',
+    ),
     pane: 'sub',
     seriesKeys: ['macd', 'macd_signal', 'macd_histogram'],
   },
@@ -106,4 +186,9 @@ export function loadIndicatorSelection(): IndicatorId[] {
 
 export function saveIndicatorSelection(selection: IndicatorId[]): void {
   writeStored(INDICATORS_STORAGE_KEY, selection);
+}
+
+/** Hover text for an indicator's chip; VWAP's depends on the range, the rest are fixed. */
+export function indicatorHint(ind: IndicatorDef, range: RangeKey): string {
+  return ind.id === 'vwap' ? vwapVariant(range).hint : ind.hint;
 }
