@@ -134,3 +134,4 @@ class ScreenMatch(_Frozen):
     market_cap: float | None
     pe_ratio: float | None
     price: float | None
+    avg_volume_3m: float | None = None  # shares per day, 3-month average

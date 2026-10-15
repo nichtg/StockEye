@@ -522,3 +522,29 @@ green, and the user approves the `production` deploy. Sonnet implements and Opus
 - Every wave had an Opus thermo review, plus a security review where it added endpoints, iterated until approved.
 - Deploys: Pages publishes on merge, and the backend image waits for the user's `production` approval. Frontends must tolerate the
   previous API.
+
+## Phase 7 (approved 2026-10-15): polish from user testing
+
+The user tested phase 6 locally and chose these options from `.handoff/sdd/report-P7.md`:
+
+| Item | Choice | What |
+|---|---|---|
+| Header tags | 1A | One plain line, e.g. "Telecom services, headquartered in Mexico"; the sector moves to About |
+| Macro section | 2A + 2B + 2D | Questions with answer chips, a bucket chart with ranges, and the method in "How this was worked out" |
+| News tab | 3A + 3D | Month chips with counts (`month=YYYY-MM`); near-duplicate stories grouped ("+2 similar") |
+| Country filter | 4A | One-click buttons for 5 or fewer countries, a themed menu above that; the phone sort select themed too |
+| Discover | 5A + 5D | 10 per list, each ordered by its own rule (1W move size, lowest P/E, most traded), funds left out of US lists |
+
+Backend branches run in parallel, one per item, each from `main`:
+- `feat/backend-discover-order`
+- `feat/backend-news-months`
+- `feat/backend-macro-verdicts`
+
+Then the frontend branches. Same process as earlier phases: Sonnet implements, Opus reviews; a methodology audit for the
+macro wording; a security review for the changed news endpoint.
+
+### Phase 7 status
+- [ ] Discover order and funds (5A + 5D)
+- [ ] News months and grouping (3A + 3D)
+- [ ] Macro verdicts and chart (2A + 2B + 2D)
+- [ ] Header line (1A) and country filter (4A)
