@@ -55,20 +55,19 @@ def build_chart(
     news: list[tuple[date, str, float]],
     statuses: FullStatuses,
 ) -> ChartData:
-    """Chart payload: candles, the requested indicator lines and the markers on visible bars."""
+    """Chart payload: candles, the requested indicator lines and markers over the full history."""
     interval, _ = RANGES[range_key]
     tz = exchange_tz(symbol)
-    mask = charts.visible_mask(frame, range_key)
+    start = charts.visible_start(frame, range_key)
     hits = detect_patterns(frame) if interval == "1d" else []
     return ChartData(
         symbol=symbol,
         range=range_key,
         interval=interval,
-        candles=charts.candles(frame, mask, interval, tz),
-        indicators=charts.indicator_series(frame, mask, indicators, interval, tz),
-        markers=charts.build_markers(
-            frame, mask, interval, tz, events=events, hits=hits, news=news
-        ),
+        visible_from=charts.time_of(start, interval, tz),
+        candles=charts.candles(frame, interval, tz),
+        indicators=charts.indicator_series(frame, start, indicators, interval, tz),
+        markers=charts.build_markers(frame, interval, tz, events=events, hits=hits, news=news),
         data_status=statuses,
     )
 

@@ -1,7 +1,8 @@
-"""Chart construction: visible window, indicator series and markers. Pure; no I/O.
+"""Chart construction: full-history candles, indicator series and markers. Pure; no I/O.
 
-Indicators are computed on the full frame (which includes warm-up history before the visible
-window) and trimmed afterwards, so lines start at the left edge instead of with NaN gaps.
+The chart carries every row of the interval's history so the user can pan and zoom left of the
+chosen range. The range only decides ``visible_from`` (where the view starts). Indicators are
+computed on the full frame and warm-up NaNs are dropped, so lines simply start later.
 """
 
 import math
@@ -45,22 +46,23 @@ def time_of(stamp: pd.Timestamp, interval: Interval, tz: ZoneInfo) -> Time:
     return int(stamp.to_pydatetime().replace(tzinfo=tz).timestamp())
 
 
-def visible_mask(frame: pd.DataFrame, range_key: RangeKey) -> pd.Series:
-    """Boolean mask of the rows shown for ``range_key`` (the rest is indicator warm-up)."""
+def visible_start(frame: pd.DataFrame, range_key: RangeKey) -> pd.Timestamp:
+    """Index label of the first row of the chosen range (the left edge of the initial view).
+
+    Hourly: the first bar of the Nth-last session. Daily: the first bar within N calendar days
+    of the last bar.
+    """
     interval, span = RANGES[range_key]
     index = pd.DatetimeIndex(frame.index)
     if interval == "1h":
         days = index.normalize().unique()
         first = days[max(0, len(days) - span)]
-        keep = index.normalize() >= first
-    else:
-        keep = index >= index[-1] - pd.Timedelta(days=span)
-    return pd.Series(keep, index=frame.index)
+        return pd.Timestamp(index[index.normalize() >= first][0])
+    return pd.Timestamp(index[index >= index[-1] - pd.Timedelta(days=span)][0])
 
 
-def candles(frame: pd.DataFrame, mask: pd.Series, interval: Interval, tz: ZoneInfo) -> list[Candle]:
-    shown = frame[mask]
-    stamps = pd.DatetimeIndex(shown.index)
+def candles(frame: pd.DataFrame, interval: Interval, tz: ZoneInfo) -> list[Candle]:
+    stamps = pd.DatetimeIndex(frame.index)
     return [
         Candle(
             time=time_of(stamp, interval, tz),
@@ -72,31 +74,28 @@ def candles(frame: pd.DataFrame, mask: pd.Series, interval: Interval, tz: ZoneIn
         )
         for stamp, o, h, lo, c, v in zip(
             stamps,
-            shown["open"],
-            shown["high"],
-            shown["low"],
-            shown["close"],
-            shown["volume"],
+            frame["open"],
+            frame["high"],
+            frame["low"],
+            frame["close"],
+            frame["volume"],
             strict=True,
         )
     ]
 
 
-def _points(
-    series: pd.Series, mask: pd.Series, interval: Interval, tz: ZoneInfo
-) -> list[SeriesPoint]:
+def _points(series: pd.Series, interval: Interval, tz: ZoneInfo) -> list[SeriesPoint]:
     out: list[SeriesPoint] = []
-    shown = series[mask]
-    for stamp, value in zip(pd.DatetimeIndex(shown.index), shown, strict=True):
+    for stamp, value in zip(pd.DatetimeIndex(series.index), series, strict=True):
         number = float(value)
-        if not math.isnan(number):
+        if math.isfinite(number):  # warm-up NaNs (and any infinity) never reach the chart
             out.append(SeriesPoint(time=time_of(stamp, interval, tz), value=number))
     return out
 
 
 def indicator_series(
     frame: pd.DataFrame,
-    mask: pd.Series,
+    visible_from: pd.Timestamp,
     names: list[str],
     interval: Interval,
     tz: ZoneInfo,
@@ -115,11 +114,12 @@ def indicator_series(
                 columns[name] = ema(close, 21)
             case "vwap":
                 # Intraday VWAP restarts every session; on daily bars the only meaningful
-                # anchor is the left edge of what the user is looking at.
+                # anchor is the left edge of the chosen range (``visible_from``), not the first
+                # row of the history.
                 if interval == "1h":
                     columns[name] = session_vwap(frame)
                 else:
-                    columns[name] = anchored_vwap(frame, frame.index[mask.to_numpy()][0])
+                    columns[name] = anchored_vwap(frame, visible_from)
             case "bollinger":
                 bands = bollinger(close)
                 for part in ("upper", "middle", "lower"):
@@ -131,22 +131,19 @@ def indicator_series(
                 columns["macd"] = lines["macd"]
                 columns["macd_signal"] = lines["signal"]
                 columns["macd_histogram"] = lines["histogram"]
-    return {key: _points(col, mask, interval, tz) for key, col in columns.items()}
+    return {key: _points(col, interval, tz) for key, col in columns.items()}
 
 
-def _time_by_date(
-    frame: pd.DataFrame, mask: pd.Series, interval: Interval, tz: ZoneInfo
-) -> dict[date, Time]:
-    """Date -> chart time of that day's first visible bar (markers attach to a bar)."""
+def _time_by_date(frame: pd.DataFrame, interval: Interval, tz: ZoneInfo) -> dict[date, Time]:
+    """Date -> chart time of that day's first bar (markers attach to a bar)."""
     out: dict[date, Time] = {}
-    for stamp in pd.DatetimeIndex(frame.index[mask.to_numpy()]):
+    for stamp in pd.DatetimeIndex(frame.index):
         out.setdefault(stamp.date(), time_of(stamp, interval, tz))
     return out
 
 
 def build_markers(
     frame: pd.DataFrame,
-    mask: pd.Series,
     interval: Interval,
     tz: ZoneInfo,
     *,
@@ -154,29 +151,29 @@ def build_markers(
     hits: list[PatternHit],
     news: list[tuple[date, str, float]],
 ) -> list[Marker]:
-    """Event, pattern and news markers that fall on a visible bar.
+    """Event, pattern and news markers that fall on a bar of ``frame`` (all history).
 
     ``news`` is (session date, headline, car_0_1). Pattern ``hits`` are only passed for daily
-    ranges; their ``index`` positions refer to ``frame``.
+    ranges and are matched to bars by date. Values are deliberately unrounded: penny stocks
+    (about S$0.012) would otherwise lose their indicator shape.
     """
-    at = _time_by_date(frame, mask, interval, tz)
+    at = _time_by_date(frame, interval, tz)
     markers: list[Marker] = []
     for event in events:
         if event.date in at:
             markers.append(Marker(time=at[event.date], kind=event.kind, label=event.label))
-    visible_positions = {i for i, shown in enumerate(mask.to_numpy()) if shown}
     for hit in hits:
-        if hit.index in visible_positions:
-            spec = PATTERNS[hit.key]
-            markers.append(
-                Marker(
-                    time=at[pd.Timestamp(hit.date).date()],
-                    kind="pattern",
-                    label=spec.label,
-                    bias=spec.bias.value,
-                    pattern=hit.key.value,
-                )
+        # Hits come from this same frame, so their date always has a bar.
+        spec = PATTERNS[hit.key]
+        markers.append(
+            Marker(
+                time=at[pd.Timestamp(hit.date).date()],
+                kind="pattern",
+                label=spec.label,
+                bias=spec.bias.value,
+                pattern=hit.key.value,
             )
+        )
     for day, headline, car in news:
         if day in at:
             markers.append(Marker(time=at[day], kind="news", label=headline, car_0_1=round(car, 4)))

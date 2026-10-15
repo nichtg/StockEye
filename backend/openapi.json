@@ -1125,6 +1125,17 @@
             ],
             "title": "Interval"
           },
+          "visible_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Visible From"
+          },
           "candles": {
             "items": {
               "$ref": "#/components/schemas/Candle"
@@ -1158,6 +1169,7 @@
           "symbol",
           "range",
           "interval",
+          "visible_from",
           "candles",
           "indicators",
           "markers",
