@@ -10,6 +10,7 @@ import { useTheme } from '@mui/material/styles';
 import type { DataStatus, StockOut } from '../../api/types';
 import { Direction } from '../../components/Direction';
 import { visuallyHidden } from '../../lib/a11y';
+import { describeCompany } from '../../lib/describeCompany';
 import { formatAsOf, formatPct, formatPrice, formatSigned } from '../../lib/format';
 import { ExchangeTag } from '../search/ExchangeTag';
 import { useWatchlistSymbols } from '../watchlist/useWatchlist';
@@ -99,30 +100,14 @@ function changeText(stock: StockOut): string {
   return `${amount} (${formatPct(stock.change_pct, { signed: true, digits: 2 })})`;
 }
 
-/** Sector, industry and country as quiet separate items; the line's height is reserved so nothing shifts. */
+/** One plain-English line (industry, headquarters); its height is reserved so nothing shifts. */
 function ProfileLine({ symbol }: { symbol: string }) {
   const profile = useProfile(symbol).data;
-  const items = (['sector', 'industry', 'country'] as const).flatMap((field) => {
-    const value = profile?.[field];
-    return value ? [{ field, value }] : [];
-  });
+  const line = describeCompany(profile?.industry, profile?.country);
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        columnGap: 2,
-        mt: 0.25,
-        minHeight: '1.3125rem',
-        color: 'ink2',
-      }}
-    >
-      {items.map((item) => (
-        <Typography key={item.field} variant="body2" component="span" sx={{ color: 'inherit' }}>
-          {item.value}
-        </Typography>
-      ))}
-    </Box>
+    <Typography variant="body2" sx={{ mt: 0.25, minHeight: '1.3125rem', color: 'ink2' }}>
+      {line}
+    </Typography>
   );
 }
 

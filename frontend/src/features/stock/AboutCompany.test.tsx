@@ -48,6 +48,16 @@ describe('AboutCompany', () => {
     expect(site).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
+  it('lists sector first, then industry and headquarters', async () => {
+    show({});
+    await screen.findByText('31.5');
+    const labels = [...document.querySelectorAll('dt')].map((dt) => dt.textContent);
+    expect(labels.slice(0, 3)).toEqual(['Sector', 'Industry', 'Headquarters']);
+    expect(screen.getByText('Technology')).toBeInTheDocument();
+    expect(screen.getByText('Consumer Electronics')).toBeInTheDocument();
+    expect(screen.getByText('United States')).toBeInTheDocument();
+  });
+
   it('hides each fact that is null', async () => {
     show({ market_cap: null, dividend_yield: null, employees: null, week52_low: null });
     await screen.findByText('31.5');
