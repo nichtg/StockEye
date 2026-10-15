@@ -4,6 +4,7 @@ import asyncio
 import zlib
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 import numpy as np
 
@@ -208,6 +209,41 @@ class FakeMarketData:
                     )
                 )
         return out
+
+
+def give_hits_traded_volume(provider: FakeMarketData) -> None:
+    """The fake screen sends no 3-month volume; without one the Singapore list drops every row."""
+    real = provider.screen
+
+    async def screen(query: ScreenQuery) -> list[ScreenMatch]:
+        return [m.model_copy(update={"avg_volume_3m": 1e6}) for m in await real(query)]
+
+    provider.screen = screen  # type: ignore[method-assign]  # test double
+
+
+def make_match(symbol: str, name: str | None = None, **fields: Any) -> ScreenMatch:
+    """A screener hit with plain defaults; override any field by keyword."""
+    base: dict[str, Any] = {
+        "symbol": symbol,
+        "name": name or symbol,
+        "exchange": "SGX" if symbol.endswith(".SI") else "US",
+        "currency": "SGD" if symbol.endswith(".SI") else "USD",
+        "market_cap": 1e9,
+        "pe_ratio": 12.0,
+        "price": 10.0,
+        "avg_volume_3m": 1e6,
+    }
+    return ScreenMatch(**{**base, **fields})
+
+
+def screen_returns(provider: FakeMarketData, **by_region: list[ScreenMatch]) -> None:
+    """Make the fake screen answer with exactly these hits per region (``us=``, ``sg=``)."""
+
+    async def screen(query: ScreenQuery) -> list[ScreenMatch]:
+        provider.calls["screen"] += 1
+        return by_region.get(query.region, [])
+
+    provider.screen = screen  # type: ignore[method-assign]  # test double
 
 
 class FakeNews:

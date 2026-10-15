@@ -1199,6 +1199,28 @@
               }
             ],
             "title": "Label"
+          },
+          "ci_low_0_1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Low 0 1"
+          },
+          "ci_high_0_1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci High 0 1"
           }
         },
         "type": "object",
@@ -1507,9 +1529,13 @@
             "type": "string",
             "title": "Description"
           },
+          "order_label": {
+            "type": "string",
+            "title": "Order Label"
+          },
           "rows": {
             "items": {
-              "$ref": "#/components/schemas/OverviewRow"
+              "$ref": "#/components/schemas/DiscoverRow"
             },
             "type": "array",
             "title": "Rows"
@@ -1523,6 +1549,7 @@
           "id",
           "title",
           "description",
+          "order_label",
           "rows",
           "status"
         ],
@@ -1560,6 +1587,192 @@
           "data_status"
         ],
         "title": "DiscoverOut"
+      },
+      "DiscoverRow": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "US",
+                  "SGX"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "last_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Price"
+          },
+          "change_1w_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 1W Pct"
+          },
+          "sparkline": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Sparkline"
+          },
+          "lean": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bullish",
+                  "bearish",
+                  "neutral"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lean"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "market_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "stale",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          },
+          "pe_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pe Ratio"
+          },
+          "avg_traded_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Traded Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "name",
+          "exchange",
+          "currency",
+          "last_price",
+          "change_1w_pct",
+          "sparkline",
+          "lean",
+          "country",
+          "sector",
+          "market_cap",
+          "status",
+          "status_reason",
+          "pe_ratio",
+          "avg_traded_value"
+        ],
+        "title": "DiscoverRow",
+        "description": "A watchlist-style row plus the figures Discover ranks by (money in the row's currency)."
       },
       "EventPointOut": {
         "properties": {
@@ -1935,6 +2148,17 @@
               }
             ],
             "title": "Earnings Note"
+          },
+          "verdicts": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictOut"
+            },
+            "type": "array",
+            "title": "Verdicts"
+          },
+          "value_statement": {
+            "type": "string",
+            "title": "Value Statement"
           }
         },
         "type": "object",
@@ -1952,7 +2176,9 @@
           "regime",
           "timeline",
           "events_total",
-          "events_insufficient"
+          "events_insufficient",
+          "verdicts",
+          "value_statement"
         ],
         "title": "MacroReportOut"
       },
@@ -3473,6 +3699,52 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerdictOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "good_news",
+              "bad_news",
+              "overall"
+            ],
+            "title": "Id"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "answer_kind": {
+            "type": "string",
+            "enum": [
+              "clear",
+              "possible",
+              "none",
+              "opposite",
+              "insufficient"
+            ],
+            "title": "Answer Kind"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "question",
+          "answer",
+          "answer_kind",
+          "detail"
+        ],
+        "title": "VerdictOut",
+        "description": "One plain question with a one-word answer chip and one supporting sentence."
       },
       "WatchlistOut": {
         "properties": {

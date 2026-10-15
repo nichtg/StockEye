@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.domain.macro.sentiment_stats import Bucket, RegimeLabel, Reliability
 from app.domain.macro.summary import Scope
+from app.domain.macro.verdicts import AnswerKind, VerdictId
 from app.domain.technical.outlook import Direction, Lean
 from app.providers.models import EventKind, Interval
 from app.services.status import DataStatus
@@ -149,6 +150,8 @@ class BucketStatsOut(BaseModel):
     t: float | None
     p_value: float | None
     label: Reliability | None
+    ci_low_0_1: float | None = None  # 95% interval of mean_car_0_1 (fractions); None if unknown
+    ci_high_0_1: float | None = None
 
 
 class DifferenceOut(BaseModel):
@@ -185,6 +188,16 @@ class TimelinePointOut(BaseModel):
     article_count: int
 
 
+class VerdictOut(BaseModel):
+    """One plain question with a one-word answer chip and one supporting sentence."""
+
+    id: VerdictId
+    question: str
+    answer: str
+    answer_kind: AnswerKind
+    detail: str
+
+
 class MacroReportOut(BaseModel):
     top_events: list[TopEventOut]
     top_events_since: date  # top_events only covers news days from this date on
@@ -201,6 +214,8 @@ class MacroReportOut(BaseModel):
     events_total: int
     events_insufficient: int
     earnings_note: str | None = None  # set when the effect comes mostly from earnings-time news
+    verdicts: list[VerdictOut]  # three plain answers about the primary scope
+    value_statement: str  # one line saying what this section is for
 
 
 class IngestionOut(BaseModel):

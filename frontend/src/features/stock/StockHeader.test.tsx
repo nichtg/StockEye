@@ -14,18 +14,32 @@ function show(profile: Record<string, unknown>) {
 }
 
 describe('StockHeader profile line', () => {
-  it('shows sector, industry and country as separate items', async () => {
+  it('describes the company in one plain-English sentence', async () => {
     show({});
-    expect(await screen.findByText('Technology')).toBeInTheDocument();
-    expect(screen.getByText('Consumer Electronics')).toBeInTheDocument();
-    expect(screen.getByText('United States')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Consumer electronics, headquartered in the United States'),
+    ).toBeInTheDocument();
+    // Sector moved to the About section; the header no longer shows it.
+    expect(screen.queryByText('Technology')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain('·');
   });
 
-  it('hides the items that are missing', async () => {
+  it('handles Yahoo industries written as "X - Y"', async () => {
+    show({ industry: 'Banks - Regional', country: 'Singapore' });
+    expect(
+      await screen.findByText('Regional banks, headquartered in Singapore'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows only the part that is known', async () => {
+    show({ industry: null });
+    expect(await screen.findByText('Headquartered in the United States')).toBeInTheDocument();
+  });
+
+  it('renders nothing when neither is known', async () => {
     show({ industry: null, country: null });
-    expect(await screen.findByText('Technology')).toBeInTheDocument();
+    await screen.findByRole('button', { name: /watchlist/i });
+    expect(screen.queryByText(/headquartered/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Consumer Electronics')).not.toBeInTheDocument();
-    expect(screen.queryByText('United States')).not.toBeInTheDocument();
   });
 });

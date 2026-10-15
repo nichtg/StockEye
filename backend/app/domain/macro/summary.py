@@ -29,7 +29,14 @@ from app.domain.macro.sentiment_stats import (
     Regime,
     Reliability,
     TimelinePoint,
-    reliability_label,
+)
+from app.domain.macro.verdicts import VALUE_STATEMENT, Verdict, build_verdicts
+from app.domain.macro.wording import (
+    VERY_OFTEN_AT,
+    direction,
+    pct_abs,
+    shown_in_100,
+    shown_label,
 )
 
 Scope = Literal["all_events", "excluding_earnings"]
@@ -37,7 +44,6 @@ Scope = Literal["all_events", "excluding_earnings"]
 MAX_HEADLINES = 3
 TOP_EVENTS_MONTHS = 3  # the biggest-news-days list only looks this far back
 MIN_LINK = 0.1  # |rank correlation| below this is described as no clear link
-VERY_OFTEN_AT = 95  # "in 100" figure from which chance is described as "very often"
 PRE_MOVE_CAVEAT = 0.01  # a mean pre-event move this large (1%) gets a caveat sentence
 
 
@@ -100,10 +106,8 @@ class MacroReport:
     events_total: int
     events_insufficient: int
     earnings_note: str | None  # set by ``_earnings_note``; None when it does not apply
-
-
-def _pct_abs(x: float) -> str:
-    return f"{abs(round(x * 100, 1)):.1f}%"
+    verdicts: list[Verdict]  # good news, bad news, overall; built from the primary scope
+    value_statement: str  # constant line saying what the section shows
 
 
 def _reliability_finding(p: float, what: str, based_on: int) -> Finding:
@@ -112,10 +116,9 @@ def _reliability_finding(p: float, what: str, based_on: int) -> Finding:
     The label and the "about X in 100" figure come from the same rounded value, so they can
     never disagree (for example "clear news effect ... about 5 in 100").
     """
-    raw = round(p * 100)
-    below_floor = raw < 1
-    in_100 = max(1, raw)
-    label = reliability_label(in_100 / 100)
+    below_floor = round(p * 100) < 1
+    in_100 = shown_in_100(p)
+    label = shown_label(p)
     chance = "fewer than 1 in 100 times" if below_floor else f"about {in_100} in 100 times"
     if label == "clear_effect":
         only = "" if below_floor else "only "
@@ -140,22 +143,22 @@ def _reliability_finding(p: float, what: str, based_on: int) -> Finding:
 
 def _reaction_phrase(m: float) -> str:
     """How the stock moved against its market-model expectation, in plain words."""
-    rounded = round(m * 100, 1)
-    if rounded == 0:
+    sign = direction(m)
+    if sign == 0:
         return "moved in line with what the market predicted"
-    side = "better" if rounded > 0 else "worse"
-    return f"did {_pct_abs(m)} {side} than its usual relationship with the market would predict"
+    side = "better" if sign > 0 else "worse"
+    return f"did {pct_abs(m)} {side} than its usual relationship with the market would predict"
 
 
 def _gap_sentence(mean_diff: float, n_pos: int, n_neg: int) -> str:
     """Positive-versus-negative comparison; a gap that rounds to zero has no direction."""
-    rounded = round(mean_diff * 100, 1)
+    sign = direction(mean_diff)
     lead = f"On average, the {n_pos} positive-news days studied did"
     tail = f"the {n_neg} negative-news days (that day and the next)."
-    if rounded == 0:
+    if sign == 0:
         return f"{lead} about the same as {tail}"
-    side = "better" if rounded > 0 else "worse"
-    return f"{lead} {_pct_abs(mean_diff)} {side} than {tail}"
+    side = "better" if sign > 0 else "worse"
+    return f"{lead} {pct_abs(mean_diff)} {side} than {tail}"
 
 
 def _pre_move_finding(bucket: BucketStats, mean_car: float) -> Finding | None:
@@ -168,16 +171,16 @@ def _pre_move_finding(bucket: BucketStats, mean_car: float) -> Finding | None:
     if pre is None or abs(pre) < PRE_MOVE_CAVEAT:
         return None
     side = "better" if pre > 0 else "worse"
-    same_direction = round(mean_car * 100, 1) != 0 and (pre > 0) == (mean_car > 0)
+    same_direction = direction(mean_car) != 0 and (pre > 0) == (mean_car > 0)
     if same_direction:
         text = (
             "Part of this move started earlier: on average, in the 5 trading days before "
-            f"these news days, the stock had already moved {_pct_abs(pre)} {side} than expected."
+            f"these news days, the stock had already moved {pct_abs(pre)} {side} than expected."
         )
     else:
         text = (
             "In the 5 trading days before these news days, the stock had on average moved "
-            f"{_pct_abs(pre)} {side} than expected."
+            f"{pct_abs(pre)} {side} than expected."
         )
     return Finding(text=text, based_on_events=bucket.n_car_pre_5)
 
@@ -424,4 +427,6 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
         events_total=len(events),
         events_insufficient=sum(1 for e in events if e.status != "ok"),
         earnings_note=note,
+        verdicts=build_verdicts(stats_all if primary_scope == "all_events" else stats_ex_earnings),
+        value_statement=VALUE_STATEMENT,
     )

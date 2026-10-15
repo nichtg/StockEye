@@ -64,7 +64,7 @@ async def _outlook(analysis: AnalysisService, symbol: str) -> TechnicalReport | 
         return None
 
 
-async def _profile(market: MarketDataService, symbol: str) -> CompanyProfile | None:
+async def profile_or_none(market: MarketDataService, symbol: str) -> CompanyProfile | None:
     """Company facts, or None: they are garnish, so their failure must never fail the row."""
     try:
         found, _ = await market.profile(symbol)
@@ -83,7 +83,7 @@ async def _row(market: MarketDataService, analysis: AnalysisService, symbol: str
         market.daily_history(symbol),
         market.quote(symbol),
         _outlook(analysis, symbol),
-        _profile(market, symbol),
+        profile_or_none(market, symbol),
     )
     statuses = [price_status, quote_status]
     lean: Lean | None = None

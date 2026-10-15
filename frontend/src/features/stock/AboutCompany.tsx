@@ -37,12 +37,21 @@ function safeWebsite(url: string | null | undefined): { href: string; host: stri
   }
 }
 
+/** A non-blank string, or null so the fact is hidden. */
+function text(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed === '' ? null : (trimmed ?? null);
+}
+
 function factsOf(profile: Profile, currency: string, exchange: Exchange): Fact[] {
   const facts: Fact[] = [];
   const add = (key: string, label: ReactNode, value: ReactNode | null) => {
     if (value !== null) facts.push({ key, label, value });
   };
   const cur = profile.currency ?? currency;
+  add('sector', 'Sector', text(profile.sector));
+  add('industry', 'Industry', text(profile.industry));
+  add('country', 'Headquarters', text(profile.country));
   add(
     'cap',
     <Term id="market_cap">Market cap</Term>,
