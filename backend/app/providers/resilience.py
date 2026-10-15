@@ -37,6 +37,8 @@ from app.providers.models import (
     NewsItem,
     NewsQuery,
     Quote,
+    ScreenMatch,
+    ScreenQuery,
     SymbolMatch,
 )
 from app.providers.quota import QuotaLedgerPort, current_priority, daily_cap
@@ -289,6 +291,9 @@ class _GuardedMarket:
 
     async def profile(self, symbol: str) -> CompanyProfile:
         return await self._guard.call(self.name, partial(self._adapter.profile, symbol))
+
+    async def screen(self, query: ScreenQuery) -> list[ScreenMatch]:
+        return await self._guard.call(self.name, partial(self._adapter.screen, query))
 
 
 class _GuardedNews:

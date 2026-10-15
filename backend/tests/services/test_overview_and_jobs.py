@@ -5,7 +5,7 @@ from bson import ObjectId
 
 from app.db import Database
 from app.jobs.ingest import refresh_exchange
-from app.jobs.scheduler import build_scheduler
+from app.jobs.scheduler import build_scheduler, schedule_startup_discover
 from app.providers.errors import TransientProviderError
 from app.providers.models import Bar, Interval
 from app.providers.quota import current_priority
@@ -124,9 +124,34 @@ async def test_scheduler_has_one_weekday_job_per_exchange(services: Services, db
 
     jobs = {job.id: job for job in scheduler.get_jobs()}
 
-    assert set(jobs) == {"refresh_us", "refresh_sgx"}
+    assert set(jobs) == {"refresh_us", "refresh_sgx", "discover_refresh"}
     assert "21" in str(jobs["refresh_us"].trigger)
     assert "mon-fri" in str(jobs["refresh_sgx"].trigger)
+    discover = jobs["discover_refresh"]
+    assert "mon-fri" in str(discover.trigger)
+    assert "hour='22'" in str(discover.trigger)
+    assert "minute='30'" in str(discover.trigger)
+    assert discover.max_instances == 1
+    assert discover.coalesce
+
+
+async def test_startup_discover_build_is_scheduled_only_when_nothing_is_stored(
+    services: Services, db: Database, provider: FakeMarketData
+) -> None:
+    provider.screen_hits = {"us": ["AAPL"], "sg": []}
+    scheduler = build_scheduler(services, db)
+
+    assert await schedule_startup_discover(scheduler, services)
+    job = scheduler.get_job("discover_startup")
+    assert job is not None
+    assert "date" in str(job.trigger)
+    assert provider.calls["screen"] == 0  # scheduled for later, never run inline
+
+    scheduler.remove_job("discover_startup")
+    await services.discover.refresh()
+
+    assert not await schedule_startup_discover(scheduler, services)
+    assert scheduler.get_job("discover_startup") is None
 
 
 async def test_cache_lookup_returns_expired_entry_marked_not_fresh(db: Database) -> None:
@@ -140,3 +165,22 @@ async def test_cache_lookup_returns_expired_entry_marked_not_fresh(db: Database)
     assert entry.is_fresh(CLOSED_NOW)
     assert not entry.is_fresh(CLOSED_NOW + timedelta(hours=1))
     assert await cache.lookup("missing") is None
+
+
+async def test_overview_row_carries_country_sector_and_market_cap(services: Services) -> None:
+    aapl, dbs = await build_overview(services.market, services.analysis, ["AAPL", "D05.SI"])
+
+    assert (aapl.country, aapl.sector, aapl.market_cap) == ("United States", "Technology", 2.5e9)
+    assert dbs.country == "Singapore"
+
+
+async def test_overview_failing_profile_still_gives_an_ok_row_with_empty_fields(
+    services: Services, provider: FakeMarketData
+) -> None:
+    provider.profile_fail = TransientProviderError("yahoo", "down")
+
+    (row,) = await build_overview(services.market, services.analysis, ["AAPL"])
+
+    assert row.status == "ok"
+    assert row.last_price is not None
+    assert (row.country, row.sector, row.market_cap) == (None, None, None)

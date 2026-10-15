@@ -32,6 +32,8 @@ from app.providers.models import (
     Exchange,
     Interval,
     Quote,
+    ScreenMatch,
+    ScreenQuery,
     SymbolMatch,
 )
 
@@ -40,6 +42,9 @@ log = get_logger(__name__)
 _US_EXCHANGES = frozenset({"NMS", "NYQ", "NGM", "NCM", "ASE", "PCX", "BTS", "NYS", "NAS", "NGS"})
 _SGX_EXCHANGES = frozenset({"SES"})
 _ALLOWED_TYPES = frozenset({"EQUITY", "ETF"})
+_SCREEN_TYPES = _ALLOWED_TYPES & {"EQUITY"}  # Discover leaves ETFs out
+# The screener's exchange field rejects three legacy codes that quotes may still carry.
+_US_SCREEN_EXCHANGES = sorted(_US_EXCHANGES - {"NYS", "NAS", "NGS"})
 _MAX_SEARCH_RESULTS = 8
 _EARNINGS_LIMIT = 40  # about ten years of quarters
 _DESCRIPTION_MAX = 4000
@@ -142,6 +147,20 @@ class YahooMarketData:
             return _profile_of(info)
 
         return await self._run(work, symbol)
+
+    async def screen(self, query: ScreenQuery) -> list[ScreenMatch]:
+        """Equities matching ``query``, listed on a supported exchange only (no OTC, no ETFs)."""
+
+        def work() -> list[ScreenMatch]:
+            result = yf.screen(
+                _equity_query(query),
+                size=query.size,
+                sortField=query.sort_field,
+                sortAsc=query.sort_asc,
+            )
+            return _matches_of(result.get("quotes") or [])
+
+        return await self._run(work)
 
     async def bars(
         self, symbol: str, interval: Interval, start: datetime, end: datetime
@@ -272,6 +291,47 @@ def _profile_of(info: dict[str, Any]) -> CompanyProfile:
         avg_volume=_number(info.get("averageVolume")),
         currency=_text(info.get("currency")),
     )
+
+
+def _equity_query(query: ScreenQuery) -> yf.EquityQuery:
+    exchanges = _US_SCREEN_EXCHANGES if query.region == "us" else sorted(_SGX_EXCHANGES)
+    # Restricting exchanges in the query (not only afterwards) keeps OTC listings from using up
+    # the result size.
+    parts = [
+        yf.EquityQuery("eq", ["region", query.region]),
+        yf.EquityQuery("is-in", ["exchange", *exchanges]),
+        yf.EquityQuery("btwn", ["intradaymarketcap", query.min_market_cap, query.max_market_cap]),
+        yf.EquityQuery("gt", ["avgdailyvol3m", query.min_avg_volume]),
+    ]
+    if query.max_pe is not None:
+        parts.append(yf.EquityQuery("gt", ["peratio.lasttwelvemonths", 0]))
+        parts.append(yf.EquityQuery("lt", ["peratio.lasttwelvemonths", query.max_pe]))
+    return yf.EquityQuery("and", parts)
+
+
+def _matches_of(quotes: list[dict[str, Any]]) -> list[ScreenMatch]:
+    matches: list[ScreenMatch] = []
+    for item in quotes:
+        exchange = _exchange_of(item.get("exchange"))
+        if exchange is None or item.get("quoteType") not in _SCREEN_TYPES:
+            continue  # re-checked here: the query filter alone is not trusted
+        symbol = _text(item.get("symbol"))
+        name = _text(item.get("longName")) or _text(item.get("shortName"))
+        if symbol is None or name is None:
+            log.info("screen_quote_skipped", reason="missing symbol or name", symbol=symbol)
+            continue
+        matches.append(
+            ScreenMatch(
+                symbol=symbol,
+                name=name,
+                exchange=exchange,
+                currency=_text(item.get("currency")),
+                market_cap=_number(item.get("marketCap")),
+                pe_ratio=_number(item.get("trailingPE")),
+                price=_number(item.get("regularMarketPrice")),
+            )
+        )
+    return matches
 
 
 def _as_date(ts: Any) -> date:

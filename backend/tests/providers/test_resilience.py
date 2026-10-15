@@ -26,6 +26,8 @@ from app.providers.models import (
     NewsItem,
     NewsQuery,
     Quote,
+    ScreenMatch,
+    ScreenQuery,
     SymbolMatch,
 )
 from app.providers.quota import Priority, QuotaDecision, QuotaSnapshot, scheduled_calls
@@ -350,6 +352,10 @@ class _Market:
         self._run("profile")
         return CompanyProfile()
 
+    async def screen(self, query: ScreenQuery) -> list[ScreenMatch]:
+        self._run("screen")
+        return []
+
 
 class _News:
     name = "p"
@@ -363,6 +369,15 @@ class _News:
         return []
 
 
+SCREEN = ScreenQuery(
+    region="us",
+    min_market_cap=3e8,
+    max_market_cap=2e9,
+    min_avg_volume=1,
+    sort_field="percentchange",
+    sort_asc=False,
+    size=5,
+)
 QUERY = NewsQuery(symbol="AAPL", exchange="US", company_name="Apple", start=NOW, end=NOW)
 
 
@@ -375,10 +390,11 @@ async def test_wrap_market_routes_every_method_through_the_guard() -> None:
     await market.bars("AAPL", "1d", NOW, NOW)
     await market.events("AAPL", NOW, NOW)
     await market.profile("AAPL")
+    await market.screen(SCREEN)
 
     assert market.name == "p"
-    assert adapter.ran == ["search", "bars", "events", "profile"]
-    assert h.ledger.consumed == 4
+    assert adapter.ran == ["search", "bars", "events", "profile", "screen"]
+    assert h.ledger.consumed == 5  # a screener call spends vendor quota like any other
 
 
 async def test_wrap_market_failure_trips_the_breaker_of_the_adapters_name() -> None:

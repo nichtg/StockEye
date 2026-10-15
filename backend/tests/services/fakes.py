@@ -19,6 +19,8 @@ from app.providers.models import (
     NewsItem,
     NewsQuery,
     Quote,
+    ScreenMatch,
+    ScreenQuery,
     SymbolMatch,
 )
 from app.providers.resilience import ProviderGuard
@@ -30,6 +32,7 @@ from app.services.admission import NewSymbolAdmission
 from app.services.analysis import AnalysisService
 from app.services.calendars import exchange_for, session_calendar
 from app.services.container import Services
+from app.services.discover import DiscoverService
 from app.services.market_data import MarketDataService
 from app.services.news import NewsService
 from app.services.news_feed import NewsFeed
@@ -66,8 +69,18 @@ class FakeMarketData:
         self.unknown = set(unknown)
         self.fail_with: ProviderError | None = None
         self.fail_symbols: dict[str, ProviderError] = {}
+        self.screen_hits: dict[str, list[str]] = {}  # region -> symbols a screen returns
+        self.screen_fail: ProviderError | None = None
+        self.profile_fail: ProviderError | None = None
         self.empty_bars = False  # answer bar requests with an empty list, like a vendor glitch
-        self.calls: dict[str, int] = {"search": 0, "quote": 0, "bars": 0, "events": 0, "profile": 0}
+        self.calls: dict[str, int] = {
+            "search": 0,
+            "quote": 0,
+            "bars": 0,
+            "events": 0,
+            "profile": 0,
+            "screen": 0,
+        }
 
     def _check(self, symbol: str) -> None:
         if symbol in self.unknown:
@@ -102,6 +115,8 @@ class FakeMarketData:
 
     async def profile(self, symbol: str) -> CompanyProfile:
         self.calls["profile"] += 1
+        if self.profile_fail is not None:
+            raise self.profile_fail
         self._check(symbol)
         return CompanyProfile(
             description=f"{NAMES.get(symbol, symbol)} makes things.",
@@ -118,6 +133,23 @@ class FakeMarketData:
             avg_volume=1_000_000.0,
             currency="SGD" if symbol.endswith(".SI") else "USD",
         )
+
+    async def screen(self, query: ScreenQuery) -> list[ScreenMatch]:
+        self.calls["screen"] += 1
+        if self.screen_fail is not None:
+            raise self.screen_fail
+        return [
+            ScreenMatch(
+                symbol=s,
+                name=NAMES.get(s, s),
+                exchange=exchange_for(s),
+                currency="SGD" if s.endswith(".SI") else "USD",
+                market_cap=1e9,
+                pe_ratio=12.0,
+                price=10.0,
+            )
+            for s in self.screen_hits.get(query.region, [])
+        ]
 
     def _daily(self, symbol: str, start: date, end: date) -> list[Bar]:
         cal = session_calendar(symbol, start, end)
@@ -291,4 +323,5 @@ def build_fake_services(
     )
     analysis = AnalysisService(db, market, news, admission, clock)
     feed = NewsFeed(NewsRepository(db), clock, news.status)
-    return Services(market, news, analysis, admission, guard, feed)
+    discover = DiscoverService(db, provider, market, analysis, clock)
+    return Services(market, news, analysis, admission, guard, feed, discover)
