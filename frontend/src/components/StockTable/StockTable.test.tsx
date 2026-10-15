@@ -154,24 +154,49 @@ describe('StockTable sorting', () => {
 });
 
 describe('StockTable country filter', () => {
-  it('lists countries with counts and filters the rows', async () => {
+  it('shows few countries as buttons with counts and filters the rows', async () => {
     const user = userEvent.setup();
     renderApp(<Harness />);
-    const select = screen.getByRole('combobox', { name: 'Country' });
+    const group = screen.getByRole('radiogroup', { name: 'Filter by country' });
     expect(
-      within(select)
-        .getAllByRole('option')
-        .map((o) => o.textContent),
-    ).toEqual(['All countries', 'Singapore (2)', 'United States (1)']);
-    await user.selectOptions(select, 'Singapore');
+      within(group)
+        .getAllByRole('radio')
+        .map((r) => r.textContent),
+    ).toEqual(['All', 'Singapore2', 'United States1']);
+    expect(within(group).getByRole('radio', { name: 'All' })).toBeChecked();
+    await user.click(within(group).getByRole('radio', { name: 'Singapore 2' }));
     expect(order()).toEqual(['AAA', 'CCC']);
     expect(screen.getByTestId('loc')).toHaveTextContent('?country=Singapore');
+    expect(within(group).getByRole('radio', { name: 'Singapore 2' })).toBeChecked();
+    await user.click(within(group).getByRole('radio', { name: 'All' }));
+    expect(screen.getByTestId('loc')).not.toHaveTextContent('country');
+  });
+
+  it('uses the namespaced URL key when several views share one URL', async () => {
+    const user = userEvent.setup();
+    renderApp(<Harness namespace="discover" />);
+    await user.click(screen.getByRole('radio', { name: 'Singapore 2' }));
+    expect(screen.getByTestId('loc')).toHaveTextContent('?discoverCountry=Singapore');
+  });
+
+  it('moves the choice with the arrow keys', async () => {
+    const user = userEvent.setup();
+    renderApp(<Harness />);
+    screen.getByRole('radio', { name: 'All' }).focus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('radio', { name: 'Singapore 2' })).toHaveFocus();
+    expect(order()).toEqual(['AAA', 'CCC']);
+    await user.keyboard('{ArrowLeft}{ArrowLeft}');
+    expect(screen.getByRole('radio', { name: 'United States 1' })).toHaveFocus();
+    expect(order()).toEqual(['BBB']);
   });
 
   it('shows an empty line with a way back when the filter hides every row', async () => {
     const user = userEvent.setup();
     renderApp(<Harness />, { route: '/?country=Peru' });
     expect(screen.getByText('No stocks from Peru here.')).toBeInTheDocument();
+    // The unknown country still shows as the selected choice, with a count of 0.
+    expect(screen.getByRole('radio', { name: 'Peru 0' })).toBeChecked();
     await user.click(screen.getByRole('button', { name: 'Show all countries' }));
     expect(order()).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
   });
@@ -239,7 +264,8 @@ describe('StockTable on a phone', () => {
     renderApp(<Harness />);
     const list = screen.getByRole('list', { name: 'Test list' });
     expect(within(list).getAllByText('Singapore')).toHaveLength(2);
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort by' }), 'Last price');
+    await user.click(screen.getByRole('combobox', { name: /Sort by/ }));
+    await user.click(screen.getByRole('option', { name: 'Last price' }));
     expect(
       within(screen.getByRole('list', { name: 'Test list' }))
         .getAllByRole('link')

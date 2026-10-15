@@ -115,15 +115,16 @@ describe('DiscoverPage', () => {
     serve(page());
     renderApp(<DiscoverPage />, { route: '/discover' });
     await screen.findByRole('table', { name: 'Small caps on the move' });
+    const group = screen.getByRole('radiogroup', { name: 'Filter by country' });
     expect(
-      within(screen.getByRole('combobox', { name: 'Country' }))
-        .getAllByRole('option')
-        .map((o) => o.textContent),
-    ).toEqual(['All countries', 'Canada (1)', 'Singapore (1)', 'United States (1)']);
+      within(group)
+        .getAllByRole('radio')
+        .map((r) => r.textContent),
+    ).toEqual(['All', 'Canada1', 'Singapore1', 'United States1']);
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Country' }), 'Singapore');
+    await user.click(within(group).getByRole('radio', { name: 'Singapore 1' }));
+    expect(screen.getByRole('radio', { name: 'Singapore 1' })).toBeChecked();
     expect(screen.getByRole('table', { name: 'Under the radar in Singapore' })).toBeInTheDocument();
-    expect(screen.queryByText(/No stocks from/)).not.toBeInTheDocument();
   });
 
   it('adds a row to the watchlist with the star', async () => {
