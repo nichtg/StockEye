@@ -13,6 +13,12 @@ describe('describeCompany', () => {
     ['Software - Infrastructure', null, 'Infrastructure software'],
     ['REIT - Retail', null, 'Retail REITs'],
     ['Information Technology Services', null, 'Information technology services'],
+    ['Insurance - Reinsurance', null, 'Reinsurers'],
+    ['Beverages - Brewers', null, 'Brewers'],
+    ['Beverages - Wineries & Distilleries', null, 'Wineries & distilleries'],
+    ['Utilities - Independent Power Producers', null, 'Independent power producers'],
+    ['Real Estate - Development', null, 'Real estate development'],
+    ['Oil & Gas E&P', null, 'Oil & gas E&P'],
   ])('describes %s in %s', (industry, country, expected) => {
     expect(describeCompany(industry, country)).toBe(expected);
   });
@@ -34,6 +40,10 @@ describe('describeCompany', () => {
     'Philippines',
     'United Arab Emirates',
     'Cayman Islands',
+    'Marshall Islands',
+    'Bahamas',
+    'British Virgin Islands',
+    'Czech Republic',
   ])('uses "the" for %s', (country) => {
     expect(describeCompany(null, country)).toBe(`Headquartered in the ${country}`);
   });

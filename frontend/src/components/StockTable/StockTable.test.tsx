@@ -164,10 +164,10 @@ describe('StockTable country filter', () => {
         .map((r) => r.textContent),
     ).toEqual(['All', 'Singapore2', 'United States1']);
     expect(within(group).getByRole('radio', { name: 'All' })).toBeChecked();
-    await user.click(within(group).getByRole('radio', { name: 'Singapore 2' }));
+    await user.click(within(group).getByRole('radio', { name: 'Singapore, 2 stocks' }));
     expect(order()).toEqual(['AAA', 'CCC']);
     expect(screen.getByTestId('loc')).toHaveTextContent('?country=Singapore');
-    expect(within(group).getByRole('radio', { name: 'Singapore 2' })).toBeChecked();
+    expect(within(group).getByRole('radio', { name: 'Singapore, 2 stocks' })).toBeChecked();
     await user.click(within(group).getByRole('radio', { name: 'All' }));
     expect(screen.getByTestId('loc')).not.toHaveTextContent('country');
   });
@@ -175,7 +175,7 @@ describe('StockTable country filter', () => {
   it('uses the namespaced URL key when several views share one URL', async () => {
     const user = userEvent.setup();
     renderApp(<Harness namespace="discover" />);
-    await user.click(screen.getByRole('radio', { name: 'Singapore 2' }));
+    await user.click(screen.getByRole('radio', { name: 'Singapore, 2 stocks' }));
     expect(screen.getByTestId('loc')).toHaveTextContent('?discoverCountry=Singapore');
   });
 
@@ -184,10 +184,10 @@ describe('StockTable country filter', () => {
     renderApp(<Harness />);
     screen.getByRole('radio', { name: 'All' }).focus();
     await user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('radio', { name: 'Singapore 2' })).toHaveFocus();
+    expect(screen.getByRole('radio', { name: 'Singapore, 2 stocks' })).toHaveFocus();
     expect(order()).toEqual(['AAA', 'CCC']);
     await user.keyboard('{ArrowLeft}{ArrowLeft}');
-    expect(screen.getByRole('radio', { name: 'United States 1' })).toHaveFocus();
+    expect(screen.getByRole('radio', { name: 'United States, 1 stock' })).toHaveFocus();
     expect(order()).toEqual(['BBB']);
   });
 
@@ -196,7 +196,7 @@ describe('StockTable country filter', () => {
     renderApp(<Harness />, { route: '/?country=Peru' });
     expect(screen.getByText('No stocks from Peru here.')).toBeInTheDocument();
     // The unknown country still shows as the selected choice, with a count of 0.
-    expect(screen.getByRole('radio', { name: 'Peru 0' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Peru, 0 stocks' })).toBeChecked();
     await user.click(screen.getByRole('button', { name: 'Show all countries' }));
     expect(order()).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
   });

@@ -71,14 +71,16 @@ describe('TableControls country filter', () => {
     expect(screen.getByTestId('loc')).toHaveTextContent('?discoverCountry=Singapore');
   });
 
-  it('shows counts, a check on the selected item and a divider after All countries', async () => {
+  it('shows counts, a check on the selected item and a border after All countries', async () => {
     const user = userEvent.setup();
     renderApp(<Harness rows={MANY} />, { route: '/?country=Singapore' });
     await user.click(screen.getByRole('combobox', { name: /Country/ }));
     const listbox = screen.getByRole('listbox');
     const options = within(listbox).getAllByRole('option');
+    // One option per choice (All plus six countries): no divider posing as an option.
+    expect(options).toHaveLength(7);
+    for (const o of options) expect(o.textContent).not.toBe('');
     expect(options[0]).toHaveTextContent('All countries');
-    expect(listbox.querySelector('hr')).not.toBeNull();
     const singapore = within(listbox).getByRole('option', { name: /Singapore/ });
     expect(singapore).toHaveTextContent('2');
     expect(singapore).toHaveAttribute('aria-selected', 'true');
@@ -88,6 +90,17 @@ describe('TableControls country filter', () => {
       return icon !== null && getComputedStyle(icon).visibility !== 'hidden';
     });
     expect(visibleChecks).toEqual([singapore]);
+    const icon = singapore.querySelector('svg');
+    expect(icon).toBeVisible();
+    expect(options[1]?.querySelector('svg')).not.toBeVisible();
+  });
+
+  it('does not let a click on the first item reset a chosen country by accident', async () => {
+    const user = userEvent.setup();
+    renderApp(<Harness rows={MANY} />, { route: '/?country=Canada' });
+    await user.click(screen.getByRole('combobox', { name: /Country/ }));
+    await user.click(screen.getByRole('option', { name: 'All countries' }));
+    expect(screen.getByTestId('loc')).not.toHaveTextContent('country');
   });
 
   it('keeps an unknown country from the URL selected, with a count of 0', async () => {
@@ -99,6 +112,14 @@ describe('TableControls country filter', () => {
     expect(peru).toHaveTextContent('0');
   });
 
+  it('opens with Space', async () => {
+    const user = userEvent.setup();
+    renderApp(<Harness rows={MANY} />);
+    screen.getByRole('combobox', { name: /Country/ }).focus();
+    await user.keyboard(' ');
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+  });
+
   it('opens with Enter and closes with Escape', async () => {
     const user = userEvent.setup();
     renderApp(<Harness rows={MANY} />);
@@ -107,5 +128,39 @@ describe('TableControls country filter', () => {
     expect(screen.getByRole('listbox')).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+});
+
+describe('TableControls on a phone', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'matchMedia',
+      (query: string): MediaQueryList =>
+        ({
+          matches: query.includes('max-width'),
+          media: query,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+          addListener: () => undefined,
+          removeListener: () => undefined,
+          dispatchEvent: () => false,
+          onchange: null,
+        }) as MediaQueryList,
+    );
+  });
+
+  it('uses buttons for 3 countries and a select for 4', () => {
+    const { unmount } = renderApp(
+      <Harness rows={['Brazil', 'Canada', 'France'].map((c, i) => row(`S${String(i)}`, c))} />,
+    );
+    expect(screen.getByRole('radiogroup', { name: 'Filter by country' })).toBeInTheDocument();
+    unmount();
+    renderApp(
+      <Harness
+        rows={['Brazil', 'Canada', 'France', 'Japan'].map((c, i) => row(`S${String(i)}`, c))}
+      />,
+    );
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /Country/ })).toBeInTheDocument();
   });
 });

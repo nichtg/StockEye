@@ -1,5 +1,5 @@
 /** Words kept upper-case when the rest of an industry name is lowercased. */
-const ACRONYMS = new Set(['ETF', 'IT', 'US', 'REIT', 'REITs']);
+const ACRONYMS = new Set(['ETF', 'IT', 'US', 'REIT', 'REITs', 'E&P']);
 
 /** Countries whose name reads naturally with "the" ("headquartered in the Netherlands"). */
 const COUNTRIES_WITH_ARTICLE = new Set([
@@ -9,7 +9,23 @@ const COUNTRIES_WITH_ARTICLE = new Set([
   'Philippines',
   'United Arab Emirates',
   'Cayman Islands',
+  'Marshall Islands',
+  'Bahamas',
+  'British Virgin Islands',
+  'Czech Republic',
 ]);
+
+/**
+ * Industries where the second part is already a full noun, so swapping "X - Y" into "Y X" would
+ * read wrongly ("Reinsurance insurance"). Keyed by the lowercase Yahoo name.
+ */
+const INDUSTRY_OVERRIDES: Record<string, string> = {
+  'insurance - reinsurance': 'reinsurers',
+  'beverages - brewers': 'brewers',
+  'beverages - wineries & distilleries': 'wineries & distilleries',
+  'utilities - independent power producers': 'independent power producers',
+  'real estate - development': 'real estate development',
+};
 
 function clean(value: string | null | undefined): string {
   return value?.trim() ?? '';
@@ -28,6 +44,8 @@ function phraseWord(word: string): string {
  * ("Drug Manufacturers - General" is just "drug manufacturers") and is dropped.
  */
 function industryPhrase(industry: string): string {
+  const override = INDUSTRY_OVERRIDES[industry.toLowerCase().replace(/\s+/g, ' ')];
+  if (override) return override;
   const parts = industry
     .split(/\s+-\s+/)
     .map((p) => p.trim())

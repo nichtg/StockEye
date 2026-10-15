@@ -122,8 +122,8 @@ describe('DiscoverPage', () => {
         .map((r) => r.textContent),
     ).toEqual(['All', 'Canada1', 'Singapore1', 'United States1']);
 
-    await user.click(within(group).getByRole('radio', { name: 'Singapore 1' }));
-    expect(screen.getByRole('radio', { name: 'Singapore 1' })).toBeChecked();
+    await user.click(within(group).getByRole('radio', { name: 'Singapore, 1 stock' }));
+    expect(screen.getByRole('radio', { name: 'Singapore, 1 stock' })).toBeChecked();
     expect(screen.getByRole('table', { name: 'Under the radar in Singapore' })).toBeInTheDocument();
   });
 
