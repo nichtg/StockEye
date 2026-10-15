@@ -11,6 +11,7 @@ import { layout } from '../theme/tokens';
 import { AccountMenu } from './AccountMenu';
 import { PageSkeleton } from './PageSkeleton';
 import { ThemeToggle } from './ThemeToggle';
+import { MainNav } from './MainNav';
 import { Wordmark } from './Wordmark';
 
 export const MAIN_ID = 'main-content';
@@ -58,6 +59,7 @@ export function AppShell() {
           }}
         >
           <Wordmark />
+          <MainNav />
           <SearchBox />
           <Box sx={{ flex: 1, display: { xs: 'none', md: 'block' } }} />
           <ThemeToggle />

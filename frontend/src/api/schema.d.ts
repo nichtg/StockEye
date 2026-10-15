@@ -363,6 +363,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/discover': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Discover
+     * @description Stored lists only: this never calls a vendor, so it cannot spend any quota.
+     */
+    get: operations['discover_api_discover_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -519,6 +539,26 @@ export interface components {
       n_pos: number;
       /** N Neg */
       n_neg: number;
+    };
+    /** DiscoverList */
+    DiscoverList: {
+      /** Id */
+      id: string;
+      /** Title */
+      title: string;
+      /** Description */
+      description: string;
+      /** Rows */
+      rows: components['schemas']['OverviewRow'][];
+      status: components['schemas']['DataStatus'];
+    };
+    /** DiscoverOut */
+    DiscoverOut: {
+      /** Lists */
+      lists: components['schemas']['DiscoverList'][];
+      /** Updated At */
+      updated_at: string | null;
+      data_status: components['schemas']['DataStatus'];
     };
     /** EventPointOut */
     EventPointOut: {
@@ -792,6 +832,12 @@ export interface components {
       sparkline: number[];
       /** Lean */
       lean: ('bullish' | 'bearish' | 'neutral') | null;
+      /** Country */
+      country: string | null;
+      /** Sector */
+      sector: string | null;
+      /** Market Cap */
+      market_cap: number | null;
       /**
        * Status
        * @enum {string}
@@ -1796,6 +1842,26 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  discover_api_discover_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DiscoverOut'];
         };
       };
     };
