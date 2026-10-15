@@ -332,6 +332,7 @@ def _matches_of(quotes: list[dict[str, Any]]) -> list[ScreenMatch]:
                 market_cap=_number(item.get("marketCap")),
                 pe_ratio=_number(item.get("trailingPE")),
                 price=_number(item.get("regularMarketPrice")),
+                avg_volume_3m=_number(item.get("averageDailyVolume3Month")),
             )
         )
     return matches

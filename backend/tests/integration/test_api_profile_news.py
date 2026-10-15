@@ -78,7 +78,7 @@ async def test_news_articles_returns_page_shape(user: httpx.AsyncClient, db: Dat
 
     body = resp.json()
     assert resp.status_code == 200
-    assert set(body) == {"articles", "next_cursor", "since", "status"}
+    assert set(body) == {"articles", "next_cursor", "since", "status", "months"}
     assert [a["title"] for a in body["articles"]] == ["headline 0", "headline 1"]
     assert set(body["articles"][0]) == {
         "published_at",
@@ -87,6 +87,7 @@ async def test_news_articles_returns_page_shape(user: httpx.AsyncClient, db: Dat
         "source",
         "sentiment_label",
         "sentiment",
+        "similar",
     }
     assert body["articles"][0]["sentiment_label"] == "not_scored"
     assert body["articles"][1]["sentiment_label"] == "positive"
@@ -119,3 +120,14 @@ async def test_news_articles_limit_max_returns_up_to_fifty(
     assert len(resp.json()["articles"]) == 50
     assert resp.json()["next_cursor"] is not None
     assert len(default.json()["articles"]) == 30
+
+
+async def test_news_articles_month_filter_validates_the_month(user: httpx.AsyncClient) -> None:
+    for month in ("2026-13", "garbage", "2020-01"):
+        resp = await user.get("/api/stocks/AAPL/news/articles", params={"month": month})
+        assert resp.status_code == 422, month
+
+    ok = await user.get("/api/stocks/AAPL/news/articles", params={"month": "2026-10"})
+
+    assert ok.status_code == 200
+    assert ok.json()["months"] == []

@@ -79,7 +79,7 @@ async def build_services(settings: Settings, db: Database) -> Services:
         IngestBudget(db, settings.max_new_symbols_per_user_per_day), news, utc_now
     )
     analysis = AnalysisService(db, market, news, admission)
-    feed = NewsFeed(NewsRepository(db), utc_now, news.status)
+    feed = NewsFeed(NewsRepository(db), utc_now, news.status, market.company_name)
     discover = DiscoverService(db, market, analysis)
     return Services(market, news, analysis, admission, guard, feed, discover, http)
 

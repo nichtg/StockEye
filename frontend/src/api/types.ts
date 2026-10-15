@@ -62,3 +62,4 @@ export interface ErrorEnvelope {
 }
 export type DiscoverOut = S['DiscoverOut'];
 export type DiscoverList = S['DiscoverList'];
+export type DiscoverRow = S['DiscoverRow'];

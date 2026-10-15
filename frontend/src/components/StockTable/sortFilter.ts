@@ -1,11 +1,29 @@
-import type { OverviewRow } from '../../api/types';
+import type { DiscoverRow, OverviewRow } from '../../api/types';
 
-export const SORT_KEYS = ['symbol', 'country', 'last', 'change', 'outlook', 'cap'] as const;
+export const SORT_KEYS = [
+  'symbol',
+  'country',
+  'last',
+  'change',
+  'outlook',
+  'cap',
+  'pe',
+  'traded',
+] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 export type SortDir = 'asc' | 'desc';
 export interface SortState {
   key: SortKey;
   dir: SortDir;
+}
+
+/** A table row; Discover rows also carry the figures its per-list columns show. */
+export type StockRow = OverviewRow & Partial<Pick<DiscoverRow, 'pe_ratio' | 'avg_traded_value'>>;
+
+/** "Last price" -> "last price", keeping P/E and 1W as written: for use mid-sentence. */
+export function sortPhrase(key: SortKey): string {
+  const label = SORT_LABELS[key];
+  return label === 'P/E' || label.startsWith('1W') ? label : label.toLowerCase();
 }
 
 export const SORT_LABELS: Record<SortKey, string> = {
@@ -15,16 +33,13 @@ export const SORT_LABELS: Record<SortKey, string> = {
   change: '1W change',
   outlook: 'Outlook',
   cap: 'Market cap',
+  pe: 'P/E',
+  traded: 'Avg daily trading',
 };
 
 const OUTLOOK_ORDER = { bearish: 0, neutral: 1, bullish: 2 } as const;
 
 export type TableColumns = 'watchlist' | 'discover';
-
-/** Market cap is shown, and so sortable, on Discover only. */
-export function sortKeysFor(columns: TableColumns): readonly SortKey[] {
-  return columns === 'discover' ? SORT_KEYS : SORT_KEYS.filter((k) => k !== 'cap');
-}
 
 export function parseSortKey(
   value: string | null,
@@ -37,7 +52,7 @@ export function parseSortDir(value: string | null): SortDir {
   return value === 'desc' ? 'desc' : 'asc';
 }
 
-function valueOf(row: OverviewRow, key: SortKey): string | number | null {
+function valueOf(row: StockRow, key: SortKey): string | number | null {
   switch (key) {
     case 'symbol':
       return row.symbol;
@@ -51,6 +66,10 @@ function valueOf(row: OverviewRow, key: SortKey): string | number | null {
       return row.lean ? OUTLOOK_ORDER[row.lean] : null;
     case 'cap':
       return row.market_cap;
+    case 'pe':
+      return row.pe_ratio ?? null;
+    case 'traded':
+      return row.avg_traded_value ?? null;
   }
 }
 
@@ -65,11 +84,11 @@ function compareValues(a: string | number, b: string | number): number {
  * A sorted copy. Missing values always go last, whichever way the column is sorted, so a
  * descending sort never buries real figures under blanks. Ties keep their original order.
  */
-export function sortRows(
-  rows: readonly OverviewRow[],
+export function sortRows<T extends StockRow>(
+  rows: readonly T[],
   key: SortKey | null,
   dir: SortDir,
-): OverviewRow[] {
+): T[] {
   if (!key) return [...rows];
   const sign = dir === 'asc' ? 1 : -1;
   return [...rows].sort((a, b) => {
@@ -83,7 +102,7 @@ export function sortRows(
 }
 
 /** Rows from one country, or all rows when `country` is null. */
-export function filterRows(rows: readonly OverviewRow[], country: string | null): OverviewRow[] {
+export function filterRows<T extends StockRow>(rows: readonly T[], country: string | null): T[] {
   if (!country) return [...rows];
   return rows.filter((r) => r.country === country);
 }
