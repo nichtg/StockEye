@@ -1,8 +1,5 @@
-import type { IChartApi, Time } from 'lightweight-charts';
-import type { BarTime } from './visible';
+import type { IChartApi } from 'lightweight-charts';
 
-/** Empty space kept right of the latest bar. */
-export const RIGHT_OFFSET = 2;
 /** Zooming in never shows fewer bars than this. */
 export const MIN_SPAN = 10;
 /** One zoom step multiplies or divides the visible span by this. */
@@ -16,9 +13,47 @@ export interface Span {
   to: number;
 }
 
-/** The first and last positions the view may show: bar 0 to the latest bar plus the right offset. */
+/** The first and last positions the view may show. fixRightEdge keeps the latest bar the limit. */
 export function dataBounds(barCount: number): Span {
-  return { from: 0, to: Math.max(0, barCount - 1) + RIGHT_OFFSET };
+  return { from: 0, to: Math.max(0, barCount - 1) };
+}
+
+/** Which moves still change the view; the buttons are disabled when theirs does not. */
+export interface NavLimits {
+  canZoomIn: boolean;
+  canZoomOut: boolean;
+  canPanLeft: boolean;
+  canPanRight: boolean;
+}
+
+export const NO_LIMITS: NavLimits = {
+  canZoomIn: false,
+  canZoomOut: false,
+  canPanLeft: false,
+  canPanRight: false,
+};
+
+/** Half a bar of slack, since the chart reports fractional positions. */
+const SLACK = 0.5;
+
+export function navLimits(range: Span | null, barCount: number): NavLimits {
+  if (!range || barCount === 0) return NO_LIMITS;
+  const bounds = dataBounds(barCount);
+  const span = range.to - range.from;
+  return {
+    canZoomIn: span > Math.min(MIN_SPAN, bounds.to - bounds.from) + SLACK,
+    canZoomOut: span < bounds.to - bounds.from - SLACK,
+    canPanLeft: range.from > bounds.from + SLACK,
+    canPanRight: range.to < bounds.to - SLACK,
+  };
+}
+
+/** Scrolls `range` the least needed to include bar `index`; a range that already does stays. */
+export function revealIndex(range: Span, index: number, bounds: Span): Span {
+  if (index < range.from)
+    return inside({ from: index, to: index + (range.to - range.from) }, bounds);
+  if (index > range.to) return inside({ from: index - (range.to - range.from), to: index }, bounds);
+  return range;
 }
 
 /** Slides `range` the least needed to sit inside `bounds`; its span is kept. */
@@ -47,18 +82,18 @@ export function panRange(range: Span, fraction: number, bounds: Span): Span {
   return inside({ from: range.from + shift, to: range.to + shift }, bounds);
 }
 
-/** What the viewer's first look at a symbol and range shows: from `visible_from` to the last bar. */
+/** The viewer's first look at a symbol and range, in bar positions: from where the chosen range starts to the last bar. */
 export interface View {
-  from: BarTime;
-  to: BarTime;
+  startIndex: number;
+  barCount: number;
 }
 
-/** Shows `view`, keeping the usual empty space right of the latest bar. */
+/**
+ * Shows `view` with one logical-range call. Going through times would not work: the chart only
+ * applies a time range on its next frame, so a following read or write would see the old range.
+ */
 export function showView(chart: IChartApi, view: View): void {
-  const scale = chart.timeScale();
-  scale.setVisibleRange({ from: view.from as Time, to: view.to as Time });
-  const shown = scale.getVisibleLogicalRange();
-  if (shown) scale.setVisibleLogicalRange({ from: shown.from, to: shown.to + RIGHT_OFFSET });
+  chart.timeScale().setVisibleLogicalRange({ from: view.startIndex, to: view.barCount - 1 });
 }
 
 export interface ChartNavigator {

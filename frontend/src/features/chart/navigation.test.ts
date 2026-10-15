@@ -6,12 +6,14 @@ import {
   createNavigator,
   dataBounds,
   handleNavKey,
+  navLimits,
+  revealIndex,
   navKeyAction,
   panRange,
   zoomRange,
 } from './navigation';
 
-// 100 bars: positions 0 to 99, plus the 2 bars of empty space on the right.
+// 100 bars: positions 0 to 99.
 const bounds = dataBounds(100);
 
 describe('zoomRange', () => {
@@ -36,7 +38,7 @@ describe('zoomRange', () => {
   });
 
   it('copes with data shorter than the minimum span', () => {
-    expect(zoomRange({ from: 0, to: 4 }, 0.1, dataBounds(3))).toEqual({ from: 0, to: 4 });
+    expect(zoomRange({ from: 0, to: 4 }, 0.1, dataBounds(3))).toEqual({ from: 0, to: 2 });
   });
 });
 
@@ -48,7 +50,7 @@ describe('panRange', () => {
 
   it('stops at the oldest bar and at the latest one, keeping the span', () => {
     expect(panRange({ from: 3, to: 23 }, -0.25, bounds)).toEqual({ from: 0, to: 20 });
-    expect(panRange({ from: 80, to: 100 }, 0.25, bounds)).toEqual({ from: 81, to: 101 });
+    expect(panRange({ from: 80, to: 100 }, 0.25, bounds)).toEqual({ from: 79, to: 99 });
   });
 });
 
@@ -103,13 +105,15 @@ describe('createNavigator', () => {
 
   it('resets to the chosen range, or fits the content when there is none', () => {
     const { chart, timeScale } = fakeChart();
-    const view = { from: '2026-04-01', to: '2026-10-01' };
+    const view = { startIndex: 30, barCount: 100 };
     createNavigator(
       chart,
       () => 100,
       () => view,
     ).reset();
-    expect(timeScale.setVisibleRange).toHaveBeenCalledWith(view);
+    // One logical-range write: the chart would not have applied a time range yet.
+    expect(timeScale.setVisibleLogicalRange).toHaveBeenCalledTimes(1);
+    expect(timeScale.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 30, to: 99 });
     createNavigator(
       chart,
       () => 100,
@@ -172,5 +176,43 @@ describe('handleNavKey', () => {
     expect(other.preventDefault).not.toHaveBeenCalled();
     const zoom = { ...key('-'), preventDefault: vi.fn(), stopPropagation: vi.fn() };
     expect(handleNavKey(zoom, null)).toBe(false);
+  });
+});
+
+describe('revealIndex', () => {
+  it('leaves the view alone when the bar is already on screen', () => {
+    expect(revealIndex({ from: 40, to: 60 }, 50, bounds)).toEqual({ from: 40, to: 60 });
+  });
+
+  it('scrolls the least needed, keeping the span, and stays inside the data', () => {
+    expect(revealIndex({ from: 40, to: 60 }, 30, bounds)).toEqual({ from: 30, to: 50 });
+    expect(revealIndex({ from: 40, to: 60 }, 70, bounds)).toEqual({ from: 50, to: 70 });
+    expect(revealIndex({ from: 40, to: 60 }, 0, bounds)).toEqual({ from: 0, to: 20 });
+  });
+});
+
+describe('navLimits', () => {
+  it('allows every move in the middle of a mid-sized view', () => {
+    expect(navLimits({ from: 40, to: 60 }, 100)).toEqual({
+      canZoomIn: true,
+      canZoomOut: true,
+      canPanLeft: true,
+      canPanRight: true,
+    });
+  });
+
+  it('stops panning at the edges and zooming at the limits', () => {
+    expect(navLimits({ from: 0, to: 99 }, 100)).toEqual({
+      canZoomIn: true,
+      canZoomOut: false,
+      canPanLeft: false,
+      canPanRight: false,
+    });
+    expect(navLimits({ from: 50, to: 59 }, 100)).toMatchObject({ canZoomIn: false });
+  });
+
+  it('allows nothing on an empty chart', () => {
+    expect(navLimits(null, 100).canZoomIn).toBe(false);
+    expect(navLimits({ from: 0, to: 1 }, 0).canPanRight).toBe(false);
   });
 });

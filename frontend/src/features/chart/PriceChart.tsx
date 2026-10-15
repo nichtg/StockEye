@@ -7,11 +7,18 @@ import { radius, tokens } from '../../theme/tokens';
 import { ChartA11yTable } from './ChartA11yTable';
 import { chartOptions } from './chartOptions';
 import { ChartTooltip } from './ChartTooltip';
-import { createNavigator, handleNavKey, type ChartNavigator, type View } from './navigation';
+import {
+  createNavigator,
+  handleNavKey,
+  navLimits,
+  type ChartNavigator,
+  type NavLimits,
+  type View,
+} from './navigation';
 import { INDICATORS, type IndicatorId } from './indicators';
 import type { MarkerKind } from './markers';
 import { SUB_PANE_HEIGHT, TIME_AXIS_HEIGHT, buildSeriesSpecs, markerData } from './model';
-import { visibleCandles } from './visible';
+import { startIndex, visibleCandles } from './visible';
 import { barLabel, chartSummary, type PatternSentences } from './tooltip';
 import { useChartCursor } from './useChartCursor';
 import { useChartSeries, useSeriesMarkers } from './useChartSeries';
@@ -29,6 +36,8 @@ interface PriceChartProps {
   shownMarkers: MarkerKind[];
   /** Receives the chart's zoom and pan actions once it exists, and null when it goes away. */
   onNavReady?: (nav: ChartNavigator | null) => void;
+  /** Which zoom and pan moves still change the view; reported as the view moves. */
+  onNavLimits?: (limits: NavLimits) => void;
 }
 
 export function PriceChart({
@@ -40,6 +49,7 @@ export function PriceChart({
   sentences,
   shownMarkers,
   onNavReady,
+  onNavLimits,
 }: PriceChartProps) {
   const palette = tokens[useColorMode().mode];
   const hostRef = useRef<HTMLDivElement>(null);
@@ -70,10 +80,13 @@ export function PriceChart({
 
   const chart = useLightweightChart(hostRef, options);
   // The chart holds all the history; the chosen range only decides where the view starts.
-  const lastTime = data.candles.at(-1)?.time;
+  const barCount = data.candles.length;
   const view = useMemo<View | undefined>(
-    () => (lastTime === undefined ? undefined : { from: data.visible_from, to: lastTime }),
-    [data.visible_from, lastTime],
+    () =>
+      barCount === 0
+        ? undefined
+        : { startIndex: startIndex(data.candles, data.visible_from), barCount },
+    [data.candles, data.visible_from, barCount],
   );
   const candles = useChartSeries(chart, specs, baseHeight, `${data.symbol}|${data.range}`, view);
   const latest = useRef({ count: data.candles.length, view });
@@ -81,14 +94,27 @@ export function PriceChart({
     latest.current = { count: data.candles.length, view };
   });
   const nav = useRef<ChartNavigator | null>(null);
+  const clearCursor = useRef<() => void>(() => undefined);
   useEffect(() => {
     if (!chart) return;
     // Reads through the ref so the actions always see the latest data.
-    const navigator = createNavigator(
+    const base = createNavigator(
       chart,
       () => latest.current.count,
       () => latest.current.view,
     );
+    // A moved view makes the keyboard bar cursor stale, so any move clears it first.
+    const moved = (run: () => void) => () => {
+      clearCursor.current();
+      run();
+    };
+    const navigator: ChartNavigator = {
+      zoomIn: moved(base.zoomIn),
+      zoomOut: moved(base.zoomOut),
+      panLeft: moved(base.panLeft),
+      panRight: moved(base.panRight),
+      reset: moved(base.reset),
+    };
     nav.current = navigator;
     onNavReady?.(navigator);
     return () => {
@@ -96,9 +122,23 @@ export function PriceChart({
       onNavReady?.(null);
     };
   }, [chart, onNavReady]);
+  useEffect(() => {
+    if (!chart) return;
+    const report = () => {
+      onNavLimits?.(navLimits(chart.timeScale().getVisibleLogicalRange(), latest.current.count));
+    };
+    report();
+    chart.timeScale().subscribeVisibleLogicalRangeChange(report);
+    return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(report);
+    };
+  }, [chart, onNavLimits, barCount]);
   useSeriesMarkers(candles, markers);
   const cursor = useChartCursor(chart, candles, hostRef, { data, currency, exchange, sentences });
 
+  useEffect(() => {
+    clearCursor.current = cursor.clear;
+  });
   const ctx = { currency, exchange };
   const shown = useMemo(
     () => visibleCandles(data.candles, data.visible_from),

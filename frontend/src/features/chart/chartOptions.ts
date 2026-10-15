@@ -8,7 +8,6 @@ import {
 } from 'lightweight-charts';
 import { exchangeLocale, exchangeTimeZone, hour12For, type Exchange } from '../../lib/exchange';
 import { dateFormat } from '../../lib/format';
-import { RIGHT_OFFSET } from './navigation';
 import { FONT_FAMILY, type Tokens } from '../../theme/tokens';
 
 function toDate(time: Time): Date {
@@ -104,7 +103,6 @@ export function chartOptions({
       borderVisible: false,
       timeVisible: intraday,
       secondsVisible: false,
-      rightOffset: RIGHT_OFFSET,
       // Zooming out stops at the whole history (the edges are fixed too), so this is only a floor.
       minBarSpacing: 0.5,
       fixLeftEdge: true,

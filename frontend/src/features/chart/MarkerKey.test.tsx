@@ -38,3 +38,19 @@ describe('MarkerKey', () => {
     expect(screen.getByRole('button', { name: 'Dividends' })).toBeEnabled();
   });
 });
+
+describe('MarkerKey totals', () => {
+  it('stays usable for a kind that has markers only before the chosen range', () => {
+    renderApp(
+      <MarkerKey
+        shown={['dividend']}
+        counts={counts}
+        totals={{ ...counts, dividend: 4 }}
+        onToggle={() => undefined}
+      />,
+    );
+    const dividends = screen.getByRole('button', { name: 'Dividends, 0 in this range' });
+    expect(dividends).toHaveAttribute('aria-disabled', 'false');
+    expect(dividends).toHaveAttribute('aria-pressed', 'true');
+  });
+});

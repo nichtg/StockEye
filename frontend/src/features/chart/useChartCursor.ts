@@ -1,4 +1,5 @@
 import type { IChartApi, ISeriesApi, Logical } from 'lightweight-charts';
+import { dataBounds, revealIndex } from './navigation';
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import type { ChartData } from '../../api/types';
 import type { Exchange } from '../../lib/exchange';
@@ -82,8 +83,18 @@ export function useChartCursor(
     const point = candles?.dataByIndex(index);
     if (!chart || !candles || !bar || !point) return;
     keyboardIndex.current = index;
+    // The chart holds years of history; bring an off-screen bar into view before pointing at it.
+    const scale = chart.timeScale();
+    const shown = scale.getVisibleLogicalRange();
+    let x: number | null = null;
+    if (shown && (index < shown.from || index > shown.to)) {
+      const moved = revealIndex(shown, index, dataBounds(latest.current.data.candles.length));
+      scale.setVisibleLogicalRange(moved);
+      // The chart applies the new range on its next frame, so place the tip from the range itself.
+      x = ((index - moved.from + 0.5) / (moved.to - moved.from + 1)) * scale.width();
+    }
     chart.setCrosshairPosition(bar.close, point.time, candles);
-    const next = tipAt(index, chart.timeScale().logicalToCoordinate(index as Logical) ?? 0);
+    const next = tipAt(index, x ?? scale.logicalToCoordinate(index as Logical) ?? 0);
     setTip(next);
     if (next) {
       const { open, high, low, close, events } = next.content;
@@ -119,6 +130,7 @@ export function useChartCursor(
   return {
     tip: tip?.source === inputs.data ? tip : null,
     announce,
+    clear,
     onKeyDown,
     onBlur,
   };

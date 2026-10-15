@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { renderApp } from '../../test/render';
 import { ChartA11yTable } from './ChartA11yTable';
-import { visibleCandles } from './visible';
+import { onOrAfter, startIndex, visibleCandles } from './visible';
 
 const candles = Array.from({ length: 6 }, (_, i) => ({
   time: `2026-10-0${String(i + 1)}`,
@@ -28,7 +28,7 @@ describe('ChartA11yTable', () => {
     const rows = within(screen.getByRole('table')).getAllByRole('row');
     expect(rows).toHaveLength(1 + 4);
     expect(within(rows[1]!).getAllByRole('cell')[0]).toHaveTextContent('Oct 3, 2026');
-    expect(screen.getByText('4 bars since Oct 3, 2026')).toBeInTheDocument();
+    expect(screen.getByText(/^4 bars since Oct 3, 2026/)).toBeInTheDocument();
   });
 });
 
@@ -37,5 +37,14 @@ describe('visibleCandles', () => {
     expect(visibleCandles(candles, undefined)).toHaveLength(6);
     const hourly = [100, 200, 300].map((time) => ({ ...candles[0]!, time }));
     expect(visibleCandles(hourly, 200).map((c) => c.time)).toEqual([200, 300]);
+  });
+});
+
+describe('startIndex', () => {
+  it('finds the first bar of the range, or 0 when none is that recent', () => {
+    expect(startIndex(candles, '2026-10-03')).toBe(2);
+    expect(startIndex(candles, '2026-12-01')).toBe(0);
+    expect(onOrAfter(200, 100)).toBe(true);
+    expect(onOrAfter('2026-01-01', '2026-02-01')).toBe(false);
   });
 });

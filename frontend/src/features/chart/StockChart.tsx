@@ -10,7 +10,7 @@ import { exchangeCurrency, exchangeOfSymbol } from '../../lib/exchange';
 import { radius } from '../../theme/tokens';
 import { usePatternReliability } from '../stock/usePatternReliability';
 import { useChart } from '../stock/useStockData';
-import type { ChartNavigator } from './navigation';
+import { NO_LIMITS, type ChartNavigator, type NavLimits } from './navigation';
 import { barLabel } from './tooltip';
 import { ChartToolbar } from './ChartToolbar';
 import { IndicatorLegend } from './IndicatorLegend';
@@ -43,9 +43,11 @@ export function StockChart({ symbol, stock, onStatus }: Props) {
   }, [onStatus, status]);
 
   const [nav, setNav] = useState<ChartNavigator | null>(null);
+  const [limits, setLimits] = useState<NavLimits>(NO_LIMITS);
 
   const markers = chart.data?.markers;
   const visibleFrom = chart.data?.visible_from;
+  const totals = useMemo(() => (markers ? markerCounts(markers) : undefined), [markers]);
   // Counts cover the chosen range; markers in the history before it are only reached by panning.
   const counts = useMemo(
     () => (markers ? markerCounts(markers, visibleFrom) : undefined),
@@ -63,6 +65,7 @@ export function StockChart({ symbol, stock, onStatus }: Props) {
         selection={settings.selection}
         onToggleIndicator={settings.toggleIndicator}
         nav={nav}
+        navLimits={limits}
         visibleFromLabel={visibleFrom === undefined ? undefined : barLabel(visibleFrom, exchange)}
       />
       <IndicatorLegend selection={settings.selection} range={settings.range} />
@@ -110,13 +113,19 @@ export function StockChart({ symbol, stock, onStatus }: Props) {
                 sentences={sentences}
                 shownMarkers={settings.shownMarkers}
                 onNavReady={setNav}
+                onNavLimits={setLimits}
               />
             </Box>
           )
         }
       </QueryRegion>
 
-      <MarkerKey shown={settings.shownMarkers} counts={counts} onToggle={settings.toggleMarker} />
+      <MarkerKey
+        shown={settings.shownMarkers}
+        counts={counts}
+        totals={totals}
+        onToggle={settings.toggleMarker}
+      />
     </Box>
   );
 }

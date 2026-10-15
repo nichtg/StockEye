@@ -1,4 +1,5 @@
 import Box from '@mui/material/Box';
+import { memo } from 'react';
 import type { Candle } from '../../api/types';
 import { visuallyHidden } from '../../lib/a11y';
 import type { Exchange } from '../../lib/exchange';
@@ -16,7 +17,7 @@ interface Props {
 }
 
 /** The bars of the chosen range as a real table, plus the live region, for people who cannot see the canvas. */
-export function ChartA11yTable({
+export const ChartA11yTable = memo(function ChartA11yTable({
   candles: bars,
   visibleFrom,
   currency,
@@ -27,7 +28,7 @@ export function ChartA11yTable({
   return (
     <Box sx={visuallyHidden}>
       <table>
-        <caption>{`${String(bars.length)} bars since ${barLabel(visibleFrom, exchange)}`}</caption>
+        <caption>{`${String(bars.length)} bars since ${barLabel(visibleFrom, exchange)}. Older bars are on the chart; scroll it back to reach them.`}</caption>
         <thead>
           <tr>
             <th>Date</th>
@@ -54,4 +55,4 @@ export function ChartA11yTable({
       <div aria-live="polite">{announcement}</div>
     </Box>
   );
-}
+});

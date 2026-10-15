@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { RangeKey } from '../../api/types';
 import { radius } from '../../theme/tokens';
 import { ChartNav } from './ChartNav';
-import type { ChartNavigator } from './navigation';
+import { NO_LIMITS, type ChartNavigator, type NavLimits } from './navigation';
 import { INDICATORS, type IndicatorId } from './indicators';
 import { RANGES } from './useChartSettings';
 
@@ -109,6 +109,7 @@ interface ChartToolbarProps {
   onToggleIndicator: (id: IndicatorId) => void;
   /** Zoom and pan actions of the chart on screen; null while there is none. */
   nav?: ChartNavigator | null;
+  navLimits?: NavLimits;
   /** The start of the chosen range, formatted, for the VWAP hint. */
   visibleFromLabel?: string;
 }
@@ -120,6 +121,7 @@ export function ChartToolbar({
   selection,
   onToggleIndicator,
   nav = null,
+  navLimits = NO_LIMITS,
   visibleFromLabel,
 }: ChartToolbarProps) {
   return (
@@ -151,7 +153,7 @@ export function ChartToolbar({
             </ToggleButton>
           ))}
         </ToggleButtonGroup>
-        <ChartNav nav={nav} range={range} />
+        <ChartNav nav={nav} range={range} limits={navLimits} />
       </Box>
 
       <ChipRow>

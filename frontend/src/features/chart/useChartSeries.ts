@@ -98,7 +98,7 @@ export class SeriesSet {
 
 /**
  * Keeps the chart's series matching `specs` and returns the candle series. The chart is fitted
- * to `view` (the range the viewer chose, from `visible_from` to the last bar) only when `fitKey`
+ * to `view` (the range the viewer chose, from where `visible_from` starts to the last bar) only when `fitKey`
  * changes (a new symbol or range), never when indicators toggle. Without a view it fits the content.
  */
 export function useChartSeries(
