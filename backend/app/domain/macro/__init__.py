@@ -27,6 +27,7 @@ from app.domain.macro.summary import (
     Headline,
     MacroReport,
     TopEvent,
+    Verdict,
     build_macro_report,
 )
 
@@ -45,6 +46,7 @@ __all__ = [
     "SessionCalendar",
     "TimelinePoint",
     "TopEvent",
+    "Verdict",
     "bucket_of",
     "build_macro_report",
     "compute_stats",

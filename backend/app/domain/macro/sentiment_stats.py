@@ -75,6 +75,11 @@ class BucketStats:
     t: float | None = None
     p_value: float | None = None
     label: Reliability | None = None
+    # 95% confidence interval of mean_car_0_1, from the same one-sample t model as ``t`` and
+    # ``p_value`` (so it excludes zero exactly when p < 0.05). None below 2 events or with no
+    # spread; unlike the test it is not gated on min_n, so a thin bucket can still be drawn.
+    ci_low_0_1: float | None = None
+    ci_high_0_1: float | None = None
 
 
 @dataclass(frozen=True)
@@ -126,11 +131,22 @@ def _bucket_test(car01: Sequence[float], min_n: int) -> tuple[float, float] | No
     return t, p
 
 
+def _mean_ci(car01: Sequence[float]) -> tuple[float, float] | None:
+    """95% t-interval of the mean (fractions): mean +/- t(0.975, n-1) * sd / sqrt(n)."""
+    n = len(car01)
+    if n < MIN_DISTINCT or np.ptp(car01) == 0:
+        return None
+    mean = float(np.mean(car01))
+    half = float(stats.t.ppf(0.975, n - 1)) * float(np.std(car01, ddof=1)) / math.sqrt(n)
+    return mean - half, mean + half
+
+
 def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> BucketStats:
     car01 = [e.car_0_1 for e in events if e.car_0_1 is not None]
     car05 = [e.car_0_5 for e in events if e.car_0_5 is not None]
     pre = [e.car_pre_5 for e in events if e.car_pre_5 is not None]
     test = _bucket_test(car01, min_n)
+    ci = _mean_ci(car01)
     return BucketStats(
         bucket=bucket,
         n=len(events),
@@ -144,6 +160,8 @@ def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> 
         t=None if test is None else test[0],
         p_value=None if test is None else test[1],
         label=None if test is None else reliability_label(test[1]),
+        ci_low_0_1=None if ci is None else ci[0],
+        ci_high_0_1=None if ci is None else ci[1],
     )
 
 
