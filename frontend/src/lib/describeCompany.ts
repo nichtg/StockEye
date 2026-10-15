@@ -19,13 +19,13 @@ const COUNTRIES_WITH_ARTICLE = new Set([
  * Industries where the second part is already a full noun, so swapping "X - Y" into "Y X" would
  * read wrongly ("Reinsurance insurance"). Keyed by the lowercase Yahoo name.
  */
-const INDUSTRY_OVERRIDES: Record<string, string> = {
-  'insurance - reinsurance': 'reinsurers',
-  'beverages - brewers': 'brewers',
-  'beverages - wineries & distilleries': 'wineries & distilleries',
-  'utilities - independent power producers': 'independent power producers',
-  'real estate - development': 'real estate development',
-};
+const INDUSTRY_OVERRIDES = new Map<string, string>([
+  ['insurance - reinsurance', 'reinsurers'],
+  ['beverages - brewers', 'brewers'],
+  ['beverages - wineries & distilleries', 'wineries & distilleries'],
+  ['utilities - independent power producers', 'independent power producers'],
+  ['real estate - development', 'real estate development'],
+]);
 
 function clean(value: string | null | undefined): string {
   return value?.trim() ?? '';
@@ -44,7 +44,7 @@ function phraseWord(word: string): string {
  * ("Drug Manufacturers - General" is just "drug manufacturers") and is dropped.
  */
 function industryPhrase(industry: string): string {
-  const override = INDUSTRY_OVERRIDES[industry.toLowerCase().replace(/\s+/g, ' ')];
+  const override = INDUSTRY_OVERRIDES.get(industry.toLowerCase().replace(/\s+/g, ' '));
   if (override) return override;
   const parts = industry
     .split(/\s+-\s+/)

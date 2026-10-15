@@ -95,7 +95,7 @@ describe('TableControls country filter', () => {
     expect(options[1]?.querySelector('svg')).not.toBeVisible();
   });
 
-  it('does not let a click on the first item reset a chosen country by accident', async () => {
+  it('choosing All countries clears the filter', async () => {
     const user = userEvent.setup();
     renderApp(<Harness rows={MANY} />, { route: '/?country=Canada' });
     await user.click(screen.getByRole('combobox', { name: /Country/ }));
