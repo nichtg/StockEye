@@ -138,17 +138,27 @@ export function NewsTab({ symbol, name, exchange, news }: Props) {
   const autoFetches = useRef(0);
   const last = pages?.[pages.length - 1];
   const emptyTail = !!last && last.articles.length === 0;
-  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = query;
+  const { hasNextPage, isFetching, isFetchingNextPage, isFetchNextPageError, fetchNextPage } =
+    query;
   useEffect(() => {
     if (!emptyTail) {
       autoFetches.current = 0;
       return;
     }
-    if (!hasNextPage || isFetchingNextPage || isFetchNextPageError) return;
+    // A running refetch (news progress) would be cancelled by fetchNextPage: wait for it.
+    if (!hasNextPage || isFetching || isFetchingNextPage || isFetchNextPageError) return;
     if (autoFetches.current >= MAX_AUTO_FETCHES) return;
     autoFetches.current += 1;
     void fetchNextPage();
-  }, [emptyTail, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage, pages]);
+  }, [
+    emptyTail,
+    hasNextPage,
+    isFetching,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    fetchNextPage,
+    pages,
+  ]);
 
   if (query.isError && !pages) {
     return (
