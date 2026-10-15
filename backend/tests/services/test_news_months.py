@@ -238,6 +238,25 @@ async def test_months_counts_are_cached_for_five_minutes(db: Database) -> None:
     assert [m.count for m in fresh.months] == [2]
 
 
+async def test_months_counts_are_not_cached_while_news_is_still_collecting(db: Database) -> None:
+    async def status(_symbol: str) -> DataStatus:
+        return DataStatus(state="partial", as_of=None, reason="collecting")
+
+    async def name(_symbol: str) -> str:
+        return "Apple Inc."
+
+    feed = NewsFeed(NewsRepository(db), FakeClock(), status, name)
+    await seed(db, "AAPL", "oct one", datetime(2026, 10, 2, 15, tzinfo=UTC))
+
+    first = await feed.page("AAPL")
+    await seed(db, "AAPL", "oct two", datetime(2026, 10, 2, 16, tzinfo=UTC))
+    second = await feed.page("AAPL")  # same instant, well inside the TTL
+
+    assert first.months is not None and second.months is not None
+    assert [m.count for m in first.months] == [1]
+    assert [m.count for m in second.months] == [2]
+
+
 class _CountingRepo(NewsRepository):
     def __init__(self, db: Database) -> None:
         super().__init__(db)
