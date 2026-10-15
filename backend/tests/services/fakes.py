@@ -23,6 +23,7 @@ from app.providers.models import (
 )
 from app.providers.resilience import ProviderGuard
 from app.repositories.ingest_budget import IngestBudget
+from app.repositories.news import NewsRepository
 from app.repositories.quotas import QuotaLedger
 from app.sentiment.scorer import SentimentScore, SentimentUnavailableError
 from app.services.admission import NewSymbolAdmission
@@ -31,6 +32,7 @@ from app.services.calendars import exchange_for, session_calendar
 from app.services.container import Services
 from app.services.market_data import MarketDataService
 from app.services.news import NewsService
+from app.services.news_feed import NewsFeed
 
 # Saturday: both exchanges closed, last completed session is Friday 2026-10-02.
 CLOSED_NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
@@ -288,4 +290,5 @@ def build_fake_services(
         IngestBudget(db, settings.max_new_symbols_per_user_per_day), news, clock
     )
     analysis = AnalysisService(db, market, news, admission, clock)
-    return Services(market, news, analysis, admission, guard)
+    feed = NewsFeed(NewsRepository(db), clock, news.status)
+    return Services(market, news, analysis, admission, guard, feed)

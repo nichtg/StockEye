@@ -21,12 +21,14 @@ from app.providers.registry import build_keyed_news_providers
 from app.providers.resilience import ProviderGuard
 from app.providers.yahoo import YahooMarketData
 from app.repositories.ingest_budget import IngestBudget
+from app.repositories.news import NewsRepository
 from app.repositories.quotas import QuotaLedger
 from app.sentiment.finbert_onnx import FinBertOnnxScorer
 from app.services.admission import NewSymbolAdmission
 from app.services.analysis import AnalysisService
 from app.services.market_data import MarketDataService
 from app.services.news import NewsService
+from app.services.news_feed import NewsFeed
 
 
 @dataclass
@@ -36,6 +38,7 @@ class Services:
     analysis: AnalysisService
     admission: NewSymbolAdmission
     guard: ProviderGuard
+    news_feed: NewsFeed
     http: httpx.AsyncClient | None = None
 
     async def aclose(self) -> None:
@@ -74,7 +77,8 @@ async def build_services(settings: Settings, db: Database) -> Services:
         IngestBudget(db, settings.max_new_symbols_per_user_per_day), news, utc_now
     )
     analysis = AnalysisService(db, market, news, admission)
-    return Services(market, news, analysis, admission, guard, http)
+    feed = NewsFeed(NewsRepository(db), utc_now, news.status)
+    return Services(market, news, analysis, admission, guard, feed, http)
 
 
 def get_services(request: Request) -> Services:

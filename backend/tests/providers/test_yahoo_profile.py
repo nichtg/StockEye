@@ -6,7 +6,8 @@ from typing import Any
 import pytest
 import yfinance as yf
 
-from app.providers.errors import SymbolNotFoundError
+from app.providers.errors import ProviderDataError, SymbolNotFoundError
+from app.providers.models import CompanyProfile
 from app.providers.yahoo import YahooMarketData
 
 
@@ -19,7 +20,7 @@ def _use_info(monkeypatch: pytest.MonkeyPatch, info: dict[str, Any]) -> None:
 
 
 def _info(**overrides: Any) -> dict[str, Any]:
-    base: dict[str, Any] = {"longName": "DBS Group Holdings Ltd"}
+    base: dict[str, Any] = {"longName": "DBS Group Holdings Ltd", "exchange": "SES"}
     return {**base, **overrides}
 
 
@@ -172,3 +173,52 @@ async def test_profile_all_missing_fields_are_none(monkeypatch: pytest.MonkeyPat
     result = await YahooMarketData().profile("AAPL")
 
     assert result.model_dump() == dict.fromkeys(result.model_dump())
+
+
+async def test_profile_unsupported_exchange_is_a_data_error_like_quote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_info(monkeypatch, _info(exchange="OQB", symbol="REEMF"))
+
+    with pytest.raises(ProviderDataError):
+        await YahooMarketData().profile("REEMF")
+
+
+async def test_profile_missing_exchange_is_a_data_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_info(monkeypatch, {"longName": "No Exchange Inc."})
+
+    with pytest.raises(ProviderDataError):
+        await YahooMarketData().profile("AAPL")
+
+
+async def test_profile_description_with_sentence_end_exactly_at_the_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = "x" * 3998 + ". " + "tail without end"  # the period is character 4000
+    _use_info(monkeypatch, _info(longBusinessSummary=text))
+
+    result = (await YahooMarketData().profile("AAPL")).description
+
+    assert result == "x" * 3998 + "."
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("https://example.com", "https://example.com"),
+        ("HTTPS://Example.com/a", "https://Example.com/a"),
+        ("  http://example.com  ", "http://example.com"),
+        ("javascript:alert(1)", None),
+        ("data:text/html,hi", None),
+        ("ftp://example.com", None),
+        ("//example.com", None),
+        ("example.com", None),
+        ("https://", None),
+        ("http://[bad", None),
+        (None, None),
+    ],
+)
+def test_company_profile_model_keeps_only_absolute_http_websites(
+    raw: str | None, expected: str | None
+) -> None:
+    assert CompanyProfile(website=raw).website == expected
