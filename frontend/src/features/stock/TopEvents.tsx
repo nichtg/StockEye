@@ -119,8 +119,8 @@ export function TopEvents({
   exchange,
 }: {
   events: TopEventOut[];
-  /** ISO date the 3-month window starts on. */
-  since: string;
+  /** ISO date the 3-month window starts on; absent on reports saved before the window existed. */
+  since?: string | null;
   exchange: Exchange;
 }) {
   const headingId = useId();
@@ -132,13 +132,15 @@ export function TopEvents({
     <section aria-labelledby={headingId}>
       <SectionTitle id={headingId}>Biggest news days, past 3 months</SectionTitle>
       <Typography variant="body2" sx={{ color: 'ink3', mb: 1.5 }}>
-        News days since {formatDate(since, exchange)}. Older news is left out because its effect on
-        today’s price has likely faded. <Term id="recent_news_window" label="the 3-month window" />
+        {since
+          ? `News days since ${formatDate(since, exchange)}.`
+          : 'News days from the past 3 months.'}{' '}
+        <Term id="recent_news_window" label="the 3-month window" />
       </Typography>
       {events.length === 0 ? (
         <Typography>
-          No news day in the past 3 months moved the price clearly. The findings above still cover 2
-          years.
+          No news days to show from the past 3 months: none were found, or they are too recent to
+          measure yet.
         </Typography>
       ) : (
         <>

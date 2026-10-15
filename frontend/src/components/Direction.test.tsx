@@ -4,8 +4,8 @@ import { renderApp } from '../test/render';
 import { Direction } from './Direction';
 
 function pill(value: number | null) {
-  renderApp(<Direction value={value} variant="pill" />);
-  return screen.queryByText(/[0-9]/)?.parentElement ?? screen.getByText('–');
+  const { container } = renderApp(<Direction value={value} variant="pill" />);
+  return container.querySelector<HTMLElement>('[data-variant]') ?? screen.getByText('–');
 }
 
 describe('Direction', () => {

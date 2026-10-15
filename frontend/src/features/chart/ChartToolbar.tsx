@@ -6,7 +6,7 @@ import Tooltip from '@mui/material/Tooltip';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { RangeKey } from '../../api/types';
 import { radius } from '../../theme/tokens';
-import { INDICATORS, indicatorHint, type IndicatorId } from './indicators';
+import { INDICATORS, type IndicatorId } from './indicators';
 import { RANGES } from './useChartSettings';
 
 /**
@@ -147,7 +147,7 @@ export function ChartToolbar({
         {INDICATORS.map((ind) => {
           const on = selection.includes(ind.id);
           return (
-            <Tooltip key={ind.id} title={indicatorHint(ind, range)} describeChild>
+            <Tooltip key={ind.id} title={ind.hint(range)} describeChild>
               <Chip
                 label={ind.label}
                 clickable

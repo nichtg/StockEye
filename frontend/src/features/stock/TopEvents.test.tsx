@@ -82,9 +82,7 @@ describe('TopEvents', () => {
     expect(
       screen.getByRole('heading', { name: 'Biggest news days, past 3 months' }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/News days since Feb 1, 2026./)).toHaveTextContent(
-      'Older news is left out because its effect on today’s price has likely faded.',
-    );
+    expect(screen.getByText(/News days since Feb 1, 2026./)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'What is the 3-month window?' })).toBeInTheDocument();
   });
 
@@ -95,10 +93,26 @@ describe('TopEvents', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'No news day in the past 3 months moved the price clearly. The findings above still cover 2 years.',
+        'No news days to show from the past 3 months: none were found, or they are too recent to measure yet.',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Order of the biggest news days' })).toBeNull();
     expect(screen.queryByRole('button', { name: /Show all/ })).toBeNull();
+  });
+
+  it('makes no claim about the findings above when there are no events', () => {
+    // The findings may be missing too (not enough news, or still collecting), so the text must not mention them.
+    renderApp(<TopEvents events={[]} since="2026-02-01" exchange="US" />);
+    expect(screen.queryByText(/findings/i)).toBeNull();
+    expect(screen.queryByText(/2 years/)).toBeNull();
+  });
+
+  it('renders without the date when the report predates the window field', () => {
+    renderApp(<TopEvents events={EVENTS} exchange="US" />);
+    expect(screen.queryByText(/News days since/)).toBeNull();
+    expect(
+      screen.getByRole('heading', { name: 'Biggest news days, past 3 months' }),
+    ).toBeInTheDocument();
+    expect(titles()).toHaveLength(3);
   });
 });
