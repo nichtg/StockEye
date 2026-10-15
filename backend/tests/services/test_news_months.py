@@ -1,5 +1,6 @@
 """News tab month filter, per-month counts and near-duplicate grouping."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -219,7 +220,10 @@ async def test_months_counts_are_cached_for_five_minutes(db: Database) -> None:
     async def status(_symbol: str) -> DataStatus:
         return ok()
 
-    feed = NewsFeed(NewsRepository(db), clock, status)
+    async def name(_symbol: str) -> str:
+        return "Apple Inc."
+
+    feed = NewsFeed(NewsRepository(db), clock, status, name)
     await seed(db, "AAPL", "oct one", datetime(2026, 10, 2, 15, tzinfo=UTC))
 
     first = await feed.page("AAPL")
@@ -232,3 +236,56 @@ async def test_months_counts_are_cached_for_five_minutes(db: Database) -> None:
     assert [m.count for m in first.months] == [1]
     assert [m.count for m in cached.months] == [1]
     assert [m.count for m in fresh.months] == [2]
+
+
+class _CountingRepo(NewsRepository):
+    def __init__(self, db: Database) -> None:
+        super().__init__(db)
+        self.scans = 0
+
+    async def window_titles(self, symbol: str, since: datetime) -> list[tuple[datetime, str]]:
+        self.scans += 1
+        await asyncio.sleep(0.05)  # keep the scan open so concurrent callers overlap
+        return await super().window_titles(symbol, since)
+
+
+async def test_months_cold_cache_scans_once_under_concurrency(db: Database) -> None:
+    async def status(_symbol: str) -> DataStatus:
+        return ok()
+
+    async def name(_symbol: str) -> str:
+        return "Apple Inc."
+
+    repo = _CountingRepo(db)
+    feed = NewsFeed(repo, FakeClock(), status, name)
+    await seed(db, "AAPL", "oct one", datetime(2026, 10, 2, 15, tzinfo=UTC))
+
+    pages = await asyncio.gather(*(feed.page("AAPL") for _ in range(5)))
+
+    assert repo.scans == 1
+    assert all(p.months is not None and [m.count for m in p.months] == [1] for p in pages)
+
+
+async def test_company_name_is_looked_up_once_a_day_and_never_caches_the_ticker(
+    db: Database,
+) -> None:
+    clock = FakeClock()
+    calls: list[str] = []
+    answers = iter(["AAPL", "Apple Inc.", "Apple Inc."])
+
+    async def status(_symbol: str) -> DataStatus:
+        return ok()
+
+    async def name(symbol: str) -> str:
+        calls.append(symbol)
+        return next(answers)
+
+    feed = NewsFeed(NewsRepository(db), clock, status, name)
+
+    await feed.page("AAPL", limit=1)  # ticker fallback: not remembered
+    await feed.page("AAPL", limit=1)  # real name: remembered
+    await feed.page("AAPL", limit=1)
+    clock.now += timedelta(hours=25)
+    await feed.page("AAPL", limit=1)
+
+    assert len(calls) == 3

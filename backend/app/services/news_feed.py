@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from app.domain.macro import bucket_of, is_price_recap
 from app.domain.news import InvalidMonthError, cluster_stories, month_window
 from app.repositories.news import RecentArticle
-from app.services.calendars import exchange_tz
+from app.services.calendars import exchange_tz, root_ticker
 from app.services.errors import AppError
 from app.services.news import core_name
 from app.services.reports import (
@@ -39,6 +39,7 @@ MAX_LIMIT = 50
 # page can be short or even empty while ``next_cursor`` is set.
 MAX_ROUNDS = 5
 MONTHS_TTL = timedelta(minutes=5)
+NAME_TTL = timedelta(hours=24)
 _EARLIEST_CURSOR = datetime(2000, 1, 1, tzinfo=UTC)
 _CURSOR_FUTURE_SLACK = timedelta(days=1)
 
@@ -128,12 +129,12 @@ def _month_counts(titles: list[tuple[datetime, str]], tz: ZoneInfo) -> list[News
     ]
 
 
-def _ignore_tokens(symbol: str, company_name: str | None) -> set[str]:
+def _ignore_tokens(symbol: str, company_name: str) -> set[str]:
     """Words every headline about the symbol shares: ticker parts and the company's core name.
 
     ("D05.SI" gives d05 and si; "Rocket Lab Holdings, Inc." gives rocket and lab.)
     """
-    text = symbol if company_name is None else f"{symbol} {core_name(company_name)}"
+    text = f"{symbol} {core_name(company_name)}"
     return {part for part in re.split(r"[^a-z0-9]+", text.lower()) if part}
 
 
@@ -215,7 +216,7 @@ class NewsFeed:
         repo: _ArticleSource,
         clock: Callable[[], datetime],
         status: Callable[[str], Awaitable[DataStatus]],
-        company_name: Callable[[str], Awaitable[str]] | None = None,
+        company_name: Callable[[str], Awaitable[str]],
     ) -> None:
         self._repo = repo
         self._clock = clock
@@ -224,6 +225,10 @@ class NewsFeed:
         # (symbol, window day) -> (expires_at, counts). A client can omit the cursor on every
         # call, so the whole-window scan is cached rather than repeated.
         self._months: dict[tuple[str, date], tuple[datetime, list[NewsMonthOut]]] = {}
+        self._month_locks: dict[tuple[str, date], asyncio.Lock] = {}  # single flight per key
+        # symbol -> (name, expires_at). Names barely change, so a day is plenty; this keeps
+        # the feed off the 60 s quote cache. The ticker fallback is never cached.
+        self._names: dict[str, tuple[str, datetime]] = {}
 
     async def page(
         self,
@@ -269,8 +274,7 @@ class NewsFeed:
             return await self._month_counts(symbol, now, since, tz)
 
         async def ignore() -> set[str]:
-            name = None if self._company_name is None else await self._company_name(symbol)
-            return _ignore_tokens(symbol, name)
+            return _ignore_tokens(symbol, await self._name_of(symbol, now))
 
         page, status, month_counts, skip = await asyncio.gather(
             _collect_page(fetch, limit, start), self._status(symbol), months(), ignore()
@@ -283,15 +287,34 @@ class NewsFeed:
             months=month_counts,
         )
 
+    async def _name_of(self, symbol: str, now: datetime) -> str:
+        """The company name, remembered ``NAME_TTL``; the bare ticker when none is known."""
+        cached = self._names.get(symbol)
+        if cached is not None and now < cached[1]:
+            return cached[0]
+        name = await self._company_name(symbol)
+        if name.strip().upper() != root_ticker(symbol).upper():  # not the ticker fallback
+            self._names[symbol] = (name, now + NAME_TTL)
+        return name
+
     async def _month_counts(
         self, symbol: str, now: datetime, since: datetime, tz: ZoneInfo
     ) -> list[NewsMonthOut]:
-        """Per-month counts, cached for ``MONTHS_TTL`` per symbol and (UTC) window day."""
+        """Per-month counts, cached for ``MONTHS_TTL`` per symbol and (UTC) window day.
+
+        Concurrent cold calls for one key share a single scan (a lock, then a cache re-check).
+        """
         key = (symbol, now.date())
         cached = self._months.get(key)
         if cached is not None and now < cached[0]:
             return cached[1]
-        counts = _month_counts(await self._repo.window_titles(symbol, since), tz)
-        self._months = {k: v for k, v in self._months.items() if now < v[0]}  # drop stale
-        self._months[key] = (now + MONTHS_TTL, counts)
-        return counts
+        lock = self._month_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            cached = self._months.get(key)
+            if cached is not None and now < cached[0]:
+                return cached[1]
+            counts = _month_counts(await self._repo.window_titles(symbol, since), tz)
+            self._months = {k: v for k, v in self._months.items() if now < v[0]}  # drop stale
+            self._months[key] = (now + MONTHS_TTL, counts)
+            self._month_locks.pop(key, None)
+            return counts

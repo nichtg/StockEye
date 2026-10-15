@@ -53,6 +53,14 @@ def test_cluster_stories_loosely_worded_reports_stay_apart_for_precision() -> No
         ("Rocket Lab wins $100M contract", "Rocket Lab wins $50M contract"),
         ("Rocket Lab (RKLB)", "Rocket Lab stock jumps on launch news"),
         ("Rocket Lab Neutron update", "Rocket Lab Neutron launch succeeds"),
+        ("Rocket Lab wins NASA contract", "Rocket Lab loses NASA contract"),
+        ("Rocket Lab Electron launch succeeds", "Rocket Lab Electron launch fails"),
+        ("Rocket Lab hits record high", "Rocket Lab hits record low"),
+        (
+            "Rocket Lab will launch Neutron this year",
+            "Rocket Lab will not launch Neutron this year",
+        ),
+        ("Rocket Lab wins launch deal with NASA", "Rocket Lab wins no launch deal with NASA"),
         ("Rocket Lab beats earnings estimates", "Rocket Lab misses earnings estimates"),
         ("Rocket Lab raises full-year guidance", "Rocket Lab cuts full-year guidance"),
         ("Rocket Lab shares rise on Neutron news", "Rocket Lab shares fall on Neutron news"),
@@ -127,3 +135,15 @@ def test_month_window_clips_the_start_to_the_window() -> None:
 def test_month_window_rejects_malformed_and_out_of_window_months(month: str) -> None:
     with pytest.raises(InvalidMonthError):
         month_window(month, NY, NOW, SINCE)
+
+
+def test_cluster_stories_delay_synonyms_fold_to_one_word() -> None:
+    titles = ["Rocket Lab Neutron launch pushed to 2027", "Rocket Lab Neutron launch delayed 2027"]
+
+    assert _groups(titles) == [[0, 1]]
+
+
+def test_cluster_stories_plural_forms_group_but_short_words_and_ss_endings_are_kept() -> None:
+    assert _groups(["alpha beta share", "alpha beta shares"]) == [[0, 1]]
+    # "loss" must not become "los": that would give 3 shared tokens and merge these.
+    assert _groups(["alpha beta loss", "alpha beta los"]) == [[0], [1]]
