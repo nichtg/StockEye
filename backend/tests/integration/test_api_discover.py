@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from app.services.container import Services
 from tests.integration.conftest import register
-from tests.services.fakes import FakeMarketData
+from tests.services.fakes import FakeMarketData, give_hits_traded_volume
 
 pytestmark = pytest.mark.integration
 
@@ -36,6 +36,7 @@ async def test_discover_returns_the_stored_lists(
     user: httpx.AsyncClient, app: FastAPI, provider: FakeMarketData
 ) -> None:
     provider.screen_hits = {"us": ["AAPL"], "sg": ["D05.SI"]}
+    give_hits_traded_volume(provider)
     services: Services = app.state.services
     await services.discover.refresh()
     screens = provider.calls["screen"]
@@ -51,9 +52,10 @@ async def test_discover_returns_the_stored_lists(
         "sg_under_radar",
     ]
     first = body["lists"][0]
-    assert set(first) == {"id", "title", "description", "rows", "status"}
+    assert set(first) == {"id", "title", "description", "order_label", "rows", "status"}
     row = first["rows"][0]
     assert row["symbol"] == "AAPL"
-    assert {"country", "sector", "market_cap"} <= set(row)
+    assert {"country", "sector", "market_cap", "pe_ratio", "avg_traded_value"} <= set(row)
+    assert first["order_label"] == "Biggest 1-week move first"
     assert body["data_status"]["state"] == "ok"
     assert provider.calls["screen"] == screens  # reading never screens again

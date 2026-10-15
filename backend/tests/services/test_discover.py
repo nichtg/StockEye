@@ -19,7 +19,13 @@ from app.services.discover import (
     is_overdue,
     last_scheduled_build,
 )
-from tests.services.fakes import FakeClock, FakeMarketData
+from tests.services.fakes import (
+    FakeClock,
+    FakeMarketData,
+    give_hits_traded_volume,
+    make_match,
+    screen_returns,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -30,6 +36,7 @@ SG = ["D05.SI"]
 @pytest.fixture(autouse=True)
 def _hits(provider: FakeMarketData) -> None:
     provider.screen_hits = {"us": US, "sg": SG}
+    give_hits_traded_volume(provider)
 
 
 async def test_refresh_builds_three_lists_with_full_rows(services: Services) -> None:
@@ -40,7 +47,7 @@ async def test_refresh_builds_three_lists_with_full_rows(services: Services) -> 
     assert [lst.id for lst in page.lists] == [p.id for p in PRESETS]
     assert len(PRESETS) == 3
     for lst in page.lists[:2]:
-        assert [r.symbol for r in lst.rows] == US
+        assert sorted(r.symbol for r in lst.rows) == sorted(US)
         assert lst.status.state == "ok"
     assert [r.symbol for r in page.lists[2].rows] == SG
     row = page.lists[0].rows[0]
@@ -69,18 +76,20 @@ async def test_refresh_asks_the_screener_for_more_than_it_shows(
     assert SCREEN_SIZE > ROWS_PER_LIST
 
 
-async def test_refresh_keeps_only_the_first_fifteen_rows_that_build(
+async def test_refresh_keeps_only_the_top_ten_rows_and_skips_unbuildable_hits(
     services: Services, provider: FakeMarketData
 ) -> None:
-    provider.screen_hits = {"us": ["ZZZZ"] + [f"S{n}" for n in range(24)], "sg": []}
+    hits = [make_match("ZZZZ", pe_ratio=0.5)] + [
+        make_match(f"S{n}", pe_ratio=1.0 + n) for n in range(24)
+    ]
+    screen_returns(provider, us=hits, sg=[])
 
     await services.discover.refresh()
 
-    page = await services.discover.lists()
-    first = page.lists[0]
-    assert len(first.rows) == ROWS_PER_LIST
-    assert first.rows[0].symbol == "S0"  # the unbuildable first hit was skipped
-    assert first.status.state == "ok"  # 15 built, so nothing was lost
+    value = (await services.discover.lists()).lists[1]
+    assert ROWS_PER_LIST == 10
+    assert [r.symbol for r in value.rows] == [f"S{n}" for n in range(10)]  # ZZZZ cannot build
+    assert value.status.state == "ok"  # 24 built, so nothing was lost
 
 
 async def test_list_that_lost_some_rows_is_marked_stale_with_a_plain_reason(
@@ -92,7 +101,7 @@ async def test_list_that_lost_some_rows_is_marked_stale_with_a_plain_reason(
 
     page = await services.discover.lists()
     lost = page.lists[0]
-    assert [r.symbol for r in lost.rows] == ["AAPL", "MSFT"]
+    assert sorted(r.symbol for r in lost.rows) == ["AAPL", "MSFT"]
     assert lost.status.state == "stale"
     assert lost.status.reason == "Some stocks in this list could not be loaded tonight."
     assert page.lists[2].status.state == "ok"
@@ -186,14 +195,14 @@ async def test_one_failing_preset_does_not_stop_the_others(
         return await real(query)
 
     provider.screen = only_sg_works  # type: ignore[method-assign]  # test spy
-    provider.screen_hits = {"us": US, "sg": ["AAPL"]}
+    provider.screen_hits = {"us": US, "sg": ["D05.SI"]}
 
     await services.discover.refresh()
 
     page = await services.discover.lists()
     assert [lst.status.state for lst in page.lists] == ["stale", "stale", "ok"]
-    assert [r.symbol for r in page.lists[2].rows] == ["AAPL"]  # updated
-    assert [r.symbol for r in page.lists[0].rows] == US  # kept
+    assert [r.symbol for r in page.lists[2].rows] == ["D05.SI"]  # updated
+    assert sorted(r.symbol for r in page.lists[0].rows) == US  # kept
 
 
 async def test_failing_preset_with_nothing_saved_is_an_empty_unavailable_list(
