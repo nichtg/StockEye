@@ -37,6 +37,7 @@ export const TERM_IDS = [
   'finbert',
   'sentiment_regime',
   'market_adjusted_return',
+  'recent_news_window',
   'news_day_tones',
   'benchmark',
   'news_event',
@@ -198,6 +199,10 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   market_adjusted_return: {
     title: 'Market-adjusted move',
     body: 'The stock’s actual move minus the move its usual link to the market would predict, added up over the news day and the next trading day. The usual link is measured over about a year of trading before the news.',
+  },
+  recent_news_window: {
+    title: 'Why only the past 3 months',
+    body: 'A news day from long ago says little about what is driving the price now, because its effect has likely faded. The list shows only recent days; the findings above still use 2 years of news.',
   },
   news_day_tones: {
     title: 'Positive, neutral and negative news days',
