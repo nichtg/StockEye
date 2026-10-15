@@ -85,3 +85,27 @@ describe('ChartToolbar indicator hints', () => {
     });
   });
 });
+
+describe('VWAP hint anchor', () => {
+  it('names the start of the chosen range on daily ranges', () => {
+    expect(vwapVariant('6M', '3 Apr 2026').hint).toBe(
+      'Average price paid since 3 Apr 2026, weighted by volume.',
+    );
+    expect(vwapVariant('1M', '3 Apr 2026').hint).not.toContain('3 Apr');
+  });
+
+  it('shows the date in the toolbar tooltip', async () => {
+    const user = userEvent.setup();
+    renderApp(
+      <ChartToolbar
+        range="1Y"
+        onRangeChange={() => undefined}
+        selection={[]}
+        onToggleIndicator={() => undefined}
+        visibleFromLabel="3 Oct 2025"
+      />,
+    );
+    await user.hover(screen.getByRole('button', { name: 'VWAP' }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('since 3 Oct 2025');
+  });
+});

@@ -250,3 +250,17 @@ describe('indicator selection persistence', () => {
     }).not.toThrow();
   });
 });
+
+describe('marker counts for the chosen range', () => {
+  it('counts only markers from the start of the range', () => {
+    const counts = markerCounts(
+      [
+        { time: '2026-01-05', kind: 'earnings', label: 'old' },
+        { time: '2026-06-05', kind: 'earnings', label: 'in range' },
+        { time: '2026-06-01', kind: 'dividend', label: 'on the first day' },
+      ],
+      '2026-06-01',
+    );
+    expect(counts).toMatchObject({ earnings: 1, dividend: 1 });
+  });
+});
