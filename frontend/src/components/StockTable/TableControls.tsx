@@ -5,7 +5,7 @@ import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import type { OverviewRow } from '../../api/types';
 import { SORT_LABELS, countryOptions, parseSortKey, sortKeysFor } from './sortFilter';
 import type { TableState } from './useTableState';
@@ -26,12 +26,6 @@ export function TableControls({ rows, state }: Props) {
   const compact = useMediaQuery(theme.breakpoints.down('sm'));
   const countries = useMemo(() => countryOptions(rows), [rows]);
   const keys = sortKeysFor(columns);
-  const known = country == null || countries.some((c) => c.country === country);
-
-  // A country from an old or hand-edited link that matches no row would only show an empty page.
-  useEffect(() => {
-    if (!known) setCountry(null);
-  }, [known, setCountry]);
 
   return (
     <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5, mb: 2 }}>
@@ -39,7 +33,7 @@ export function TableControls({ rows, state }: Props) {
         select
         size="small"
         label="Country"
-        value={known ? (country ?? '') : ''}
+        value={country ?? ''}
         onChange={(e) => {
           setCountry(e.target.value || null);
         }}
@@ -47,6 +41,10 @@ export function TableControls({ rows, state }: Props) {
         sx={{ minWidth: 200 }}
       >
         <option value="">All countries</option>
+        {/* A country from a shared link may match no row; keep it visible rather than blank. */}
+        {country && !countries.some((c) => c.country === country) && (
+          <option value={country}>{country} (0)</option>
+        )}
         {countries.map((c) => (
           <option key={c.country} value={c.country}>
             {c.country} ({c.count})

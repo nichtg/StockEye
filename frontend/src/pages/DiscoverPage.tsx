@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
+import { useMemo } from 'react';
 import { QueryRegion } from '../components/QueryRegion';
 import { filterRows } from '../components/StockTable/sortFilter';
 import {
@@ -54,8 +54,11 @@ export default function DiscoverPage() {
               </Typography>
             );
           }
-          const nothingShown =
-            table.country != null && filterRows(allRows, table.country).length === 0;
+          // Set only when the chosen country leaves every list empty.
+          const emptyCountry =
+            table.country != null && filterRows(allRows, table.country).length === 0
+              ? table.country
+              : null;
           const inWatchlist = new Set(symbols.data ?? []);
           return (
             <>
@@ -68,9 +71,9 @@ export default function DiscoverPage() {
               <Box sx={{ mt: 3 }}>
                 <TableControls rows={allRows} state={table} />
               </Box>
-              {nothingShown && table.country && (
+              {emptyCountry && (
                 <NoStocksFromCountry
-                  country={table.country}
+                  country={emptyCountry}
                   onShowAll={() => {
                     table.setCountry(null);
                   }}
@@ -91,6 +94,13 @@ export default function DiscoverPage() {
                     )
                   ) : (
                     <Box sx={{ mt: 1.5 }}>
+                      {table.country &&
+                        emptyCountry === null &&
+                        filterRows(list.rows, table.country).length === 0 && (
+                          <Typography variant="body2" sx={{ color: 'ink3' }}>
+                            None from {table.country} in this list.
+                          </Typography>
+                        )}
                       <StockTable
                         rows={list.rows}
                         ariaLabel={list.title}

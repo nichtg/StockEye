@@ -89,12 +89,25 @@ describe('DiscoverPage', () => {
     expect(await screen.findByText(/These lists did not refresh overnight/)).toBeInTheDocument();
   });
 
-  it('drops an unknown country from the link and explains an empty filter once', async () => {
-    const body = page();
-    serve(body);
+  it('explains an unknown country in the link once, with a way back', async () => {
+    const user = userEvent.setup();
+    serve(page());
     renderApp(<DiscoverPage />, { route: '/discover?discoverCountry=Peru' });
-    await screen.findByRole('table', { name: 'Small caps on the move' });
-    expect(screen.queryByText(/No stocks from Peru/)).not.toBeInTheDocument();
+    expect(await screen.findByText('No stocks from Peru here.')).toBeInTheDocument();
+    expect(screen.getAllByText(/No stocks from Peru/)).toHaveLength(1);
+    expect(screen.queryByText(/None from Peru in this list/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show all countries' }));
+    expect(
+      await screen.findByRole('table', { name: 'Small caps on the move' }),
+    ).toBeInTheDocument();
+  });
+
+  it('says so quietly in a list with nothing from the chosen country', async () => {
+    serve(page());
+    renderApp(<DiscoverPage />, { route: '/discover?discoverCountry=Singapore' });
+    expect(await screen.findByText('None from Singapore in this list.')).toBeInTheDocument();
+    expect(screen.getAllByText(/None from Singapore in this list/)).toHaveLength(1);
+    expect(screen.queryByText(/No stocks from/)).not.toBeInTheDocument();
   });
 
   it('shares one country filter across every list', async () => {

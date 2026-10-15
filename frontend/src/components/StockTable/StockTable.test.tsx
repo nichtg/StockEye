@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
 import type { OverviewRow } from '../../api/types';
@@ -56,19 +56,17 @@ function Harness({
   namespace = '',
   marketCap = false,
   star = false,
-  controls = true,
 }: {
   rows?: OverviewRow[];
   namespace?: string;
   marketCap?: boolean;
   star?: boolean;
-  controls?: boolean;
 }) {
   const table = useTableState({ namespace, columns: marketCap ? 'discover' : 'watchlist' });
   return (
     <>
       <Probe />
-      {controls && <TableControls rows={rows} state={table} />}
+      <TableControls rows={rows} state={table} />
       <StockTable
         rows={rows}
         ariaLabel="Test list"
@@ -135,14 +133,6 @@ describe('StockTable sorting', () => {
     expect(document.querySelector('[aria-sort]')).toBeNull();
   });
 
-  it('drops a URL country that matches no row once the controls have the rows', async () => {
-    renderApp(<Harness />, { route: '/?country=Peru' });
-    await waitFor(() => {
-      expect(screen.getByTestId('loc')).toHaveTextContent(/^$/);
-    });
-    expect(order()).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
-  });
-
   it('ignores an unknown sort key', () => {
     renderApp(<Harness />, { route: '/?sort=bogus&dir=sideways' });
     expect(order()).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
@@ -180,7 +170,7 @@ describe('StockTable country filter', () => {
 
   it('shows an empty line with a way back when the filter hides every row', async () => {
     const user = userEvent.setup();
-    renderApp(<Harness controls={false} />, { route: '/?country=Peru' });
+    renderApp(<Harness />, { route: '/?country=Peru' });
     expect(screen.getByText('No stocks from Peru here.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Show all countries' }));
     expect(order()).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
