@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from bson import ObjectId
-from pymongo import ASCENDING, UpdateOne
+from pymongo import ASCENDING, DESCENDING, UpdateOne
 
 from app.db import Database, Document
 from app.domain.macro import ScoredArticle
@@ -33,6 +33,18 @@ def dedupe_key(title: str, source: str) -> str:
 class ArticleText:
     id: ObjectId
     text: str  # title + ". " + summary, the input to the sentiment model
+
+
+@dataclass(frozen=True)
+class RecentArticle:
+    """One stored article for the News tab; ``score`` is None until the article is scored."""
+
+    published_at: datetime
+    title: str
+    url: str
+    source: str
+    score: float | None
+    dedupe_key: str  # the tiebreak that makes pagination stable when timestamps are equal
 
 
 @dataclass(frozen=True)
@@ -147,6 +159,53 @@ class NewsRepository:
                 title=doc["title"],
                 url=doc["url"],
                 source=doc["source"],
+            )
+            async for doc in cursor
+        ]
+
+    async def recent(
+        self,
+        symbol: str,
+        *,
+        since: datetime,
+        before: datetime | None,
+        limit: int,
+        before_key: str | None = None,
+    ) -> list[RecentArticle]:
+        """Up to ``limit + 1`` articles, newest first (the extra row says "more exist").
+
+        Keeps ``published_at >= since``. With ``before`` set it keeps only rows strictly older
+        than the position ``(before, before_key)``: ``published_at < before``, or the same
+        instant with a smaller ``dedupe_key`` (``before_key`` None means the whole instant is
+        excluded). Ordering is ``published_at`` then ``dedupe_key``, both descending, so equal
+        timestamps never reorder between pages. Scored and unscored articles both count. Only
+        http(s) links are returned, since the UI renders them as anchors.
+        """
+        window: dict[str, datetime] = {"$gte": since}
+        query: Document = {"symbols": symbol, "url": {"$regex": "^https?://"}}
+        if before is None:
+            query["published_at"] = window
+        elif before_key is None:
+            query["published_at"] = {**window, "$lt": before}
+        else:
+            query["$or"] = [
+                {"published_at": {**window, "$lt": before}},
+                {"published_at": {"$eq": before, "$gte": since}, "dedupe_key": {"$lt": before_key}},
+            ]
+        cursor = self._articles.find(
+            query,
+            {"title": 1, "url": 1, "source": 1, "published_at": 1, "sentiment": 1, "dedupe_key": 1},
+            sort=[("published_at", DESCENDING), ("dedupe_key", DESCENDING)],
+            limit=limit + 1,
+        )
+        return [
+            RecentArticle(
+                published_at=doc["published_at"],
+                title=doc["title"],
+                url=doc["url"],
+                source=doc["source"],
+                score=None if doc.get("sentiment") is None else float(doc["sentiment"]["score"]),
+                dedupe_key=doc["dedupe_key"],
             )
             async for doc in cursor
         ]

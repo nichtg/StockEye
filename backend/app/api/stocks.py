@@ -8,11 +8,13 @@ from pydantic import BaseModel
 
 from app.api.deps import UserDep
 from app.api.limits import MACRO, SEARCH, STOCK, limited
-from app.providers.models import Exchange, SymbolMatch
+from app.providers.models import CompanyProfile, Exchange, SymbolMatch
 from app.services.container import ServicesDep
+from app.services.news_feed import DEFAULT_LIMIT, MAX_LIMIT
 from app.services.reports import (
     ChartData,
     MacroResponse,
+    NewsArticlesOut,
     NewsProgressOut,
     RangeKey,
     TechnicalReport,
@@ -40,6 +42,10 @@ class StockOut(BaseModel):
     data_status: DataStatus
 
 
+class ProfileOut(CompanyProfile):
+    data_status: DataStatus
+
+
 @router.get("/search", dependencies=[Depends(limited(SEARCH))])
 async def search(
     _user: UserDep, services: ServicesDep, q: Annotated[str, Query(max_length=60)] = ""
@@ -61,6 +67,12 @@ async def stock(symbol: SymbolPath, _user: UserDep, services: ServicesDep) -> St
         as_of=quote.as_of,
         data_status=status,
     )
+
+
+@router.get("/{symbol}/profile", dependencies=[Depends(limited(STOCK))])
+async def profile(symbol: SymbolPath, _user: UserDep, services: ServicesDep) -> ProfileOut:
+    found, status = await services.market.profile(symbol)
+    return ProfileOut(**found.model_dump(), data_status=status)
 
 
 @router.get("/{symbol}/chart", dependencies=[Depends(limited(STOCK))])
@@ -91,3 +103,17 @@ async def macro(symbol: SymbolPath, user: UserDep, services: ServicesDep) -> Mac
 async def news(symbol: SymbolPath, user: UserDep, services: ServicesDep) -> NewsProgressOut:
     """Starts news collection when needed (within the daily budget) and reports its progress."""
     return await services.analysis.news_progress(symbol, user.id)
+
+
+@router.get("/{symbol}/news/articles", dependencies=[Depends(limited(STOCK))])
+async def news_articles(
+    symbol: SymbolPath,
+    _user: UserDep,
+    services: ServicesDep,
+    before: Annotated[
+        str | None, Query(max_length=300, description="Cursor from next_cursor")
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+) -> NewsArticlesOut:
+    """Stored news from the past six months, newest first. Read-only: never starts collection."""
+    return await services.news.recent_articles(symbol, before=before, limit=limit)

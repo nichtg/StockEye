@@ -216,6 +216,27 @@ class NewsProgressOut(IngestionOut):
     status: DataStatus
 
 
+SentimentLabel = Literal["positive", "negative", "neutral", "not_scored"]
+
+
+class NewsArticleOut(BaseModel):
+    published_at: datetime
+    title: str
+    url: str  # always http(s)
+    source: str
+    sentiment_label: SentimentLabel
+    sentiment: float | None  # [-1, 1]; None until the article is scored
+
+
+class NewsArticlesOut(BaseModel):
+    """One page of the News tab, newest first."""
+
+    articles: list[NewsArticleOut]
+    next_cursor: str | None  # pass as ``before`` for the next page; None at the end
+    since: datetime  # start of the window (UTC)
+    status: DataStatus  # news ingestion status
+
+
 class MacroResponse(BaseModel):
     symbol: str
     name: str

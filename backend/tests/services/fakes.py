@@ -12,6 +12,7 @@ from app.db import Database
 from app.providers.errors import ProviderError, QuotaExhaustedError, SymbolNotFoundError
 from app.providers.models import (
     Bar,
+    CompanyProfile,
     CorporateEvent,
     Exchange,
     Interval,
@@ -64,7 +65,7 @@ class FakeMarketData:
         self.fail_with: ProviderError | None = None
         self.fail_symbols: dict[str, ProviderError] = {}
         self.empty_bars = False  # answer bar requests with an empty list, like a vendor glitch
-        self.calls: dict[str, int] = {"search": 0, "quote": 0, "bars": 0, "events": 0}
+        self.calls: dict[str, int] = {"search": 0, "quote": 0, "bars": 0, "events": 0, "profile": 0}
 
     def _check(self, symbol: str) -> None:
         if symbol in self.unknown:
@@ -95,6 +96,25 @@ class FakeMarketData:
             price=bars[-1].close,
             previous_close=bars[-2].close,
             as_of=self._clock(),
+        )
+
+    async def profile(self, symbol: str) -> CompanyProfile:
+        self.calls["profile"] += 1
+        self._check(symbol)
+        return CompanyProfile(
+            description=f"{NAMES.get(symbol, symbol)} makes things.",
+            sector="Technology",
+            industry="Consumer Electronics",
+            country="Singapore" if symbol.endswith(".SI") else "United States",
+            website="https://example.com",
+            employees=1000,
+            market_cap=2.5e9,
+            pe_ratio=21.5,
+            dividend_yield=0.0428,
+            week52_low=80.0,
+            week52_high=120.0,
+            avg_volume=1_000_000.0,
+            currency="SGD" if symbol.endswith(".SI") else "USD",
         )
 
     def _daily(self, symbol: str, start: date, end: date) -> list[Bar]:

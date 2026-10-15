@@ -62,6 +62,24 @@ class CorporateEvent(_Frozen):
     value: float | None = None  # dividend amount, split ratio, or reported EPS
 
 
+class CompanyProfile(_Frozen):
+    """Descriptive facts about a company; each field is None when the vendor has no usable value."""
+
+    description: str | None = None  # plain text, at most 4000 characters
+    sector: str | None = None
+    industry: str | None = None
+    country: str | None = None
+    website: str | None = None  # absolute http(s) URL with a host; never any other scheme
+    employees: int | None = None
+    market_cap: float | None = None  # in ``currency``
+    pe_ratio: float | None = None  # trailing twelve months
+    dividend_yield: float | None = None  # a fraction: 0.0428 means 4.28%
+    week52_low: float | None = None  # in ``currency``
+    week52_high: float | None = None
+    avg_volume: float | None = None  # shares per day
+    currency: str | None = None
+
+
 class NewsItem(_Frozen):
     url: HttpUrl
     title: str

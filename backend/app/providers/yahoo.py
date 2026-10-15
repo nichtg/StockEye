@@ -9,6 +9,7 @@ import math
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import pandas as pd
 import yfinance as yf
@@ -26,6 +27,7 @@ from app.providers.errors import (
 )
 from app.providers.models import (
     Bar,
+    CompanyProfile,
     CorporateEvent,
     Exchange,
     Interval,
@@ -40,6 +42,8 @@ _SGX_EXCHANGES = frozenset({"SES"})
 _ALLOWED_TYPES = frozenset({"EQUITY", "ETF"})
 _MAX_SEARCH_RESULTS = 8
 _EARNINGS_LIMIT = 40  # about ten years of quarters
+_DESCRIPTION_MAX = 4000
+_WEB_SCHEMES = frozenset({"http", "https"})
 
 
 def _exchange_of(code: object) -> Exchange | None:
@@ -125,6 +129,17 @@ class YahooMarketData:
 
         return await self._run(work, symbol)
 
+    async def profile(self, symbol: str) -> CompanyProfile:
+        """Company facts from ``Ticker.info``; an empty payload means Yahoo does not know it."""
+
+        def work() -> CompanyProfile:
+            info = yf.Ticker(symbol).info
+            if not info or not any(info.get(k) for k in ("longName", "shortName", "symbol")):
+                raise SymbolNotFoundError(self.name, f"unknown symbol {symbol}")
+            return _profile_of(info)
+
+        return await self._run(work, symbol)
+
     async def bars(
         self, symbol: str, interval: Interval, start: datetime, end: datetime
     ) -> list[Bar]:
@@ -204,6 +219,63 @@ class YahooMarketData:
 
         actions, reported = await asyncio.gather(self._run(core, symbol), optional_earnings())
         return sorted([*actions, *reported], key=lambda e: (e.date, e.kind))
+
+
+def _text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
+def _number(value: object) -> float | None:
+    """A finite float, or None for a missing, non-numeric (bool included) or NaN/inf value."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _website(value: object) -> str | None:
+    """The URL only if it is absolute http(s) with a host: it becomes a clickable link."""
+    text = _text(value)
+    if text is None:
+        return None
+    try:
+        parts = urlsplit(text)
+        host = parts.hostname
+    except ValueError:
+        return None
+    return text if parts.scheme.lower() in _WEB_SCHEMES and host else None
+
+
+def _description(value: object) -> str | None:
+    text = _text(value)
+    if text is None or len(text) <= _DESCRIPTION_MAX:
+        return text
+    cut = text[:_DESCRIPTION_MAX]
+    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    # A sentence end in the first half keeps most of the text; otherwise cut hard.
+    return cut[: end + 1] if end >= _DESCRIPTION_MAX // 2 else cut.rstrip()
+
+
+def _profile_of(info: dict[str, Any]) -> CompanyProfile:
+    employees = _number(info.get("fullTimeEmployees"))
+    percent = _number(info.get("dividendYield"))  # yfinance 1.7 reports 4.28 for 4.28%
+    return CompanyProfile(
+        description=_description(info.get("longBusinessSummary")),
+        sector=_text(info.get("sector")),
+        industry=_text(info.get("industry")),
+        country=_text(info.get("country")),
+        website=_website(info.get("website")),
+        employees=None if employees is None else int(employees),
+        market_cap=_number(info.get("marketCap")),
+        pe_ratio=_number(info.get("trailingPE")),
+        dividend_yield=None if percent is None else percent / 100.0,
+        week52_low=_number(info.get("fiftyTwoWeekLow")),
+        week52_high=_number(info.get("fiftyTwoWeekHigh")),
+        avg_volume=_number(info.get("averageVolume")),
+        currency=_text(info.get("currency")),
+    )
 
 
 def _as_date(ts: Any) -> date:
