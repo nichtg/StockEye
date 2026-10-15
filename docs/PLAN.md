@@ -511,8 +511,14 @@ green, and the user approves the `production` deploy. Sonnet implements and Opus
 | 5 | `feat/frontend-landing` | A public landing page at `/` for signed-out visitors |
 
 ### Phase 6 status
-- [ ] Wave 1: chip hints, 1W pill, 3-month Biggest news days
-- [ ] Wave 2: chart pan and zoom
-- [ ] Wave 3: company profile and News tab
-- [ ] Wave 4: country sorting and Discover
-- [ ] Wave 5: landing page
+- [x] Wave 1: chip hints, 1W pill, 3-month Biggest news days (#33, #34)
+- [x] Wave 2: chart pan and zoom; full history plus `visible_from`, unrounded values (#35, #36)
+- [x] Wave 3: company profile and News tab; `NewsFeed` module; unsupported exchanges get a 404 that is remembered (#37, #38)
+- [x] Wave 4: Discover (nightly screener, read-only endpoint), country sort and filter (#39, #40). Also:
+  - Scheduled calls wait out per-minute blocks and use at most 70% of each minute.
+  - Users wait at most 8 s behind a background fetch, then get the saved copy.
+  - A weekly prune job removes unused price data.
+- [x] Wave 5: landing page for signed-out visitors; `RequireAuth signedOut`; `SiteFrame` (#41)
+- Every wave had an Opus thermo review, plus a security review where it added endpoints, iterated until approved.
+- Deploys: Pages publishes on merge, and the backend image waits for the user's `production` approval. Frontends must tolerate the
+  previous API.
