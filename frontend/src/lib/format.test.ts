@@ -92,9 +92,10 @@ describe('month and period formatting', () => {
 describe('company fact formats', () => {
   it('compacts money to T, B, M and K in the stock currency', () => {
     expect(formatCompactCurrency(3.2e12, 'USD', 'US')).toBe('$3.2T');
-    expect(formatCompactCurrency(208.9e9, 'SGD', 'SGX')).toBe('S$208.9B');
+    expect(formatCompactCurrency(208.9e9, 'SGD', 'SGX')).toBe('S$209B');
     expect(formatCompactCurrency(850e6, 'USD', 'US')).toBe('$850M');
     expect(formatCompactCurrency(12_500, 'USD', 'US')).toBe('$12.5K');
+    expect(formatCompactCurrency(5.049e12, 'USD', 'US')).toBe('$5.05T');
     expect(formatCompactCurrency(null, 'USD', 'US')).toBe('–');
   });
 

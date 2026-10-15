@@ -249,7 +249,8 @@ export function formatCompactCurrency(
       currency: code,
       currencyDisplay: 'narrowSymbol',
       notation: 'compact',
-      maximumFractionDigits: 1,
+      // Three significant digits: "$5.05T" rather than a rounded "$5T", "S$209B".
+      maximumSignificantDigits: 3,
     });
   } catch {
     // Intl rejects a code it doesn't know: show the bare compact number rather than fail.
