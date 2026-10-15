@@ -255,6 +255,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/stocks/{symbol}/profile': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Profile */
+    get: operations['profile_api_stocks__symbol__profile_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/stocks/{symbol}/chart': {
     parameters: {
       query?: never;
@@ -318,6 +335,26 @@ export interface paths {
      * @description Starts news collection when needed (within the daily budget) and reports its progress.
      */
     get: operations['news_api_stocks__symbol__news_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/stocks/{symbol}/news/articles': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * News Articles
+     * @description Stored news from the past six months, newest first. Read-only: never starts collection.
+     */
+    get: operations['news_articles_api_stocks__symbol__news_articles_get'];
     put?: never;
     post?: never;
     delete?: never;
@@ -661,6 +698,43 @@ export interface components {
       /** Car 0 1 */
       car_0_1?: number | null;
     };
+    /** NewsArticleOut */
+    NewsArticleOut: {
+      /**
+       * Published At
+       * Format: date-time
+       */
+      published_at: string;
+      /** Title */
+      title: string;
+      /** Url */
+      url: string;
+      /** Source */
+      source: string;
+      /**
+       * Sentiment Label
+       * @enum {string}
+       */
+      sentiment_label: 'positive' | 'negative' | 'neutral' | 'not_scored';
+      /** Sentiment */
+      sentiment: number | null;
+    };
+    /**
+     * NewsArticlesOut
+     * @description One page of the News tab, newest first.
+     */
+    NewsArticlesOut: {
+      /** Articles */
+      articles: components['schemas']['NewsArticleOut'][];
+      /** Next Cursor */
+      next_cursor: string | null;
+      /**
+       * Since
+       * Format: date-time
+       */
+      since: string;
+      status: components['schemas']['DataStatus'];
+    };
     /**
      * NewsProgressOut
      * @description Answer of the cheap, pollable news endpoint: progress plus an honest status.
@@ -754,6 +828,36 @@ export interface components {
     PriceStatuses: {
       prices: components['schemas']['DataStatus'];
       overall: components['schemas']['DataStatus'];
+    };
+    /** ProfileOut */
+    ProfileOut: {
+      /** Description */
+      description?: string | null;
+      /** Sector */
+      sector?: string | null;
+      /** Industry */
+      industry?: string | null;
+      /** Country */
+      country?: string | null;
+      /** Website */
+      website?: string | null;
+      /** Employees */
+      employees?: number | null;
+      /** Market Cap */
+      market_cap?: number | null;
+      /** Pe Ratio */
+      pe_ratio?: number | null;
+      /** Dividend Yield */
+      dividend_yield?: number | null;
+      /** Week52 Low */
+      week52_low?: number | null;
+      /** Week52 High */
+      week52_high?: number | null;
+      /** Avg Volume */
+      avg_volume?: number | null;
+      /** Currency */
+      currency?: string | null;
+      data_status: components['schemas']['DataStatus'];
     };
     /**
      * ProviderStatus
@@ -1494,6 +1598,38 @@ export interface operations {
       };
     };
   };
+  profile_api_stocks__symbol__profile_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI */
+        symbol: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProfileOut'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
   chart_api_stocks__symbol__chart_get: {
     parameters: {
       query?: {
@@ -1613,6 +1749,42 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['NewsProgressOut'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  news_articles_api_stocks__symbol__news_articles_get: {
+    parameters: {
+      query?: {
+        /** @description Cursor from next_cursor */
+        before?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Uppercase Yahoo-style ticker, e.g. AAPL or D05.SI */
+        symbol: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NewsArticlesOut'];
         };
       };
       /** @description Validation Error */
