@@ -9,10 +9,12 @@ The build is deliberately slow and gentle: one row at a time, under the schedule
 """
 
 import asyncio
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel
 
@@ -26,7 +28,7 @@ from app.repositories.cache import CacheRepository
 from app.services.analysis import AnalysisService
 from app.services.errors import AppError
 from app.services.market_data import MarketDataService
-from app.services.overview import OverviewRow, build_overview
+from app.services.overview import WEEK_SESSIONS, OverviewRow, build_overview, profile_or_none
 from app.services.status import DataStatus, combine, ok
 
 log = get_logger(__name__)
@@ -43,17 +45,22 @@ BUILD_AT = (22, 30)  # UTC, weekdays: after the US close refresh
 BUILD_GRACE = timedelta(hours=1)
 KEEP_STALE_FOR = timedelta(days=7)  # kept rows older than this are dropped rather than shown
 ROWS_PER_LIST = 10
-SCREEN_SIZE = 25  # ask for more than we show: every hit is built, then ranked and cut to the top 10
+SCREEN_SIZE = 25  # the candidate pool: ranked first, then built in rank order until 10 rows
 EMPTY_REASON = "Discover lists are being prepared. Check back in a few minutes."
 _OVERDUE_REASON = "These lists did not refresh as scheduled. Showing the last saved version."
 _PARTIAL_REASON = "Some stocks in this list could not be loaded tonight."
 _FAILED_REASON = "This list could not be refreshed tonight. Showing the last saved version."
 _NOTHING_REASON = "This list could not be built tonight."
-# Closed-end funds and trusts sneak into Yahoo's equity screens (typeDisp and quoteType both say
-# "Equity"). US lists leave out names that say so, and companies Yahoo files as asset management
-# (a fund's profile industry). Singapore lists keep REITs and trusts, which are real companies.
-_FUND_NAME = re.compile(r"\b(fund|etf|trust)\b", re.IGNORECASE)
-_FUND_INDUSTRIES = frozenset({"Asset Management"})
+# Closed-end funds sneak into Yahoo's equity screens (typeDisp and quoteType both say "Equity").
+# Names that say "fund" or "ETF" are out. Yahoo files closed-end funds as "Asset Management" with
+# no employees, so that industry is out when it has no headcount or the name reads like a fund
+# vehicle; a real manager (Diamond Hill) has staff and an ordinary name, and stays. Banks and
+# equity REITs named "... Trust" are real companies, so "trust" alone excludes nothing.
+_FUND_NAME = re.compile(r"\b(fund|etf)\b", re.IGNORECASE)
+_VEHICLE_NAME = re.compile(r"\b(trust|income|opportunit(y|ies)|municipal|portfolio|fund)\b", re.I)
+_ASSET_MANAGEMENT = "Asset Management"
+
+Rank = Literal["week_move", "pe", "traded_value"]
 
 
 class DiscoverRow(OverviewRow):
@@ -63,18 +70,6 @@ class DiscoverRow(OverviewRow):
     avg_traded_value: float | None  # 3-month average daily volume x price
 
 
-def _by_move(row: DiscoverRow) -> float | None:
-    return -abs(row.change_1w_pct) if row.change_1w_pct is not None else None
-
-
-def _by_pe(row: DiscoverRow) -> float | None:
-    return row.pe_ratio if row.pe_ratio is not None and row.pe_ratio > 0 else None
-
-
-def _by_traded_value(row: DiscoverRow) -> float | None:
-    return -row.avg_traded_value if row.avg_traded_value is not None else None
-
-
 @dataclass(frozen=True)
 class Preset:
     id: str
@@ -82,8 +77,8 @@ class Preset:
     description: str
     order_label: str  # tells the reader how the rows are sorted
     query: ScreenQuery
-    rank: Callable[[DiscoverRow], float | None]  # smaller sorts first; None = cannot be ranked
-    keep_unranked: bool = False  # True: unranked rows go last instead of being dropped
+    rank: Rank  # how candidates are ordered before any row is built
+    exclude_funds: bool = False  # US lists only: Singapore REITs and trusts are real companies
 
 
 PRESETS: tuple[Preset, ...] = (
@@ -97,12 +92,12 @@ PRESETS: tuple[Preset, ...] = (
             min_market_cap=300e6,
             max_market_cap=2e9,
             min_avg_volume=200_000,
-            sort_field="percentchange",
+            sort_field="dayvolume",
             sort_asc=False,
             size=SCREEN_SIZE,
         ),
-        _by_move,
-        keep_unranked=True,
+        "week_move",
+        exclude_funds=True,
     ),
     Preset(
         "us_value_small",
@@ -119,7 +114,8 @@ PRESETS: tuple[Preset, ...] = (
             sort_asc=False,
             size=SCREEN_SIZE,
         ),
-        _by_pe,
+        "pe",
+        exclude_funds=True,
     ),
     Preset(
         "sg_under_radar",
@@ -135,7 +131,7 @@ PRESETS: tuple[Preset, ...] = (
             sort_asc=False,
             size=SCREEN_SIZE,
         ),
-        _by_traded_value,
+        "traded_value",
     ),
 )
 
@@ -272,48 +268,85 @@ class DiscoverService:
     async def _rows(self, preset: Preset) -> tuple[list[DiscoverRow], bool]:
         """The top ``ROWS_PER_LIST`` hits by the preset's own order; and whether none was lost.
 
-        Every hit is built (one at a time) and then ranked, so the order the reader sees is the
-        order the list promises. Raises when the screen fails, or when it found hits but none of
-        them could be built (a vendor problem, not an empty market).
+        Candidates are ranked first (from the screener's figures, or one cached history call for
+        the movers list) and rows are then built in rank order, one at a time, until the list is
+        full, so a build is never spent on a stock that would not make the cut. Raises when the
+        screen fails, or when it found rankable hits but none could be built (a vendor problem,
+        not an empty market).
         """
-        us = preset.query.region == "us"
         matches = await self._market.screen(preset.query)
-        candidates = [m for m in matches if not (us and _FUND_NAME.search(m.name))]
-        funds = 0  # hits whose profile says fund: not candidates, so they cannot make a list stale
+        pool = [m for m in matches if not (preset.exclude_funds and _is_fund(m, None))]
+        ranked = await self._ranked(preset, pool)
+        funds = 0  # profile-detected funds are not candidates, so they cannot make a list stale
         built: list[DiscoverRow] = []
-        for match in candidates:
+        for match in ranked:
+            if len(built) == ROWS_PER_LIST:
+                break
+            # The profile is cached for a day and the row build reuses it: a fund costs one call.
+            if preset.exclude_funds and _is_fund(
+                match, await profile_or_none(self._market, match.symbol)
+            ):
+                funds += 1
+                continue
             # One row at a time: each costs about 3 vendor calls, and a burst would eat the
             # per-minute allowance users need.
             (row,) = await build_overview(
                 self._market, self._analysis, [match.symbol], concurrency=1
             )
-            if row.status == "unavailable":
-                continue
-            profile = await self._profile_or_none(match.symbol)
-            if us and profile is not None and profile.industry in _FUND_INDUSTRIES:
-                funds += 1
-                continue
-            built.append(_discover_row(row, match, profile))
-        wanted = len(candidates) - funds
+            if row.status != "unavailable":
+                built.append(_discover_row(row, match))
+        wanted = len(ranked) - funds
         if wanted and not built:
             raise AppError(503, "data_unavailable", "No stock in the list could be loaded.")
-        return _ranked(preset, built), len(built) >= min(ROWS_PER_LIST, wanted)
+        return built, len(built) >= min(ROWS_PER_LIST, wanted)
 
-    async def _profile_or_none(self, symbol: str) -> CompanyProfile | None:
-        """The profile the row build just cached (so normally no new vendor call)."""
+    async def _ranked(self, preset: Preset, pool: list[ScreenMatch]) -> list[ScreenMatch]:
+        """Rankable candidates, best first (stable on ties); the rest are left out."""
+        keyed: list[tuple[float, ScreenMatch]] = []
+        for match in pool:
+            key = await self._rank_key(preset.rank, match)
+            if key is not None:
+                keyed.append((key, match))
+        keyed.sort(key=lambda pair: pair[0])
+        return [m for _, m in keyed]
+
+    async def _rank_key(self, rank: Rank, match: ScreenMatch) -> float | None:
+        """Smaller sorts first; None means this hit cannot be ranked and is left out."""
+        if rank == "pe":
+            return match.pe_ratio if match.pe_ratio is not None and match.pe_ratio > 0 else None
+        if rank == "traded_value":
+            # Only SGD lines: a USD-quoted SGX line's value would not compare with the others.
+            value = _traded_value(match)
+            return -value if value is not None and match.currency == "SGD" else None
+        move = await self._week_move(match.symbol)
+        return -abs(move) if move is not None else math.inf  # unknown 1-week move sorts last
+
+    async def _week_move(self, symbol: str) -> float | None:
+        """1-week change in percent from the shared daily history (the row build reuses it)."""
         try:
-            found, _ = await self._market.profile(symbol)
+            frame, _ = await self._market.daily_history(symbol)
         except (AppError, ProviderError):
             return None
-        return found
+        closes = [float(c) for c in frame["close"].tolist()]
+        if len(closes) <= WEEK_SESSIONS or not closes[-1 - WEEK_SESSIONS]:
+            return None
+        return (closes[-1] / closes[-1 - WEEK_SESSIONS] - 1.0) * 100.0
 
 
-def _ranked(preset: Preset, rows: list[DiscoverRow]) -> list[DiscoverRow]:
-    """Rows in the preset's order, cut to ``ROWS_PER_LIST``; the sort is stable on ties."""
-    keyed = [(preset.rank(r), r) for r in rows]
-    with_key = sorted((p for p in keyed if p[0] is not None), key=lambda p: p[0] or 0.0)
-    without = [r for k, r in keyed if k is None] if preset.keep_unranked else []
-    return ([r for _, r in with_key] + without)[:ROWS_PER_LIST]
+def _is_fund(match: ScreenMatch, profile: CompanyProfile | None) -> bool:
+    """Closed-end funds and similar; ``profile`` None means only the name can be judged."""
+    if _FUND_NAME.search(match.name):
+        return True
+    if profile is None or profile.industry != _ASSET_MANAGEMENT:
+        return False
+    return profile.employees is None or bool(_VEHICLE_NAME.search(match.name))
+
+
+def _traded_value(match: ScreenMatch) -> float | None:
+    """3-month average daily volume x price, in the quote currency."""
+    if match.avg_volume_3m is None or match.price is None:
+        return None
+    return match.avg_volume_3m * match.price
 
 
 def _kept(preset: Preset, old: DiscoverList | None, now: datetime) -> DiscoverList:
@@ -338,17 +371,10 @@ def _kept(preset: Preset, old: DiscoverList | None, now: datetime) -> DiscoverLi
     )
 
 
-def _discover_row(
-    row: OverviewRow, match: ScreenMatch, profile: CompanyProfile | None
-) -> DiscoverRow:
+def _discover_row(row: OverviewRow, match: ScreenMatch) -> DiscoverRow:
     """Add the ranking figures, and fill a missing market cap from the screener hit."""
-    traded = (
-        match.avg_volume_3m * match.price
-        if match.avg_volume_3m is not None and match.price is not None
-        else None
-    )
-    pe = match.pe_ratio if match.pe_ratio is not None else (profile.pe_ratio if profile else None)
     cap = row.market_cap if row.market_cap is not None else match.market_cap
-    return DiscoverRow(
-        **row.model_dump() | {"market_cap": cap}, pe_ratio=pe, avg_traded_value=traded
+    return DiscoverRow.model_validate(
+        row.model_dump()
+        | {"market_cap": cap, "pe_ratio": match.pe_ratio, "avg_traded_value": _traded_value(match)}
     )

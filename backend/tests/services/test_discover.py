@@ -1,6 +1,5 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import pytest
 
@@ -20,7 +19,13 @@ from app.services.discover import (
     is_overdue,
     last_scheduled_build,
 )
-from tests.services.fakes import FakeClock, FakeMarketData
+from tests.services.fakes import (
+    FakeClock,
+    FakeMarketData,
+    give_hits_traded_volume,
+    make_match,
+    screen_returns,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -32,38 +37,6 @@ SG = ["D05.SI"]
 def _hits(provider: FakeMarketData) -> None:
     provider.screen_hits = {"us": US, "sg": SG}
     give_hits_traded_volume(provider)
-
-
-def give_hits_traded_volume(provider: FakeMarketData) -> None:
-    """The shared fake sends no 3-month volume; without one the Singapore list drops every row."""
-    real = provider.screen
-
-    async def screen(query: ScreenQuery) -> list[ScreenMatch]:
-        return [m.model_copy(update={"avg_volume_3m": 1e6}) for m in await real(query)]
-
-    provider.screen = screen  # type: ignore[method-assign]  # test double
-
-
-def _match(symbol: str, name: str | None = None, **fields: float | None) -> ScreenMatch:
-    base: dict[str, Any] = {
-        "symbol": symbol,
-        "name": name or symbol,
-        "exchange": "SGX" if symbol.endswith(".SI") else "US",
-        "currency": "SGD" if symbol.endswith(".SI") else "USD",
-        "market_cap": 1e9,
-        "pe_ratio": 12.0,
-        "price": 10.0,
-        "avg_volume_3m": 1e6,
-    }
-    return ScreenMatch(**{**base, **fields})
-
-
-def _screen_returns(provider: FakeMarketData, **by_region: list[ScreenMatch]) -> None:
-    async def screen(query: ScreenQuery) -> list[ScreenMatch]:
-        provider.calls["screen"] += 1
-        return by_region.get(query.region, [])
-
-    provider.screen = screen  # type: ignore[method-assign]  # test double
 
 
 async def test_refresh_builds_three_lists_with_full_rows(services: Services) -> None:
@@ -106,8 +79,10 @@ async def test_refresh_asks_the_screener_for_more_than_it_shows(
 async def test_refresh_keeps_only_the_top_ten_rows_and_skips_unbuildable_hits(
     services: Services, provider: FakeMarketData
 ) -> None:
-    hits = [_match("ZZZZ", pe_ratio=0.5)] + [_match(f"S{n}", pe_ratio=1.0 + n) for n in range(24)]
-    _screen_returns(provider, us=hits, sg=[])
+    hits = [make_match("ZZZZ", pe_ratio=0.5)] + [
+        make_match(f"S{n}", pe_ratio=1.0 + n) for n in range(24)
+    ]
+    screen_returns(provider, us=hits, sg=[])
 
     await services.discover.refresh()
 
@@ -220,13 +195,13 @@ async def test_one_failing_preset_does_not_stop_the_others(
         return await real(query)
 
     provider.screen = only_sg_works  # type: ignore[method-assign]  # test spy
-    provider.screen_hits = {"us": US, "sg": ["AAPL"]}
+    provider.screen_hits = {"us": US, "sg": ["D05.SI"]}
 
     await services.discover.refresh()
 
     page = await services.discover.lists()
     assert [lst.status.state for lst in page.lists] == ["stale", "stale", "ok"]
-    assert [r.symbol for r in page.lists[2].rows] == ["AAPL"]  # updated
+    assert [r.symbol for r in page.lists[2].rows] == ["D05.SI"]  # updated
     assert sorted(r.symbol for r in page.lists[0].rows) == US  # kept
 
 

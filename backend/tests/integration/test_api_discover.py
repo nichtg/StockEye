@@ -4,8 +4,7 @@ from fastapi import FastAPI
 
 from app.services.container import Services
 from tests.integration.conftest import register
-from tests.services.fakes import FakeMarketData
-from tests.services.test_discover import give_hits_traded_volume
+from tests.services.fakes import FakeMarketData, give_hits_traded_volume
 
 pytestmark = pytest.mark.integration
 
