@@ -16,20 +16,26 @@ import { useTheme } from '@mui/material/styles';
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
-import type { OverviewRow } from '../../api/types';
 import { ExchangeTag } from '../../features/search/ExchangeTag';
 import { OutlookCell } from '../../features/watchlist/Outlook';
 import { Sparkline } from '../../features/watchlist/Sparkline';
 import { visuallyHidden } from '../../lib/a11y';
-import { formatCompactCurrency, formatPrice } from '../../lib/format';
+import { formatCompactCurrency, formatNumber, formatPrice } from '../../lib/format';
 import { radius } from '../../theme/tokens';
 import { Direction } from '../Direction';
 import { Term } from '../Term';
-import { filterRows, sortRows, type SortKey, type SortState } from './sortFilter';
+import { filterRows, sortRows, type SortKey, type SortState, type StockRow } from './sortFilter';
 import type { TableState } from './useTableState';
+
+type OverviewRow = StockRow;
+
+/** A per-list extra metric (Discover only): P/E, or average daily trading value. */
+export type ExtraColumn = 'pe' | 'traded';
 
 interface ListProps {
   rows: OverviewRow[];
+  /** One extra metric column for this table, chosen by the page. */
+  extra?: ExtraColumn;
   /** Names the table (and the mobile list) for assistive tech. */
   ariaLabel: string;
   /** The per-row control: remove for the watchlist, a star toggle for Discover. */
@@ -50,6 +56,33 @@ interface ViewProps extends ListProps {
 
 const UNAVAILABLE = 'Data unavailable';
 const numCell = { textAlign: 'right', whiteSpace: 'nowrap' } as const;
+
+function ExtraCell({ row, extra }: { row: OverviewRow; extra: ExtraColumn }) {
+  if (extra === 'pe') {
+    return (
+      <TableCell sx={numCell}>
+        {row.pe_ratio == null ? '–' : formatNumber(row.pe_ratio, row.exchange, { digits: 1 })}
+      </TableCell>
+    );
+  }
+  return (
+    <TableCell sx={numCell}>
+      {formatCompactCurrency(row.avg_traded_value, row.currency, row.exchange)}
+    </TableCell>
+  );
+}
+
+/** The mobile one-liner for the extra metric, or null when the row has none. */
+function extraText(row: OverviewRow, extra: ExtraColumn | undefined): string | null {
+  if (extra === 'pe' && row.pe_ratio != null) {
+    return `P/E ${formatNumber(row.pe_ratio, row.exchange, { digits: 1 })}`;
+  }
+  if (extra === 'traded' && row.avg_traded_value != null) {
+    const value = formatCompactCurrency(row.avg_traded_value, row.currency, row.exchange);
+    return `Avg daily trading ${value}`;
+  }
+  return null;
+}
 
 function isUnavailable(row: OverviewRow): boolean {
   return row.status === 'unavailable' || row.last_price == null;
@@ -152,12 +185,12 @@ function SortHeader({
 }
 
 function DesktopTable(props: ViewProps) {
-  const { rows, ariaLabel, state, renderAction, actionLabel } = props;
+  const { rows, ariaLabel, state, renderAction, actionLabel, extra } = props;
   const { sort, toggleSort: onSort } = state;
   const showMarketCap = state.columns === 'discover';
   const navigate = useNavigate();
   // Everything between the symbol and the action column.
-  const dataColumns = showMarketCap ? 6 : 5;
+  const dataColumns = (showMarketCap ? 6 : 5) + (extra ? 1 : 0);
   return (
     <TableContainer sx={{ border: 1, borderColor: 'line', borderRadius: radius.lg }}>
       <Table aria-label={ariaLabel}>
@@ -178,6 +211,28 @@ function DesktopTable(props: ViewProps) {
                 term={<Term id="market_cap" />}
               >
                 Market cap
+              </SortHeader>
+            )}
+            {extra === 'pe' && (
+              <SortHeader
+                sortKey="pe"
+                align="right"
+                sort={sort}
+                onSort={onSort}
+                term={<Term id="pe_ratio" />}
+              >
+                P/E
+              </SortHeader>
+            )}
+            {extra === 'traded' && (
+              <SortHeader
+                sortKey="traded"
+                align="right"
+                sort={sort}
+                onSort={onSort}
+                term={<Term id="avg_traded_value" />}
+              >
+                Avg daily trading
               </SortHeader>
             )}
             <SortHeader sortKey="last" align="right" sort={sort} onSort={onSort}>
@@ -226,6 +281,7 @@ function DesktopTable(props: ViewProps) {
                         {formatCompactCurrency(row.market_cap, row.currency, row.exchange)}
                       </TableCell>
                     )}
+                    {extra && <ExtraCell row={row} extra={extra} />}
                     <TableCell sx={numCell}>
                       <Box sx={{ color: 'ink', fontWeight: 500 }}>
                         {formatPrice(row.last_price, row.currency, row.exchange)}
@@ -253,7 +309,7 @@ function DesktopTable(props: ViewProps) {
   );
 }
 
-function MobileList({ rows, ariaLabel, renderAction }: ListProps) {
+function MobileList({ rows, ariaLabel, renderAction, extra }: ListProps) {
   return (
     <Box
       component="ul"
@@ -286,6 +342,11 @@ function MobileList({ rows, ariaLabel, renderAction }: ListProps) {
                   <Box sx={{ color: 'ink', fontWeight: 500, fontSize: '0.9375rem' }}>
                     {formatPrice(row.last_price, row.currency, row.exchange)}
                   </Box>
+                  {extraText(row, extra) && (
+                    <Typography variant="caption" component="div" sx={{ color: 'ink3' }}>
+                      {extraText(row, extra)}
+                    </Typography>
+                  )}
                   <Typography variant="body2" component="div">
                     <Direction value={row.change_1w_pct} variant="pill" />
                   </Typography>

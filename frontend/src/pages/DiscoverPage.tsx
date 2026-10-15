@@ -1,10 +1,14 @@
+import SortIcon from '@mui/icons-material/Sort';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { useMemo } from 'react';
 import { QueryRegion } from '../components/QueryRegion';
 import { filterRows } from '../components/StockTable/sortFilter';
+import { SORT_LABELS } from '../components/StockTable/sortFilter';
 import {
   NoStocksFromCountry,
+  type ExtraColumn,
   StockTable,
   StockTableSkeleton,
 } from '../components/StockTable/StockTable';
@@ -18,6 +22,12 @@ import { useWatchlistSymbols } from '../features/watchlist/useWatchlist';
 import { useWatchlistToggle } from '../features/watchlist/useWatchlistToggle';
 import { useDocumentTitle } from '../hooks';
 import { formatRelative } from '../lib/format';
+
+/** The extra metric each list shows, decided by list id (titles are copy and may change). */
+const LIST_COLUMNS: Record<string, ExtraColumn> = {
+  us_value_small: 'pe',
+  sg_under_radar: 'traded',
+};
 
 const PREPARING = 'Discover lists are being prepared. Check back in a few minutes.';
 
@@ -84,7 +94,38 @@ export default function DiscoverPage() {
                   <Typography variant="h2" component="h2">
                     {list.title}
                   </Typography>
-                  <Typography sx={{ color: 'ink2', mb: 1.5 }}>{list.description}</Typography>
+                  <Typography sx={{ color: 'ink2', mb: 0.5 }}>{list.description}</Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ color: 'ink3', display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}
+                  >
+                    <SortIcon fontSize="inherit" aria-hidden />
+                    {table.sort ? (
+                      <>
+                        <span>
+                          Sorted by {SORT_LABELS[table.sort.key]},{' '}
+                          {table.sort.dir === 'asc' ? 'ascending' : 'descending'} ·
+                        </span>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => {
+                            table.setSort(null);
+                          }}
+                          sx={{
+                            minWidth: 0,
+                            p: 0,
+                            fontSize: 'inherit',
+                            textDecoration: 'underline',
+                          }}
+                        >
+                          Reset to list order
+                        </Button>
+                      </>
+                    ) : (
+                      <span>Ordered by: {list.order_label}</span>
+                    )}
+                  </Typography>
                   <DataStatusLine statuses={[list.status]} />
                   {list.rows.length === 0 ? (
                     list.status.state === 'ok' && (
@@ -103,6 +144,7 @@ export default function DiscoverPage() {
                         )}
                       <StockTable
                         rows={list.rows}
+                        extra={LIST_COLUMNS[list.id]}
                         ariaLabel={list.title}
                         state={table}
                         quietWhenEmpty
