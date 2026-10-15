@@ -46,6 +46,11 @@ class RecentArticle:
     score: float | None
     dedupe_key: str  # the tiebreak that makes pagination stable when timestamps are equal
 
+    @property
+    def position(self) -> tuple[datetime, str]:
+        """Total-order position ``(published_at, dedupe_key)``, the paging cursor."""
+        return self.published_at, self.dedupe_key
+
 
 @dataclass(frozen=True)
 class SentimentRecord:
@@ -73,6 +78,20 @@ async def install_indexes(db: Database) -> None:
         [("symbols", ASCENDING), ("published_at", ASCENDING)], name="symbols_published"
     )
     await db[STATE].create_index("symbol", unique=True, name="symbol_unique")
+
+
+def _recent_query(symbol: str, since: datetime, after: tuple[datetime, str] | None) -> Document:
+    """The exact filter ``NewsRepository.recent`` runs (shared so tests can explain it)."""
+    query: Document = {
+        "symbols": symbol,
+        "url": {"$regex": "^https?://"},
+        "published_at": {"$gte": since},
+    }
+    if after is not None:
+        moment, key = after
+        query["published_at"] = {"$gte": since, "$lte": moment}
+        query["$or"] = [{"published_at": {"$lt": moment}}, {"dedupe_key": {"$lt": key}}]
+    return query
 
 
 class NewsRepository:
@@ -168,30 +187,19 @@ class NewsRepository:
         symbol: str,
         *,
         since: datetime,
-        before: datetime | None,
+        after: tuple[datetime, str] | None,
         limit: int,
-        before_key: str | None = None,
     ) -> list[RecentArticle]:
         """Up to ``limit + 1`` articles, newest first (the extra row says "more exist").
 
-        Keeps ``published_at >= since``. With ``before`` set it keeps only rows strictly older
-        than the position ``(before, before_key)``: ``published_at < before``, or the same
-        instant with a smaller ``dedupe_key`` (``before_key`` None means the whole instant is
-        excluded). Ordering is ``published_at`` then ``dedupe_key``, both descending, so equal
-        timestamps never reorder between pages. Scored and unscored articles both count. Only
-        http(s) links are returned, since the UI renders them as anchors.
+        Keeps ``published_at >= since``. With ``after = (t, k)`` it keeps only rows strictly
+        later in the order: older than ``t``, or at ``t`` with a smaller ``dedupe_key``. The
+        order is ``published_at`` then ``dedupe_key``, both descending, so equal timestamps
+        never reorder between pages. Scored and unscored articles both count; only http(s)
+        links are returned. The ``symbols_published`` index serves the match; the
+        ``dedupe_key`` tiebreak adds an in-memory SORT, which is fine at per-symbol volumes.
         """
-        window: dict[str, datetime] = {"$gte": since}
-        query: Document = {"symbols": symbol, "url": {"$regex": "^https?://"}}
-        if before is None:
-            query["published_at"] = window
-        elif before_key is None:
-            query["published_at"] = {**window, "$lt": before}
-        else:
-            query["$or"] = [
-                {"published_at": {**window, "$lt": before}},
-                {"published_at": {"$eq": before, "$gte": since}, "dedupe_key": {"$lt": before_key}},
-            ]
+        query = _recent_query(symbol, since, after)
         cursor = self._articles.find(
             query,
             {"title": 1, "url": 1, "source": 1, "published_at": 1, "sentiment": 1, "dedupe_key": 1},

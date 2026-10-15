@@ -116,4 +116,4 @@ async def news_articles(
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> NewsArticlesOut:
     """Stored news from the past six months, newest first. Read-only: never starts collection."""
-    return await services.news.recent_articles(symbol, before=before, limit=limit)
+    return await services.news_feed.page(symbol, before, limit)

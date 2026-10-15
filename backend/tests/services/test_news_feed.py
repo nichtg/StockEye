@@ -2,15 +2,22 @@
 
 import base64
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
 from app.db import Database
-from app.repositories.news import ARTICLES, dedupe_key, install_indexes
+from app.repositories.news import (
+    ARTICLES,
+    RecentArticle,
+    _recent_query,
+    dedupe_key,
+    install_indexes,
+)
 from app.services.container import Services
 from app.services.errors import AppError
-from app.services.news_feed import NEWS_TAB_DAYS, decode_cursor, encode_cursor
+from app.services.news_feed import MAX_ROUNDS, NEWS_TAB_DAYS, NewsFeed
+from app.services.status import DataStatus, ok
 from tests.services.fakes import CLOSED_NOW
 
 pytestmark = pytest.mark.integration
@@ -53,7 +60,7 @@ async def walk(services: Services, symbol: str, limit: int) -> list[list[str]]:
     pages: list[list[str]] = []
     cursor: str | None = None
     while True:
-        page = await services.news.recent_articles(symbol, before=cursor, limit=limit)
+        page = await services.news_feed.page(symbol, before=cursor, limit=limit)
         pages.append([a.title for a in page.articles])
         cursor = page.next_cursor
         if cursor is None:
@@ -71,7 +78,7 @@ async def test_recent_articles_window_is_182_days_and_inclusive(
     await seed(db, "AAPL", "just outside", NOW - timedelta(days=NEWS_TAB_DAYS, seconds=1))
     await seed(db, "AAPL", "fresh", _ago(hours=1))
 
-    page = await services.news.recent_articles("AAPL")
+    page = await services.news_feed.page("AAPL")
 
     assert NEWS_TAB_DAYS == 182
     assert [a.title for a in page.articles] == ["fresh", "just inside"]
@@ -87,7 +94,7 @@ async def test_recent_articles_orders_newest_first_with_key_descending_on_ties(
     await seed(db, "AAPL", "newest", _ago(days=1))
     await seed(db, "AAPL", "oldest", _ago(days=3))
 
-    page = await services.news.recent_articles("AAPL")
+    page = await services.news_feed.page("AAPL")
 
     tied = sorted(keys, key=lambda t: keys[t], reverse=True)
     assert [a.title for a in page.articles] == ["newest", *tied, "oldest"]
@@ -101,7 +108,7 @@ async def test_recent_articles_pages_are_stable_across_a_tie_at_the_page_edge(
     for title in ("t1", "t2", "t3", "t4", "t5"):
         await seed(db, "AAPL", title, tie)
     await seed(db, "AAPL", "oldest", _ago(days=3))
-    everything = [a.title for a in (await services.news.recent_articles("AAPL")).articles]
+    everything = [a.title for a in (await services.news_feed.page("AAPL")).articles]
 
     for limit in (1, 2, 3, 4):  # the edge falls inside the tie group for several limits
         pages = await walk(services, "AAPL", limit)
@@ -115,9 +122,9 @@ async def test_recent_articles_other_symbols_never_appear(db: Database, services
     await seed(db, "MSFT", "microsoft news", _ago(days=1))
     await seed(db, "AAPL", "shared story", _ago(days=2), symbols=["AAPL", "MSFT"])
 
-    apple = await services.news.recent_articles("AAPL")
-    msft = await services.news.recent_articles("MSFT")
-    nobody = await services.news.recent_articles("SPY")
+    apple = await services.news_feed.page("AAPL")
+    msft = await services.news_feed.page("MSFT")
+    nobody = await services.news_feed.page("SPY")
 
     assert [a.title for a in apple.articles] == ["apple news", "shared story"]
     assert [a.title for a in msft.articles] == ["microsoft news", "shared story"]
@@ -145,7 +152,7 @@ async def test_recent_articles_all_recaps_returns_empty_page_without_cursor(
     for i in range(3):
         await seed(db, "AAPL", f"{RECAP} {i}", _ago(hours=1 + i))
 
-    page = await services.news.recent_articles("AAPL")
+    page = await services.news_feed.page("AAPL")
 
     assert page.articles == []
     assert page.next_cursor is None
@@ -160,7 +167,7 @@ async def test_recent_articles_unscored_are_included_as_not_scored(
     await seed(db, "AAPL", "edge up", _ago(hours=4), 0.3)
     await seed(db, "AAPL", "edge down", _ago(hours=5), -0.3)
 
-    page = await services.news.recent_articles("AAPL")
+    page = await services.news_feed.page("AAPL")
 
     labels = {a.title: (a.sentiment_label, a.sentiment) for a in page.articles}
     assert labels == {
@@ -180,7 +187,7 @@ async def test_recent_articles_non_http_urls_are_dropped_and_do_not_shrink_pages
     await seed(db, "AAPL", "ok one", _ago(hours=3))
     await seed(db, "AAPL", "ok two", _ago(hours=4))
 
-    page = await services.news.recent_articles("AAPL", limit=2)
+    page = await services.news_feed.page("AAPL", limit=2)
 
     assert [a.title for a in page.articles] == ["ok one", "ok two"]
     assert all(a.url.startswith("https://") for a in page.articles)
@@ -189,7 +196,7 @@ async def test_recent_articles_non_http_urls_are_dropped_and_do_not_shrink_pages
 async def test_recent_articles_is_read_only_and_does_not_start_ingestion(
     services: Services,
 ) -> None:
-    page = await services.news.recent_articles("AAPL")
+    page = await services.news_feed.page("AAPL")
 
     assert page.status.state == "partial"  # not collected yet
     assert not await services.news.has_history("AAPL")
@@ -213,26 +220,107 @@ async def test_recent_articles_malformed_cursor_is_422(services: Services) -> No
     ]
     for cursor in bad:
         with pytest.raises(AppError) as caught:
-            await services.news.recent_articles("AAPL", before=cursor)
+            await services.news_feed.page("AAPL", before=cursor)
         assert caught.value.status == 422, cursor
 
 
-def test_cursor_round_trips() -> None:
-    position = (datetime(2026, 9, 1, 12, 30, 15, 123000, tzinfo=UTC), "abc123")
+async def test_page_cursor_from_a_previous_page_round_trips(
+    db: Database, services: Services
+) -> None:
+    for i in range(3):
+        await seed(db, "AAPL", f"headline {i}", _ago(hours=i + 1))
 
-    assert decode_cursor(encode_cursor(position)) == position
+    first = await services.news_feed.page("AAPL", limit=1)
+    second = await services.news_feed.page("AAPL", before=first.next_cursor, limit=1)
+
+    assert [a.title for a in second.articles] == ["headline 1"]
 
 
-async def test_recent_query_is_served_by_the_symbols_published_index(db: Database) -> None:
+async def test_page_extreme_cursor_times_are_422_not_500(services: Services) -> None:
+    def encoded(stamp: str) -> str:
+        raw = json.dumps({"t": stamp, "k": "abc"}).encode()
+        return base64.urlsafe_b64encode(raw).decode()
+
+    for stamp in (
+        "0001-01-01T00:00:00+14:00",  # overflows once converted to UTC
+        "9999-12-31T23:59:59-14:00",
+        "1999-12-31T23:59:59+00:00",  # before the earliest allowed
+        "2026-10-05T00:00:00+00:00",  # more than a day after the clock
+    ):
+        with pytest.raises(AppError) as caught:
+            await services.news_feed.page("AAPL", before=encoded(stamp))
+        assert caught.value.status == 422, stamp
+
+
+@pytest.mark.parametrize("limit", [0, -1, 51])
+async def test_page_limit_outside_bounds_is_422(services: Services, limit: int) -> None:
+    with pytest.raises(AppError) as caught:
+        await services.news_feed.page("AAPL", limit=limit)
+
+    assert caught.value.status == 422
+
+
+@pytest.mark.parametrize("with_cursor", [False, True])
+async def test_recent_query_is_served_by_the_symbols_published_index(
+    db: Database, with_cursor: bool
+) -> None:
     await install_indexes(db)
     for i in range(20):
         await seed(db, "AAPL", f"a{i}", _ago(hours=i))
+    after = (_ago(hours=5), "m" * 64) if with_cursor else None
+    query = _recent_query("AAPL", _ago(days=182), after)
 
-    plan = (
-        await db[ARTICLES]
-        .find({"symbols": "AAPL", "published_at": {"$gte": _ago(days=182)}})
-        .sort([("published_at", -1), ("dedupe_key", -1)])
-        .explain()
-    )
+    plan = await db[ARTICLES].find(query).sort([("published_at", -1), ("dedupe_key", -1)]).explain()
 
-    assert "symbols_published" in json.dumps(plan, default=str)
+    winning = json.dumps(plan["queryPlanner"]["winningPlan"], default=str)
+    assert "IXSCAN" in winning
+    assert "symbols_published" in winning
+    assert "COLLSCAN" not in winning
+
+
+class _ScriptedSource:
+    """An in-memory article source: newest-first rows, paged like the repository."""
+
+    def __init__(self, titles: list[str]) -> None:
+        start = NOW - timedelta(days=1)
+        self.rows = [
+            RecentArticle(
+                published_at=start - timedelta(minutes=i),
+                title=title,
+                url="https://example.com/x",
+                source="Wire",
+                score=None,
+                dedupe_key=f"{i:04d}",
+            )
+            for i, title in enumerate(titles)
+        ]
+
+    async def recent(
+        self, symbol: str, *, since: datetime, after: tuple[datetime, str] | None, limit: int
+    ) -> list[RecentArticle]:
+        rows = [r for r in self.rows if after is None or r.position < after]
+        return rows[: limit + 1]
+
+
+async def test_page_when_recaps_exhaust_the_rounds_pages_still_return_every_article_once() -> None:
+    recaps = [f"{RECAP} {i}" for i in range(20)]
+    real = ["Apple news 1", "Apple news 2", "Apple news 3"]
+    source = _ScriptedSource([*recaps, *real])
+
+    async def status(_symbol: str) -> DataStatus:
+        return ok()
+
+    feed = NewsFeed(source, lambda: NOW, status)  # type: ignore[arg-type]
+    assert MAX_ROUNDS * 2 < 20  # limit 1 scans 2 rows a round, so the real rows are out of reach
+    pages = []
+    cursor: str | None = None
+    while True:
+        page = await feed.page("AAPL", before=cursor, limit=1)
+        pages.append(page)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+
+    flat = [a.title for p in pages for a in p.articles]
+    assert flat == real
+    assert any(not p.articles and p.next_cursor is not None for p in pages)

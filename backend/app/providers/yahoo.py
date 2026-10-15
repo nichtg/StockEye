@@ -6,10 +6,10 @@ straight away into the normalized models.
 
 import asyncio
 import math
+import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
-from urllib.parse import urlsplit
 
 import pandas as pd
 import yfinance as yf
@@ -43,7 +43,7 @@ _ALLOWED_TYPES = frozenset({"EQUITY", "ETF"})
 _MAX_SEARCH_RESULTS = 8
 _EARNINGS_LIMIT = 40  # about ten years of quarters
 _DESCRIPTION_MAX = 4000
-_WEB_SCHEMES = frozenset({"http", "https"})
+_SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
 
 
 def _exchange_of(code: object) -> Exchange | None:
@@ -136,6 +136,9 @@ class YahooMarketData:
             info = yf.Ticker(symbol).info
             if not info or not any(info.get(k) for k in ("longName", "shortName", "symbol")):
                 raise SymbolNotFoundError(self.name, f"unknown symbol {symbol}")
+            exchange = info.get("exchange")
+            if _exchange_of(exchange) is None:  # same rule as quote(): e.g. OTC listings
+                raise ProviderDataError(self.name, f"unsupported exchange {exchange!r}")
             return _profile_of(info)
 
         return await self._run(work, symbol)
@@ -235,27 +238,15 @@ def _number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _website(value: object) -> str | None:
-    """The URL only if it is absolute http(s) with a host: it becomes a clickable link."""
-    text = _text(value)
-    if text is None:
-        return None
-    try:
-        parts = urlsplit(text)
-        host = parts.hostname
-    except ValueError:
-        return None
-    return text if parts.scheme.lower() in _WEB_SCHEMES and host else None
-
-
 def _description(value: object) -> str | None:
     text = _text(value)
     if text is None or len(text) <= _DESCRIPTION_MAX:
         return text
-    cut = text[:_DESCRIPTION_MAX]
-    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    ends = list(_SENTENCE_END.finditer(text[: _DESCRIPTION_MAX + 1]))
     # A sentence end in the first half keeps most of the text; otherwise cut hard.
-    return cut[: end + 1] if end >= _DESCRIPTION_MAX // 2 else cut.rstrip()
+    if ends and ends[-1].start() + 1 >= _DESCRIPTION_MAX // 2:
+        return text[: ends[-1].start() + 1]
+    return text[:_DESCRIPTION_MAX].rstrip()
 
 
 def _profile_of(info: dict[str, Any]) -> CompanyProfile:
@@ -266,7 +257,7 @@ def _profile_of(info: dict[str, Any]) -> CompanyProfile:
         sector=_text(info.get("sector")),
         industry=_text(info.get("industry")),
         country=_text(info.get("country")),
-        website=_website(info.get("website")),
+        website=_text(info.get("website")),  # the model keeps http(s) only
         employees=None if employees is None else int(employees),
         market_cap=_number(info.get("marketCap")),
         pe_ratio=_number(info.get("trailingPE")),

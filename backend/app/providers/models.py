@@ -6,8 +6,9 @@ ever sees a vendor-specific field. All datetimes are timezone-aware UTC.
 
 from datetime import date, datetime
 from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, HttpUrl
+from pydantic import AwareDatetime, BaseModel, ConfigDict, HttpUrl, field_validator
 
 Exchange = Literal["US", "SGX"]
 Interval = Literal["1d", "1h"]
@@ -78,6 +79,19 @@ class CompanyProfile(_Frozen):
     week52_high: float | None = None
     avg_volume: float | None = None  # shares per day
     currency: str | None = None
+
+    @field_validator("website")
+    @classmethod
+    def _web_url_only(cls, value: str | None) -> str | None:
+        """Keep only an absolute http(s) URL with a host: it is rendered as a link."""
+        if value is None:
+            return None
+        try:
+            parts = urlsplit(value.strip())
+            host = parts.hostname
+        except ValueError:
+            return None
+        return urlunsplit(parts) if parts.scheme in {"http", "https"} and host else None
 
 
 class NewsItem(_Frozen):

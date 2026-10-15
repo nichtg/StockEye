@@ -26,21 +26,10 @@ from app.repositories.news import (
     ArticleText,
     IngestState,
     NewsRepository,
-    RecentArticle,
     SentimentRecord,
 )
 from app.sentiment.scorer import SentimentScore, SentimentScorer, SentimentUnavailableError
 from app.services.calendars import exchange_for, root_ticker
-from app.services.news_feed import (
-    DEFAULT_LIMIT,
-    NEWS_TAB_DAYS,
-    Position,
-    article_out,
-    collect_page,
-    decode_cursor,
-    encode_cursor,
-)
-from app.services.reports import NewsArticlesOut
 from app.services.status import DataStatus, ok
 
 log = get_logger(__name__)
@@ -370,34 +359,6 @@ class NewsService:
         if status.state == "ok" and not articles:
             status = ok(status.as_of, "No news articles about this company were found.")
         return articles, status
-
-    async def recent_articles(
-        self, symbol: str, *, before: str | None = None, limit: int = DEFAULT_LIMIT
-    ) -> NewsArticlesOut:
-        """One page of the last ``NEWS_TAB_DAYS`` days of stored news, price recaps left out.
-
-        Read-only: it never starts ingestion (the News tab's progress poll does that). ``before``
-        is a cursor from an earlier page; a malformed one raises a 422 ``AppError``.
-        """
-        start = decode_cursor(before) if before is not None else None
-        since = self._clock() - timedelta(days=NEWS_TAB_DAYS)
-
-        async def fetch(position: Position | None) -> list[RecentArticle]:
-            return await self._repo.recent(
-                symbol,
-                since=since,
-                before=None if position is None else position[0],
-                before_key=None if position is None else position[1],
-                limit=limit,
-            )
-
-        page = await collect_page(fetch, limit, start)
-        return NewsArticlesOut(
-            articles=[article_out(a) for a in page.articles],
-            next_cursor=None if page.next_position is None else encode_cursor(page.next_position),
-            since=since,
-            status=await self.status(symbol),
-        )
 
 
 def _records(

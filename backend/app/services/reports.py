@@ -232,7 +232,9 @@ class NewsArticlesOut(BaseModel):
     """One page of the News tab, newest first."""
 
     articles: list[NewsArticleOut]
-    next_cursor: str | None  # pass as ``before`` for the next page; None at the end
+    # Pass as ``before`` for the next page. Keep paging until null; a page may be short or
+    # even empty.
+    next_cursor: str | None
     since: datetime  # start of the window (UTC)
     status: DataStatus  # news ingestion status
 
