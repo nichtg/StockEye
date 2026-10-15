@@ -14,8 +14,13 @@ import { useMe } from './useAuth';
  * that is also meant for visitors passes `signedOut`, shown instead of the redirect to /login.
  */
 export function RequireAuth({ signedOut }: { signedOut?: ReactNode }) {
-  // No stored session means nobody is signed in here, so skip the /me round trip entirely.
-  if (signedOut !== undefined && tokenStore.getRefresh() === null) return <>{signedOut}</>;
+  const client = useQueryClient();
+  // No stored session means nobody is signed in here, so skip the /me round trip entirely. A
+  // deleted account clears storage too, and must still end on /login, not the landing page.
+  if (signedOut !== undefined && tokenStore.getRefresh() === null) {
+    if (client.getQueryData(signedOutOnPurposeKey)) return <Navigate to="/login" replace />;
+    return <>{signedOut}</>;
+  }
   return <Gate signedOut={signedOut} />;
 }
 

@@ -6,9 +6,13 @@ import { keepSignedOutMark } from '../queryClient';
 import { NoticeProvider } from '../components/NoticeProvider';
 import { ColorModeProvider } from '../theme/ColorModeProvider';
 
-export function renderApp(ui: ReactElement, { route = '/' }: { route?: string } = {}) {
+export function renderApp(
+  ui: ReactElement,
+  { route = '/', seed }: { route?: string; seed?: (client: QueryClient) => void } = {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   keepSignedOutMark(client);
+  seed?.(client);
   return {
     client,
     ...render(

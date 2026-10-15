@@ -92,22 +92,19 @@ describe('RequireAuth on the home route', () => {
   });
 
   it('goes to /login, not the landing page, after the account was deleted here', async () => {
-    storeSession();
-    stubFetch((req) =>
-      req.path === '/me'
-        ? { status: 401, body: { error: { code: 'unauthorized', message: 'no' } } }
-        : undefined,
-    );
-    const { client } = renderApp(
+    // Deletion clears the stored session, so this runs through the no-token short-circuit.
+    const seen = stubFetch(() => undefined);
+    renderApp(
       <>
         <App />
         <Probe />
       </>,
+      { seed: (client) => client.setQueryData(signedOutOnPurposeKey, true) },
     );
-    client.setQueryData(signedOutOnPurposeKey, true);
 
     await waitFor(() => {
       expect(screen.getByTestId('loc').textContent).toBe('/login');
     });
+    expect(seen.some((r) => r.path === '/me')).toBe(false);
   });
 });
