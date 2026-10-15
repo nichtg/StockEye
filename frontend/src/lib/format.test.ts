@@ -1,4 +1,10 @@
 import {
+  exchangeDay,
+  formatClock,
+  formatCompactCurrency,
+  formatCount,
+  formatPriceRange,
+  formatYield,
   formatMonthRange,
   formatMonthYear,
   moveText,
@@ -80,5 +86,37 @@ describe('month and period formatting', () => {
     expect(formatMonthRange('2026-10-02', '2026-10-28')).toBe('Oct 2026');
     expect(formatMonthRange(null, '2026-10-28')).toBeNull();
     expect(formatMonthRange('2026-10-02', null)).toBeNull();
+  });
+});
+
+describe('company fact formats', () => {
+  it('compacts money to T, B, M and K in the stock currency', () => {
+    expect(formatCompactCurrency(3.2e12, 'USD', 'US')).toBe('$3.2T');
+    expect(formatCompactCurrency(208.9e9, 'SGD', 'SGX')).toBe('S$208.9B');
+    expect(formatCompactCurrency(850e6, 'USD', 'US')).toBe('$850M');
+    expect(formatCompactCurrency(12_500, 'USD', 'US')).toBe('$12.5K');
+    expect(formatCompactCurrency(null, 'USD', 'US')).toBe('–');
+  });
+
+  it('shows a dividend yield fraction as a percent with 2 decimals', () => {
+    expect(formatYield(0.0044)).toBe('0.44%');
+    expect(formatYield(0.05)).toBe('5.00%');
+  });
+
+  it('joins the 52-week range, or gives null when an end is missing', () => {
+    expect(formatPriceRange(164.08, 237.23, 'USD', 'US')).toBe('$164.08 – $237.23');
+    expect(formatPriceRange(null, 237.23, 'USD', 'US')).toBeNull();
+    expect(formatPriceRange(41.1, 44, 'SGD', 'SGX')).toBe('S$41.10 – S$44.00');
+  });
+
+  it('groups whole numbers', () => {
+    expect(formatCount(164000, 'US')).toBe('164,000');
+  });
+
+  it('reads the day and clock in the exchange zone, not the browser zone', () => {
+    // 02:30 UTC on Oct 4 is still Oct 3 in New York and already Oct 4 in Singapore.
+    expect(exchangeDay('2026-10-04T02:30:00Z', 'US')).toBe('2026-10-03');
+    expect(exchangeDay('2026-10-04T02:30:00Z', 'SGX')).toBe('2026-10-04');
+    expect(formatClock('2026-10-03T20:05:00Z', 'US')).toBe('4:05 PM EDT');
   });
 });

@@ -1,11 +1,13 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { api } from '../../api/client';
 import {
   chartKey,
   chartRootKey,
   macroKey,
+  newsArticlesKey,
   newsKey,
+  profileKey,
   searchKey,
   stockKey,
   technicalKey,
@@ -15,7 +17,9 @@ import { ALL_INDICATORS } from '../chart/indicators';
 import type {
   ChartData,
   MacroResponse,
+  NewsArticlesPage,
   NewsProgress,
+  Profile,
   RangeKey,
   StockOut,
   SymbolMatch,
@@ -31,6 +35,56 @@ export function useStock(symbol: string) {
     queryKey: stockKey(symbol),
     queryFn: ({ signal }) => api.get<StockOut>(`/stocks/${encodeURIComponent(symbol)}`, { signal }),
   });
+}
+
+/** The server caches the profile for 24 h, so a long staleTime saves round trips. */
+export const PROFILE_STALE_MS = 60 * 60 * 1000;
+export const NEWS_PAGE_SIZE = 30;
+
+export function useProfile(symbol: string) {
+  return useQuery({
+    queryKey: profileKey(symbol),
+    staleTime: PROFILE_STALE_MS,
+    queryFn: ({ signal }) =>
+      api.get<Profile>(`/stocks/${encodeURIComponent(symbol)}/profile`, { signal }),
+  });
+}
+
+/**
+ * The News tab's articles, newest first, one cursor page at a time. Reads only: collection is
+ * started by useNewsProgress. When that poller reports a new month or update, the loaded pages
+ * are refetched, so the list never lags behind what has been collected.
+ */
+export function useNewsArticles(
+  symbol: string,
+  progress: NewsProgress | undefined,
+  enabled = true,
+) {
+  const client = useQueryClient();
+  const query = useInfiniteQuery({
+    queryKey: newsArticlesKey(symbol),
+    enabled,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ signal, pageParam }) =>
+      api.get<NewsArticlesPage>(`/stocks/${encodeURIComponent(symbol)}/news/articles`, {
+        signal,
+        query: { limit: NEWS_PAGE_SIZE, before: pageParam },
+      }),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+  });
+
+  const seen = useRef<{ symbol: string; marker: string } | undefined>(undefined);
+  const marker = progress ? `${String(progress.months_done)}|${progress.updated_at ?? ''}` : null;
+  useEffect(() => {
+    if (marker === null) return;
+    const before = seen.current;
+    seen.current = { symbol, marker };
+    // The first answer for a stock is a baseline, never a change.
+    if (before?.symbol !== symbol || before.marker === marker) return;
+    void client.invalidateQueries({ queryKey: newsArticlesKey(symbol) });
+  }, [marker, symbol, client]);
+
+  return query;
 }
 
 /** Every indicator is fetched with the bars, so toggling one never refetches or discards the chart. */

@@ -46,6 +46,11 @@ export const TERM_IDS = [
   'p_value',
   'statistical_reliability',
   'news_effect',
+  'news_sentiment',
+  'market_cap',
+  'pe_ratio',
+  'dividend_yield',
+  'week52_range',
   'near_earnings',
   'earnings',
   'dividend',
@@ -235,6 +240,26 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   news_effect: {
     title: 'News effect',
     body: 'How sure we can be that news, rather than luck, is linked to these moves. It is not a buy or sell signal.',
+  },
+  news_sentiment: {
+    title: 'News sentiment',
+    body: 'A language model scores each headline from −1 to +1. Above +0.3 shows as Positive, below −0.3 as Negative, and anything between as Neutral. “Not scored yet” means the model has not read that headline yet.',
+  },
+  market_cap: {
+    title: 'Market cap',
+    body: 'The total value of all a company’s shares: the share price times the number of shares. It is a quick way to tell a large company from a small one.',
+  },
+  pe_ratio: {
+    title: 'P/E ratio',
+    body: 'The share price divided by the company’s yearly profit per share. A higher number means investors pay more for each dollar of profit, often because they expect growth.',
+  },
+  dividend_yield: {
+    title: 'Dividend yield',
+    body: 'The cash a company pays out each year as a share of the current share price. A 2% yield means about $2 a year for every $100 invested.',
+  },
+  week52_range: {
+    title: '52-week range',
+    body: 'The lowest and highest prices the stock has traded at over the past year. It shows where today’s price sits within its recent history.',
   },
   near_earnings: {
     title: 'Earnings tag',

@@ -14,6 +14,7 @@ import { formatAsOf, formatPct, formatPrice, formatSigned } from '../../lib/form
 import { ExchangeTag } from '../search/ExchangeTag';
 import { useWatchlistSymbols } from '../watchlist/useWatchlist';
 import { useWatchlistToggle } from '../watchlist/useWatchlistToggle';
+import { useProfile } from './useStockData';
 
 interface Props {
   symbol: string;
@@ -98,6 +99,32 @@ function changeText(stock: StockOut): string {
   return `${amount} (${formatPct(stock.change_pct, { signed: true, digits: 2 })})`;
 }
 
+/** Sector, industry and country as quiet separate items; the line's height is reserved so nothing shifts. */
+function ProfileLine({ symbol }: { symbol: string }) {
+  const profile = useProfile(symbol).data;
+  const items = [profile?.sector, profile?.industry, profile?.country].filter(
+    (v): v is string => !!v,
+  );
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        columnGap: 2,
+        mt: 0.25,
+        minHeight: '1.3125rem',
+        color: 'ink2',
+      }}
+    >
+      {items.map((item) => (
+        <Typography key={item} variant="body2" component="span" sx={{ color: 'inherit' }}>
+          {item}
+        </Typography>
+      ))}
+    </Box>
+  );
+}
+
 export function StockHeader({ symbol, stock, loading, statuses }: Props) {
   return (
     <Box component="header">
@@ -125,6 +152,7 @@ export function StockHeader({ symbol, stock, loading, statuses }: Props) {
           ) : (
             loading && <Skeleton width={200} />
           )}
+          <ProfileLine symbol={symbol} />
         </Box>
         <WatchlistToggle symbol={symbol} />
       </Box>

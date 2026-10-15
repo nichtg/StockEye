@@ -8,21 +8,27 @@ import type { FullStatuses } from '../api/types';
 import { ErrorState } from '../components/ErrorState';
 import { StockNotFound } from '../components/StockNotFound';
 import { StockChart } from '../features/chart/StockChart';
+import { AboutCompany } from '../features/stock/AboutCompany';
 import { MacroTab } from '../features/stock/MacroTab';
+import { NewsTab } from '../features/stock/NewsTab';
 import { StockHeader } from '../features/stock/StockHeader';
 import { TechnicalTab } from '../features/stock/TechnicalTab';
 import { useNewsProgress, useStock } from '../features/stock/useStockData';
 import { useDocumentTitle } from '../hooks';
 import { exchangeOfSymbol } from '../lib/exchange';
 
-type TabKey = 'technical' | 'macro';
+type TabKey = 'technical' | 'macro' | 'news';
+
+function tabOf(value: string | null): TabKey {
+  return value === 'macro' || value === 'news' ? value : 'technical';
+}
 
 export default function StockPage() {
   const { symbol: raw = '' } = useParams();
   const symbol = raw.toUpperCase();
   useDocumentTitle(symbol);
   const [params, setParams] = useSearchParams();
-  const tab: TabKey = params.get('tab') === 'macro' ? 'macro' : 'technical';
+  const tab = tabOf(params.get('tab'));
   // Tagged with its symbol, so the previous symbol's freshness never shows under a new header.
   const [reported, setReported] = useState<{ symbol: string; status?: FullStatuses }>();
   const chartStatuses = reported?.symbol === symbol ? reported.status : undefined;
@@ -86,7 +92,10 @@ export default function StockPage() {
               { replace: true },
             );
           }}
-          sx={{ mb: { xs: 4, md: 5 }, maxWidth: 'fit-content' }}
+          // Three labels are wider than a phone: the track scrolls sideways instead of the page.
+          variant="scrollable"
+          scrollButtons={false}
+          sx={{ mb: { xs: 4, md: 5 }, maxWidth: 'min(100%, fit-content)' }}
         >
           {/* aria-controls may only name a panel that exists, and only the active one is rendered. */}
           <Tab
@@ -101,6 +110,12 @@ export default function StockPage() {
             id="tab-macro"
             aria-controls={tab === 'macro' ? 'panel-macro' : undefined}
           />
+          <Tab
+            value="news"
+            label="News (6 months)"
+            id="tab-news"
+            aria-controls={tab === 'news' ? 'panel-news' : undefined}
+          />
         </Tabs>
         <Box
           role="tabpanel"
@@ -110,10 +125,21 @@ export default function StockPage() {
         >
           {tab === 'technical' ? (
             <TechnicalTab symbol={symbol} exchange={exchange} />
-          ) : (
+          ) : tab === 'macro' ? (
             <MacroTab symbol={symbol} exchange={exchange} news={news.data} />
+          ) : (
+            <NewsTab symbol={symbol} name={stock.data?.name} exchange={exchange} news={news.data} />
           )}
         </Box>
+      </Box>
+
+      <Box sx={{ mt: 6 }}>
+        <AboutCompany
+          symbol={symbol}
+          name={stock.data?.name}
+          exchange={exchange}
+          currency={stock.data?.currency ?? 'USD'}
+        />
       </Box>
     </Box>
   );
