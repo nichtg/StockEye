@@ -288,3 +288,12 @@ async def test_events_core_failure_propagates(ticker: type[FakeTicker]) -> None:
 
     with pytest.raises(TransientProviderError):
         await YahooMarketData().events("AAPL", START, END)
+
+
+async def test_quote_unsupported_exchange_is_not_found(ticker: type[FakeTicker]) -> None:
+    ticker.fast = SimpleNamespace(
+        last_price=1.0, previous_close=1.0, currency="USD", exchange="OQB"
+    )
+
+    with pytest.raises(SymbolNotFoundError):
+        await YahooMarketData().quote("REEMF")

@@ -112,7 +112,7 @@ class YahooMarketData:
                 raise SymbolNotFoundError(self.name, f"no quote for {symbol}")
             exchange = _exchange_of(info.exchange)
             if exchange is None:
-                raise ProviderDataError(self.name, f"unsupported exchange {info.exchange!r}")
+                raise SymbolNotFoundError(self.name, f"unsupported exchange {info.exchange!r}")
             try:
                 name = ticker.info.get("longName") or ticker.info.get("shortName") or symbol
             except Exception:
@@ -138,7 +138,7 @@ class YahooMarketData:
                 raise SymbolNotFoundError(self.name, f"unknown symbol {symbol}")
             exchange = info.get("exchange")
             if _exchange_of(exchange) is None:  # same rule as quote(): e.g. OTC listings
-                raise ProviderDataError(self.name, f"unsupported exchange {exchange!r}")
+                raise SymbolNotFoundError(self.name, f"unsupported exchange {exchange!r}")
             return _profile_of(info)
 
         return await self._run(work, symbol)
@@ -242,7 +242,12 @@ def _description(value: object) -> str | None:
     text = _text(value)
     if text is None or len(text) <= _DESCRIPTION_MAX:
         return text
-    ends = list(_SENTENCE_END.finditer(text[: _DESCRIPTION_MAX + 1]))
+    # `$` also matches at the slice end, so a match must start inside the limit.
+    ends = [
+        m
+        for m in _SENTENCE_END.finditer(text[: _DESCRIPTION_MAX + 1])
+        if m.start() < _DESCRIPTION_MAX
+    ]
     # A sentence end in the first half keeps most of the text; otherwise cut hard.
     if ends and ends[-1].start() + 1 >= _DESCRIPTION_MAX // 2:
         return text[: ends[-1].start() + 1]
