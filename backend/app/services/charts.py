@@ -3,6 +3,8 @@
 The chart carries every row of the interval's history so the user can pan and zoom left of the
 chosen range. The range only decides ``visible_from`` (where the view starts). Indicators are
 computed on the full frame and warm-up NaNs are dropped, so lines simply start later.
+Prices and indicator values are deliberately unrounded: penny stocks (about S$0.012) would
+otherwise lose their indicator shape.
 """
 
 import math
@@ -154,8 +156,7 @@ def build_markers(
     """Event, pattern and news markers that fall on a bar of ``frame`` (all history).
 
     ``news`` is (session date, headline, car_0_1). Pattern ``hits`` are only passed for daily
-    ranges and are matched to bars by date. Values are deliberately unrounded: penny stocks
-    (about S$0.012) would otherwise lose their indicator shape.
+    ranges and are matched to bars by date.
     """
     at = _time_by_date(frame, interval, tz)
     markers: list[Marker] = []
