@@ -74,6 +74,26 @@ describe('Bucket chart', () => {
     expect(within(screen.getByTestId('bucket-row-neutral')).getByText('−1.2%')).toBeInTheDocument();
   });
 
+  it('labels a 0.25 axis end with two decimals, not rounded', async () => {
+    const data = macroFixture();
+    const stats = data.report!.stats_ex_earnings;
+    stats.buckets.positive = {
+      ...stats.buckets.positive!,
+      mean_car_0_1: 0.0022,
+      ci_low_0_1: -0.001,
+      ci_high_0_1: 0.0024,
+    };
+    stats.buckets.neutral = {
+      ...stats.buckets.neutral!,
+      mean_car_0_1: -0.001,
+      ci_low_0_1: -0.002,
+      ci_high_0_1: 0,
+    };
+    show(data);
+    expect(await screen.findByText('+0.25%')).toBeInTheDocument();
+    expect(screen.getByText('−0.25%')).toBeInTheDocument();
+  });
+
   it('says not enough data, with the count, instead of a bar for an untested bucket', async () => {
     show();
     const row = await screen.findByTestId('bucket-row-negative');

@@ -42,6 +42,14 @@ interface Row {
 const days = (n: number) => `${String(n)} ${n === 1 ? 'day' : 'days'}`;
 const pct = (v: number, digits = 1) => formatPct(v, { signed: true, digits });
 
+/** Up to 2 decimals with trailing zeros trimmed (0.25 -> 2, 0.5 -> 1, 2 -> 0), so axis ends like 0.25 are not rounded. */
+function tickDigits(v: number): number {
+  // Work in whole hundredths: 0.3 * 10 is not an exact integer in floating point.
+  const hundredths = Math.round(Math.abs(v) * 100);
+  if (hundredths % 100 === 0) return 0;
+  return hundredths % 10 === 0 ? 1 : 2;
+}
+
 function rowOf(key: BucketKey, name: string, b: Bucket | undefined): Row {
   const n = b?.n ?? 0;
   if (!b || !isTested(b)) return { key, name, n, result: { kind: 'untested' } };
@@ -119,7 +127,6 @@ export function BucketChart({ stats }: { stats: MacroStatsOut }) {
   const anyFaded = tested.some((t) => t.faded);
   const x = (v: number) => ((v + axis.max) / (2 * axis.max)) * W;
   const mid = ROW_H / 2;
-  const tickDigits = Number.isInteger(axis.max) ? 0 : 1;
 
   return (
     <Box>
@@ -247,7 +254,7 @@ export function BucketChart({ stats }: { stats: MacroStatsOut }) {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {v === 0 ? '0%' : pct(v, tickDigits)}
+                {v === 0 ? '0%' : pct(v, tickDigits(v))}
               </Typography>
             ))}
           </Box>
