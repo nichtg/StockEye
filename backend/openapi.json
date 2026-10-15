@@ -1944,13 +1944,11 @@
               "$ref": "#/components/schemas/VerdictOut"
             },
             "type": "array",
-            "title": "Verdicts",
-            "default": []
+            "title": "Verdicts"
           },
           "value_statement": {
             "type": "string",
-            "title": "Value Statement",
-            "default": ""
+            "title": "Value Statement"
           }
         },
         "type": "object",
@@ -1968,7 +1966,9 @@
           "regime",
           "timeline",
           "events_total",
-          "events_insufficient"
+          "events_insufficient",
+          "verdicts",
+          "value_statement"
         ],
         "title": "MacroReportOut"
       },
