@@ -75,22 +75,33 @@ def test_bucket_ci_hand_computed_fixture_matches_t_interval() -> None:
         make_event(date(2025, 1, 6) + timedelta(days=10 * i), 0.5, c) for i, c in enumerate(cars)
     ]
 
-    b = compute_stats(events, exclude_near_earnings=False).buckets["positive"]
+    b = compute_stats(events, exclude_near_earnings=False, min_n=5).buckets["positive"]
 
     assert b.ci_low_0_1 == pytest.approx(0.030 - 0.019632, abs=1e-6)
     assert b.ci_high_0_1 == pytest.approx(0.030 + 0.019632, abs=1e-6)
 
 
+def test_bucket_ci_below_min_n_is_none_like_the_test() -> None:
+    cars = [0.01, 0.02, 0.03, 0.04, 0.05]
+    events = [
+        make_event(date(2025, 1, 6) + timedelta(days=10 * i), 0.5, c) for i, c in enumerate(cars)
+    ]
+
+    b = compute_stats(events, exclude_near_earnings=False, min_n=10).buckets["positive"]
+
+    assert (b.p_value, b.ci_low_0_1, b.ci_high_0_1) == (None, None, None)
+
+
 def test_bucket_ci_single_event_is_none() -> None:
     events = [make_event(date(2025, 1, 6), 0.5, 0.02)]
 
-    b = compute_stats(events, exclude_near_earnings=False).buckets["positive"]
+    b = compute_stats(events, exclude_near_earnings=False, min_n=1).buckets["positive"]
 
     assert (b.ci_low_0_1, b.ci_high_0_1) == (None, None)
 
 
 def test_bucket_ci_no_spread_is_none() -> None:
-    events = [make_event(date(2025, 1, 6) + timedelta(days=i), 0.5, 0.02) for i in range(4)]
+    events = [make_event(date(2025, 1, 6) + timedelta(days=i), 0.5, 0.02) for i in range(12)]
 
     b = compute_stats(events, exclude_near_earnings=False).buckets["positive"]
 
@@ -119,7 +130,7 @@ def test_verdicts_report_has_three_in_order_and_value_statement() -> None:
     assert [v.question for v in report.verdicts] == [
         "Does good news lift the price?",
         "Does bad news drag it down?",
-        "Does news move this stock more than the market?",
+        "Do good-news days beat bad-news days?",
     ]
     assert report.value_statement == (
         "Shows whether news days for this stock moved its price more than the market alone "
@@ -170,8 +181,8 @@ def test_good_news_verdict_detail_states_average_count_and_chance() -> None:
     v = _verdicts(stats)["good_news"]
 
     assert v.detail == (
-        "On average +1.0% versus the market over 2 days, across 21 days with positive news. "
-        "A gap this size often happens by chance."
+        "On average +1.0% versus what the market predicted over 2 days, across 21 days with "
+        "positive news. A move this size often happens by chance."
     )
 
 
@@ -194,22 +205,37 @@ def test_good_news_verdict_enough_days_but_no_spread_is_insufficient() -> None:
     assert "12 days with positive news" in v.detail
 
 
-def test_overall_verdict_clear_difference_is_clear() -> None:
+def test_overall_verdict_clear_difference_states_gap_and_chance() -> None:
     stats = _stats(_bucket("positive", 17, 0.01), _bucket("negative", 17, -0.01), _diff(0.01, 0.02))
 
     v = _verdicts(stats)["overall"]
 
     assert v.answer_kind == "clear"
-    assert v.detail == "News days moved this stock more than the market explains."
+    assert v.detail == (
+        "On average, positive-news days did 2.0% better than negative-news days over 2 days, "
+        "compared with what the market predicted. A gap this size rarely happens by chance."
+    )
 
 
-def test_overall_verdict_no_clear_difference_says_in_line_with_market() -> None:
+def test_overall_verdict_possible_difference_is_possibly() -> None:
+    stats = _stats(_bucket("positive", 17, 0.01), _bucket("negative", 17, -0.01), _diff(0.1, 0.02))
+
+    v = _verdicts(stats)["overall"]
+
+    assert v.answer_kind == "possible"
+    assert v.detail.endswith("A gap this size could still happen by chance.")
+
+
+def test_overall_verdict_no_clear_difference_says_about_the_same() -> None:
     stats = _stats(_bucket("positive", 17, 0.01), _bucket("negative", 17, -0.01), _diff(0.6, 0.002))
 
     v = _verdicts(stats)["overall"]
 
     assert v.answer_kind == "none"
-    assert v.detail == "This stock's moves on news days were in line with the market's."
+    assert v.detail == (
+        "Positive-news and negative-news days moved about the same against the market; "
+        "any gap could easily be chance."
+    )
 
 
 def test_overall_verdict_reversed_difference_is_opposite() -> None:
@@ -220,25 +246,51 @@ def test_overall_verdict_reversed_difference_is_opposite() -> None:
     v = _verdicts(stats)["overall"]
 
     assert v.answer_kind == "opposite"
-    assert "2.0% worse" in v.detail
+    assert v.detail == (
+        "Positive-news days did 2.0% worse than negative-news days on average over 2 days, "
+        "the reverse of what the news suggested."
+    )
 
 
-def test_overall_verdict_possible_difference_is_possibly() -> None:
-    stats = _stats(_bucket("positive", 17, 0.01), _bucket("negative", 17, -0.01), _diff(0.1, 0.02))
+def test_overall_verdict_clear_gap_rounding_to_zero_is_none_not_opposite() -> None:
+    stats = _stats(_bucket("positive", 17, 0.0), _bucket("negative", 17, 0.0), _diff(0.01, -0.0003))
 
-    assert _verdicts(stats)["overall"].answer_kind == "possible"
-
-
-def test_overall_verdict_without_difference_uses_strongest_bucket() -> None:
-    stats = _stats(_bucket("positive", 17, 0.01, 0.3), _bucket("negative", 17, -0.02, 0.01))
-
-    assert _verdicts(stats)["overall"].answer_kind == "clear"
+    assert _verdicts(stats)["overall"].answer_kind == "none"
 
 
-def test_overall_verdict_without_difference_strongest_bucket_wrong_way_is_opposite() -> None:
-    stats = _stats(_bucket("positive", 17, -0.02, 0.01), _bucket("negative", 17, -0.01, 0.4))
+def test_overall_verdict_without_difference_never_cherry_picks_a_bucket() -> None:
+    stats = _stats(_bucket("positive", 17, 0.01, 0.3), _bucket("negative", 17, -0.02, 0.001))
 
-    assert _verdicts(stats)["overall"].answer_kind == "opposite"
+    v = _verdicts(stats)["overall"]
+
+    assert v.answer_kind == "insufficient"
+    assert v.detail == (
+        "Not enough days with both positive and negative news to compare them yet; "
+        "at least 10 of each are needed."
+    )
+
+
+@pytest.mark.parametrize("kind_of", ["good_news", "bad_news"])
+def test_bucket_verdict_clear_effect_rounding_to_zero_is_none_not_opposite(kind_of: str) -> None:
+    stats = _stats(_bucket("positive", 17, 0.0002, 0.01), _bucket("negative", 17, -0.0002, 0.01))
+
+    assert _verdicts(stats)[kind_of].answer_kind == "none"
+
+
+@pytest.mark.parametrize(
+    ("p", "kind"),
+    [(0.052, "possible"), (0.0496, "possible"), (0.197, "none"), (0.0104, "clear")],
+)
+def test_verdict_chip_uses_the_rounded_figure_the_findings_show(p: float, kind: str) -> None:
+    # 0.0496 shows as "5 in 100" (possible), 0.197 as "20 in 100" (no clear effect).
+    stats = _stats(_bucket("positive", 17, 0.01, p), _bucket("negative", 17, -0.01), _diff(p, 0.02))
+    report = build_macro_report([], stats, stats, None, [], {}, as_of=AS_OF)
+    v = {x.id: x for x in report.verdicts}
+
+    assert v["good_news"].answer_kind == kind
+    assert v["overall"].answer_kind == kind
+    shown = {"clear": "Clear", "possible": "Possible", "none": "No clear"}[kind]
+    assert any(f.text.startswith(f"{shown} news effect") for f in report.primary_findings)
 
 
 def test_overall_verdict_nothing_testable_is_insufficient() -> None:

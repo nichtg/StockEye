@@ -29,7 +29,14 @@ from app.domain.macro.sentiment_stats import (
     Regime,
     Reliability,
     TimelinePoint,
-    reliability_label,
+)
+from app.domain.macro.verdicts import VALUE_STATEMENT, Verdict, build_verdicts
+from app.domain.macro.wording import (
+    VERY_OFTEN_AT,
+    direction,
+    pct_abs,
+    shown_in_100,
+    shown_label,
 )
 
 Scope = Literal["all_events", "excluding_earnings"]
@@ -37,7 +44,6 @@ Scope = Literal["all_events", "excluding_earnings"]
 MAX_HEADLINES = 3
 TOP_EVENTS_MONTHS = 3  # the biggest-news-days list only looks this far back
 MIN_LINK = 0.1  # |rank correlation| below this is described as no clear link
-VERY_OFTEN_AT = 95  # "in 100" figure from which chance is described as "very often"
 PRE_MOVE_CAVEAT = 0.01  # a mean pre-event move this large (1%) gets a caveat sentence
 
 
@@ -83,21 +89,6 @@ class Finding:
     p_value: float | None = None
 
 
-VerdictId = Literal["good_news", "bad_news", "overall"]
-AnswerKind = Literal["clear", "possible", "none", "opposite", "insufficient"]
-
-
-@dataclass(frozen=True)
-class Verdict:
-    """A plain question, a one-word answer and one supporting sentence (primary scope)."""
-
-    id: VerdictId
-    question: str
-    answer: str
-    answer_kind: AnswerKind
-    detail: str
-
-
 @dataclass(frozen=True)
 class MacroReport:
     top_events: list[TopEvent]  # only news days on or after ``top_events_since``
@@ -119,33 +110,15 @@ class MacroReport:
     value_statement: str  # constant line saying what the section shows
 
 
-VALUE_STATEMENT = (
-    "Shows whether news days for this stock moved its price more than the market alone "
-    "would explain."
-)
-ANSWERS: dict[AnswerKind, str] = {
-    "clear": "Yes, clearly",
-    "possible": "Possibly",
-    "none": "Not clearly",
-    "opposite": "No, the opposite",
-    "insufficient": "Not enough data",
-}
-
-
-def _pct_abs(x: float) -> str:
-    return f"{abs(round(x * 100, 1)):.1f}%"
-
-
 def _reliability_finding(p: float, what: str, based_on: int) -> Finding:
     """Reliability sentence; ``what`` is e.g. "a gap this large". The raw p stays in the field.
 
     The label and the "about X in 100" figure come from the same rounded value, so they can
     never disagree (for example "clear news effect ... about 5 in 100").
     """
-    raw = round(p * 100)
-    below_floor = raw < 1
-    in_100 = max(1, raw)
-    label = reliability_label(in_100 / 100)
+    below_floor = round(p * 100) < 1
+    in_100 = shown_in_100(p)
+    label = shown_label(p)
     chance = "fewer than 1 in 100 times" if below_floor else f"about {in_100} in 100 times"
     if label == "clear_effect":
         only = "" if below_floor else "only "
@@ -170,22 +143,22 @@ def _reliability_finding(p: float, what: str, based_on: int) -> Finding:
 
 def _reaction_phrase(m: float) -> str:
     """How the stock moved against its market-model expectation, in plain words."""
-    rounded = round(m * 100, 1)
-    if rounded == 0:
+    sign = direction(m)
+    if sign == 0:
         return "moved in line with what the market predicted"
-    side = "better" if rounded > 0 else "worse"
-    return f"did {_pct_abs(m)} {side} than its usual relationship with the market would predict"
+    side = "better" if sign > 0 else "worse"
+    return f"did {pct_abs(m)} {side} than its usual relationship with the market would predict"
 
 
 def _gap_sentence(mean_diff: float, n_pos: int, n_neg: int) -> str:
     """Positive-versus-negative comparison; a gap that rounds to zero has no direction."""
-    rounded = round(mean_diff * 100, 1)
+    sign = direction(mean_diff)
     lead = f"On average, the {n_pos} positive-news days studied did"
     tail = f"the {n_neg} negative-news days (that day and the next)."
-    if rounded == 0:
+    if sign == 0:
         return f"{lead} about the same as {tail}"
-    side = "better" if rounded > 0 else "worse"
-    return f"{lead} {_pct_abs(mean_diff)} {side} than {tail}"
+    side = "better" if sign > 0 else "worse"
+    return f"{lead} {pct_abs(mean_diff)} {side} than {tail}"
 
 
 def _pre_move_finding(bucket: BucketStats, mean_car: float) -> Finding | None:
@@ -198,16 +171,16 @@ def _pre_move_finding(bucket: BucketStats, mean_car: float) -> Finding | None:
     if pre is None or abs(pre) < PRE_MOVE_CAVEAT:
         return None
     side = "better" if pre > 0 else "worse"
-    same_direction = round(mean_car * 100, 1) != 0 and (pre > 0) == (mean_car > 0)
+    same_direction = direction(mean_car) != 0 and (pre > 0) == (mean_car > 0)
     if same_direction:
         text = (
             "Part of this move started earlier: on average, in the 5 trading days before "
-            f"these news days, the stock had already moved {_pct_abs(pre)} {side} than expected."
+            f"these news days, the stock had already moved {pct_abs(pre)} {side} than expected."
         )
     else:
         text = (
             "In the 5 trading days before these news days, the stock had on average moved "
-            f"{_pct_abs(pre)} {side} than expected."
+            f"{pct_abs(pre)} {side} than expected."
         )
     return Finding(text=text, based_on_events=bucket.n_car_pre_5)
 
@@ -399,111 +372,6 @@ def _earnings_note(stats_all: MacroStats, stats_ex: MacroStats) -> str | None:
     return None
 
 
-def _days(n: int, what: str) -> str:
-    return f"{n} day with {what}" if n == 1 else f"{n} days with {what}"
-
-
-def _pct_signed(x: float) -> str:
-    rounded = round(x * 100, 1)
-    sign = "+" if rounded > 0 else "-" if rounded < 0 else ""
-    return f"{sign}{abs(rounded):.1f}%"
-
-
-def _kind(label: Reliability, moved_right_way: bool) -> AnswerKind:
-    """Answer kind for a tested effect; a clear or possible effect the wrong way is opposite."""
-    if label == "no_clear_effect":
-        return "none"
-    if not moved_right_way:
-        return "opposite"
-    return "clear" if label == "clear_effect" else "possible"
-
-
-_CHANCE: dict[Reliability, str] = {
-    "clear_effect": "A gap this size rarely happens by chance.",
-    "possible_effect": "A gap this size could still happen by chance.",
-    "no_clear_effect": "A gap this size often happens by chance.",
-}
-
-
-def _bucket_verdict(
-    vid: VerdictId, question: str, label: Bucket, stats: MacroStats, *, wants_rise: bool
-) -> Verdict:
-    """Verdict for one news tone; ``wants_rise`` says which way the price should move."""
-    b = stats.buckets[label]
-    what = f"{label} news"
-    if b.mean_car_0_1 is None or b.label is None:
-        if b.n < stats.min_n:
-            detail = f"Only {_days(b.n, what)} so far; at least {stats.min_n} are needed."
-        else:
-            detail = f"The {_days(b.n, what)} did not give a usable reading yet."
-        return Verdict(vid, question, ANSWERS["insufficient"], "insufficient", detail)
-    mean = b.mean_car_0_1
-    rounded = round(mean * 100, 1)
-    kind = _kind(b.label, rounded != 0 and (rounded > 0) == wants_rise)
-    detail = (
-        f"On average {_pct_signed(mean)} versus the market over 2 days, across "
-        f"{_days(b.n, what)}. {_CHANCE[b.label]}"
-    )
-    return Verdict(vid, question, ANSWERS[kind], kind, detail)
-
-
-def _overall_verdict(stats: MacroStats) -> Verdict:
-    """Positive-versus-negative gap; falls back to the most convincing tested bucket."""
-    question = "Does news move this stock more than the market?"
-    diff = stats.difference
-    if diff is not None:
-        label = diff.label
-        right_way = round(diff.mean_diff * 100, 1) > 0
-        reverse = (
-            f"Positive-news days did {_pct_abs(diff.mean_diff)} worse than negative-news days "
-            "on average over 2 days, the reverse of what the news suggested."
-        )
-    else:
-        tested = [
-            (b, up)
-            for b, up in ((stats.buckets["positive"], True), (stats.buckets["negative"], False))
-            if b.p_value is not None and b.label is not None and b.mean_car_0_1 is not None
-        ]
-        if not tested:
-            detail = (
-                "Not enough days with positive and negative news yet to judge; at least "
-                f"{stats.min_n} of each are needed."
-            )
-            return Verdict("overall", question, ANSWERS["insufficient"], "insufficient", detail)
-        best, wants_rise = min(tested, key=lambda t: t[0].p_value or 1.0)
-        assert best.label is not None  # noqa: S101 - filtered above
-        assert best.mean_car_0_1 is not None  # noqa: S101
-        label = best.label
-        rounded = round(best.mean_car_0_1 * 100, 1)
-        right_way = rounded != 0 and (rounded > 0) == wants_rise
-        reverse = "News days moved this stock the opposite way to the tone of the news."
-    kind = _kind(label, right_way)
-    if kind == "clear":
-        detail = "News days moved this stock more than the market explains."
-    elif kind == "possible":
-        detail = (
-            "News days may have moved this stock more than the market explains, "
-            "but luck cannot be ruled out."
-        )
-    elif kind == "opposite":
-        detail = reverse
-    else:
-        detail = "This stock's moves on news days were in line with the market's."
-    return Verdict("overall", question, ANSWERS[kind], kind, detail)
-
-
-def _verdicts(stats: MacroStats) -> list[Verdict]:
-    return [
-        _bucket_verdict(
-            "good_news", "Does good news lift the price?", "positive", stats, wants_rise=True
-        ),
-        _bucket_verdict(
-            "bad_news", "Does bad news drag it down?", "negative", stats, wants_rise=False
-        ),
-        _overall_verdict(stats),
-    ]
-
-
 def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contract
     events: Sequence[EventResult],
     stats_all: MacroStats,
@@ -559,6 +427,6 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
         events_total=len(events),
         events_insufficient=sum(1 for e in events if e.status != "ok"),
         earnings_note=note,
-        verdicts=_verdicts(stats_all if primary_scope == "all_events" else stats_ex_earnings),
+        verdicts=build_verdicts(stats_all if primary_scope == "all_events" else stats_ex_earnings),
         value_statement=VALUE_STATEMENT,
     )

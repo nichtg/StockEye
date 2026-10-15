@@ -75,9 +75,8 @@ class BucketStats:
     t: float | None = None
     p_value: float | None = None
     label: Reliability | None = None
-    # 95% confidence interval of mean_car_0_1, from the same one-sample t model as ``t`` and
-    # ``p_value`` (so it excludes zero exactly when p < 0.05). None below 2 events or with no
-    # spread; unlike the test it is not gated on min_n, so a thin bucket can still be drawn.
+    # 95% confidence interval of mean_car_0_1 from the same one-sample t model and the same
+    # min_n / spread gate as ``t`` and ``p_value`` (excludes zero exactly when p < 0.05).
     ci_low_0_1: float | None = None
     ci_high_0_1: float | None = None
 
@@ -120,25 +119,21 @@ def _median(values: Sequence[float]) -> float | None:
     return float(np.median(values)) if values else None
 
 
-def _bucket_test(car01: Sequence[float], min_n: int) -> tuple[float, float] | None:
-    """One-sample t-test against zero; each bucket claim needs its own evidence."""
+def _bucket_test(car01: Sequence[float], min_n: int) -> tuple[float, float, float, float] | None:
+    """One-sample t-test against zero, with the 95% interval of the mean from the same model.
+
+    Returns (t, p, ci_low, ci_high); the interval excludes zero exactly when p < 0.05. Each
+    bucket claim needs its own evidence, so below ``min_n`` (or with no spread) there is
+    neither a test nor an interval.
+    """
     if len(car01) < min_n or len(car01) < MIN_DISTINCT or np.ptp(car01) == 0:
         return None
     res = stats.ttest_1samp(car01, 0.0)
     t, p = float(res.statistic), float(res.pvalue)
     if math.isnan(t) or math.isnan(p):
         return None
-    return t, p
-
-
-def _mean_ci(car01: Sequence[float]) -> tuple[float, float] | None:
-    """95% t-interval of the mean (fractions): mean +/- t(0.975, n-1) * sd / sqrt(n)."""
-    n = len(car01)
-    if n < MIN_DISTINCT or np.ptp(car01) == 0:
-        return None
-    mean = float(np.mean(car01))
-    half = float(stats.t.ppf(0.975, n - 1)) * float(np.std(car01, ddof=1)) / math.sqrt(n)
-    return mean - half, mean + half
+    ci = res.confidence_interval(0.95)
+    return t, p, float(ci.low), float(ci.high)
 
 
 def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> BucketStats:
@@ -146,7 +141,6 @@ def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> 
     car05 = [e.car_0_5 for e in events if e.car_0_5 is not None]
     pre = [e.car_pre_5 for e in events if e.car_pre_5 is not None]
     test = _bucket_test(car01, min_n)
-    ci = _mean_ci(car01)
     return BucketStats(
         bucket=bucket,
         n=len(events),
@@ -160,8 +154,8 @@ def _bucket_stats(bucket: Bucket, events: Sequence[EventResult], min_n: int) -> 
         t=None if test is None else test[0],
         p_value=None if test is None else test[1],
         label=None if test is None else reliability_label(test[1]),
-        ci_low_0_1=None if ci is None else ci[0],
-        ci_high_0_1=None if ci is None else ci[1],
+        ci_low_0_1=None if test is None else test[2],
+        ci_high_0_1=None if test is None else test[3],
     )
 
 

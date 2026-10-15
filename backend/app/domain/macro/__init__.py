@@ -27,9 +27,9 @@ from app.domain.macro.summary import (
     Headline,
     MacroReport,
     TopEvent,
-    Verdict,
     build_macro_report,
 )
+from app.domain.macro.verdicts import Verdict
 
 __all__ = [
     "BucketStats",
