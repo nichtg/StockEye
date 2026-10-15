@@ -72,6 +72,7 @@ function SimilarStories({
         }}
         sx={{
           display: 'block',
+          minHeight: 24,
           mt: 0.5,
           fontSize: '0.8125rem',
           fontWeight: 500,
@@ -140,7 +141,9 @@ export function ArticleRow({ article, exchange }: { article: NewsArticle; exchan
           <SimilarStories similar={article.similar} exchange={exchange} />
         )}
       </Box>
-      <SentimentBadge label={article.sentiment_label} />
+      <Box sx={{ alignSelf: { xs: 'flex-start', sm: 'auto' } }}>
+        <SentimentBadge label={article.sentiment_label} />
+      </Box>
     </Box>
   );
 }

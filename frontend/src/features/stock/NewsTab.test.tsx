@@ -252,6 +252,28 @@ describe('NewsTab', () => {
       expect(screen.getByTestId('search').textContent).toBe('');
     });
 
+    it('moves with the arrow keys, wrapping from All to the last chip', async () => {
+      const user = userEvent.setup();
+      const seen = monthsApi();
+      show();
+      await screen.findByText('All news');
+      screen.getByRole('radio', { name: 'All months' }).focus();
+      await user.keyboard('{ArrowRight}');
+      const first = await screen.findByRole('radio', { name: 'October 2026, 42 articles' });
+      expect(first).toBeChecked();
+      expect(first).toHaveFocus();
+      expect(screen.getByTestId('search')).toHaveTextContent('?month=2026-10');
+      expect(seen.at(-1)?.search.get('month')).toBe('2026-10');
+
+      await user.click(screen.getByRole('radio', { name: 'All months' }));
+      await screen.findByText('All news');
+      screen.getByRole('radio', { name: 'All months' }).focus();
+      await user.keyboard('{ArrowLeft}');
+      const last = await screen.findByRole('radio', { name: 'September 2026, 1 article' });
+      expect(last).toBeChecked();
+      expect(last).toHaveFocus();
+    });
+
     it('starts from a month in the URL, and falls back to All for an unknown one', async () => {
       const seen = monthsApi();
       const first = show(idle, '/?tab=news&month=2026-09');
@@ -318,7 +340,7 @@ describe('NewsTab', () => {
       const button = await screen.findByRole('button', { name: '+2 similar stories' });
       expect(button).toHaveAttribute('aria-expanded', 'false');
       expect(screen.queryByRole('link', { name: 'Same story, outlet B' })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'What is grouped stories?' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'What is a grouped story?' })).toBeVisible();
 
       await user.click(button);
       expect(button).toHaveAttribute('aria-expanded', 'true');

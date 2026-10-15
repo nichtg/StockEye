@@ -14,7 +14,15 @@ const groupSx = (scroll: boolean) => (theme: Theme) => {
     gap: 0.5,
     maxWidth: '100%',
     // A long row scrolls inside its own track instead of widening the page.
-    ...(scroll ? { flexWrap: 'nowrap', overflowX: 'auto' } : { flexWrap: 'wrap' }),
+    ...(scroll
+      ? {
+          flexWrap: 'nowrap',
+          overflowX: 'auto',
+          width: 'fit-content',
+          scrollbarWidth: 'none',
+          '&::-webkit-scrollbar': { display: 'none' },
+        }
+      : { flexWrap: 'wrap' }),
     '& .choice': {
       ...(scroll ? { flexShrink: 0, whiteSpace: 'nowrap' } : {}),
       ...seg.item,

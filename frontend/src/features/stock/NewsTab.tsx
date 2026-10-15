@@ -217,7 +217,7 @@ export function NewsTab({ symbol, name, exchange, news }: Props) {
           <>
             {' '}
             Similar headlines from the same day are grouped.{' '}
-            <Term id="grouped_stories" label="grouped stories">
+            <Term id="grouped_stories" label="a grouped story">
               How grouping works
             </Term>
           </>
