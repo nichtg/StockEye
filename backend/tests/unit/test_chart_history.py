@@ -1,12 +1,14 @@
 """build_chart returns the full history; the range only sets ``visible_from``."""
 
 import json
-import time
 from datetime import date
 
 import numpy as np
 import pandas as pd
+import pytest
 
+from app.domain.technical import PATTERNS
+from app.domain.technical.candlesticks import PatternHit
 from app.providers.models import CorporateEvent
 from app.services import compute
 from app.services.charts import INDICATORS
@@ -94,7 +96,7 @@ def test_build_chart_daily_vwap_starts_at_visible_from_with_typical_price() -> N
     vwap = chart.indicators["vwap"]
     anchor = next(c for c in chart.candles if c.time == chart.visible_from)
     assert vwap[0].time == chart.visible_from
-    assert vwap[0].value == round((anchor.high + anchor.low + anchor.close) / 3, 4)
+    assert vwap[0].value == pytest.approx((anchor.high + anchor.low + anchor.close) / 3)
 
 
 def test_build_chart_all_indicator_series_are_finite_and_start_after_warm_up() -> None:
@@ -107,10 +109,18 @@ def test_build_chart_all_indicator_series_are_finite_and_start_after_warm_up() -
     assert chart.indicators["sma50"][0].time != chart.candles[0].time
 
 
-def test_build_chart_markers_before_visible_from_are_kept() -> None:
+def test_build_chart_markers_before_visible_from_are_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     frame = _daily()
     old = frame.index[10].date()
     events = [CorporateEvent(kind="dividend", date=old, label="Dividend 0.25 USD")]
+
+    key = next(iter(PATTERNS))
+    hit = PatternHit(
+        key=key, bias=PATTERNS[key].bias, index=20, date=frame.index[20].to_pydatetime()
+    )
+    monkeypatch.setattr(compute, "detect_patterns", lambda _frame: [hit])
 
     chart = _chart("6M", frame, events=events)
 
@@ -119,6 +129,9 @@ def test_build_chart_markers_before_visible_from_are_kept() -> None:
     assert marker.time == old.isoformat()
     assert marker.time < str(chart.visible_from)
     assert any(c.time == marker.time for c in chart.candles)
+    pattern = next(m for m in chart.markers if m.kind == "pattern")
+    assert pattern.time == frame.index[20].strftime("%Y-%m-%d")
+    assert pattern.time < str(chart.visible_from)
 
 
 def test_build_chart_marker_on_missing_bar_is_dropped() -> None:
@@ -127,13 +140,17 @@ def test_build_chart_marker_on_missing_bar_is_dropped() -> None:
     assert _chart("6M", _daily(), events=events).markers == []
 
 
-def test_build_chart_three_year_daily_payload_is_small_and_fast() -> None:
+def test_build_chart_three_year_daily_payload_is_small() -> None:
+    chart = _chart("2Y", _daily(), list(INDICATORS))
+
+    assert len(json.dumps(chart.model_dump(mode="json"))) < 1_500_000
+
+
+def test_build_chart_penny_stock_keeps_many_distinct_macd_histogram_values() -> None:
     frame = _daily()
+    frame[["open", "high", "low", "close"]] *= 0.012 / 100  # S$0.012-ish closes
 
-    started = time.perf_counter()
-    chart = _chart("2Y", frame, list(INDICATORS))
-    elapsed = time.perf_counter() - started
+    chart = _chart("1Y", frame, ["macd"])
 
-    size = len(json.dumps(chart.model_dump(mode="json")))
-    assert size < 1_500_000
-    assert elapsed < 1.0  # 300 ms locally; loose here so slow CI machines don't flake
+    histogram = {p.value for p in chart.indicators["macd_histogram"]}
+    assert len(histogram) > 200

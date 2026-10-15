@@ -66,10 +66,10 @@ def candles(frame: pd.DataFrame, interval: Interval, tz: ZoneInfo) -> list[Candl
     return [
         Candle(
             time=time_of(stamp, interval, tz),
-            open=round(float(o), 4),
-            high=round(float(h), 4),
-            low=round(float(lo), 4),
-            close=round(float(c), 4),
+            open=float(o),
+            high=float(h),
+            low=float(lo),
+            close=float(c),
             volume=float(v),
         )
         for stamp, o, h, lo, c, v in zip(
@@ -89,7 +89,7 @@ def _points(series: pd.Series, interval: Interval, tz: ZoneInfo) -> list[SeriesP
     for stamp, value in zip(pd.DatetimeIndex(series.index), series, strict=True):
         number = float(value)
         if math.isfinite(number):  # warm-up NaNs (and any infinity) never reach the chart
-            out.append(SeriesPoint(time=time_of(stamp, interval, tz), value=round(number, 4)))
+            out.append(SeriesPoint(time=time_of(stamp, interval, tz), value=number))
     return out
 
 
@@ -154,7 +154,8 @@ def build_markers(
     """Event, pattern and news markers that fall on a bar of ``frame`` (all history).
 
     ``news`` is (session date, headline, car_0_1). Pattern ``hits`` are only passed for daily
-    ranges; their ``index`` positions refer to ``frame``.
+    ranges and are matched to bars by date. Values are deliberately unrounded: penny stocks
+    (about S$0.012) would otherwise lose their indicator shape.
     """
     at = _time_by_date(frame, interval, tz)
     markers: list[Marker] = []
@@ -162,18 +163,17 @@ def build_markers(
         if event.date in at:
             markers.append(Marker(time=at[event.date], kind=event.kind, label=event.label))
     for hit in hits:
-        day = pd.Timestamp(hit.date).date()
-        if day in at:
-            spec = PATTERNS[hit.key]
-            markers.append(
-                Marker(
-                    time=at[day],
-                    kind="pattern",
-                    label=spec.label,
-                    bias=spec.bias.value,
-                    pattern=hit.key.value,
-                )
+        # Hits come from this same frame, so their date always has a bar.
+        spec = PATTERNS[hit.key]
+        markers.append(
+            Marker(
+                time=at[pd.Timestamp(hit.date).date()],
+                kind="pattern",
+                label=spec.label,
+                bias=spec.bias.value,
+                pattern=hit.key.value,
             )
+        )
     for day, headline, car in news:
         if day in at:
             markers.append(Marker(time=at[day], kind="news", label=headline, car_0_1=round(car, 4)))
