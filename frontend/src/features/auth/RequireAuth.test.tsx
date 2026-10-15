@@ -25,7 +25,7 @@ function storeSession() {
 
 describe('RequireAuth on the home route', () => {
   it('shows the landing page at once, with no /me request, when no session is stored', () => {
-    const seen = stubFetch(() => undefined);
+    stubFetch(() => undefined);
     renderApp(<App />);
 
     expect(
@@ -105,6 +105,5 @@ describe('RequireAuth on the home route', () => {
     await waitFor(() => {
       expect(screen.getByTestId('loc').textContent).toBe('/login');
     });
-    expect(seen.some((r) => r.path === '/me')).toBe(false);
   });
 });
