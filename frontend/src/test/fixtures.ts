@@ -147,6 +147,36 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
     buckets: {},
     difference: null,
   };
+  const bucketStats = (
+    bucket: 'positive' | 'neutral' | 'negative',
+    n: number,
+    mean: number | null,
+    ci: [number, number] | null,
+    label: 'clear_effect' | 'possible_effect' | 'no_clear_effect' | null,
+  ) => ({
+    bucket,
+    n,
+    mean_car_0_1: mean,
+    median_car_0_1: mean,
+    n_car_0_5: n,
+    mean_car_0_5: null,
+    median_car_0_5: null,
+    mean_car_pre_5: null,
+    n_car_pre_5: n,
+    t: null,
+    p_value: ci ? 0.2 : null,
+    label,
+    ci_low_0_1: ci?.[0] ?? null,
+    ci_high_0_1: ci?.[1] ?? null,
+  });
+  const primaryStats = {
+    ...emptyStats,
+    buckets: {
+      positive: bucketStats('positive', 21, 0.01, [-0.004, 0.024], 'no_clear_effect'),
+      neutral: bucketStats('neutral', 12, -0.012, [-0.02, -0.004], 'clear_effect'),
+      negative: bucketStats('negative', 4, null, null, null),
+    },
+  };
   return {
     symbol: 'AAPL',
     name: 'Apple Inc.',
@@ -190,7 +220,7 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
       secondary_scope: null,
       secondary_findings: [],
       stats_all: emptyStats,
-      stats_ex_earnings: emptyStats,
+      stats_ex_earnings: primaryStats,
       regime: {
         recent_mean: 0.2,
         baseline_mean: 0.05,
@@ -204,6 +234,32 @@ export function macroFixture(overrides: Partial<MacroResponse> = {}): MacroRespo
       ],
       events_total: 36,
       events_insufficient: 2,
+      value_statement:
+        'Shows whether news days for this stock moved its price more than the market alone would explain.',
+      verdicts: [
+        {
+          id: 'good_news',
+          question: 'Does good news lift the price?',
+          answer: 'Not clearly',
+          answer_kind: 'none',
+          detail:
+            'On average +1.0% versus what the market predicted over 2 days, across 21 days with positive news.',
+        },
+        {
+          id: 'bad_news',
+          question: 'Does bad news drag it down?',
+          answer: 'Not enough data',
+          answer_kind: 'insufficient',
+          detail: 'Only 4 days with negative news so far; at least 10 are needed.',
+        },
+        {
+          id: 'overall',
+          question: 'Do good-news days beat bad-news days?',
+          answer: 'Possibly',
+          answer_kind: 'possible',
+          detail: 'On average, positive-news days did 1.0% better than negative-news days.',
+        },
+      ],
     },
     ingestion: {
       months_done: 24,
