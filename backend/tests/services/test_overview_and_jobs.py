@@ -161,7 +161,7 @@ async def test_startup_discover_build_is_skipped_after_a_recent_attempt_with_no_
     services: Services, db: Database
 ) -> None:
     await services.discover.refresh()
-    await db["analysis_cache"].delete_one({"key": "discover:v1"})  # crashed before it was saved
+    await db["analysis_cache"].delete_one({"key": "discover:v2"})  # crashed before it was saved
     scheduler = build_scheduler(services, db)
 
     assert not await schedule_startup_discover(scheduler, services)

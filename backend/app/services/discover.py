@@ -9,6 +9,7 @@ The build is deliberately slow and gentle: one row at a time, under the schedule
 """
 
 import asyncio
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,7 +20,7 @@ from app.clock import utc_now
 from app.db import Database
 from app.logging_setup import get_logger
 from app.providers.errors import ProviderError
-from app.providers.models import ScreenMatch, ScreenQuery
+from app.providers.models import CompanyProfile, ScreenMatch, ScreenQuery
 from app.providers.quota import scheduled_calls
 from app.repositories.cache import CacheRepository
 from app.services.analysis import AnalysisService
@@ -30,8 +31,8 @@ from app.services.status import DataStatus, combine, ok
 
 log = get_logger(__name__)
 
-CACHE_KEY = "discover:v1"
-ATTEMPT_KEY = "discover:attempt"
+CACHE_KEY = "discover:v2"
+ATTEMPT_KEY = "discover:attempt:v2"
 # The cron runs on weekdays only, so a page can legitimately be 3 days old over a weekend.
 CACHE_TTL = timedelta(hours=74)
 # A build is marked before it starts; a crash loop on startup then cannot re-run it for this long.
@@ -41,13 +42,37 @@ BUILD_AT = (22, 30)  # UTC, weekdays: after the US close refresh
 # A page is "overdue" only when the last scheduled build is this old and still has not landed.
 BUILD_GRACE = timedelta(hours=1)
 KEEP_STALE_FOR = timedelta(days=7)  # kept rows older than this are dropped rather than shown
-ROWS_PER_LIST = 15
-SCREEN_SIZE = 25  # ask for more than we show, so a few unbuildable hits do not thin a list
+ROWS_PER_LIST = 10
+SCREEN_SIZE = 25  # ask for more than we show: every hit is built, then ranked and cut to the top 10
 EMPTY_REASON = "Discover lists are being prepared. Check back in a few minutes."
 _OVERDUE_REASON = "These lists did not refresh as scheduled. Showing the last saved version."
 _PARTIAL_REASON = "Some stocks in this list could not be loaded tonight."
 _FAILED_REASON = "This list could not be refreshed tonight. Showing the last saved version."
 _NOTHING_REASON = "This list could not be built tonight."
+# Closed-end funds and trusts sneak into Yahoo's equity screens (typeDisp and quoteType both say
+# "Equity"). US lists leave out names that say so, and companies Yahoo files as asset management
+# (a fund's profile industry). Singapore lists keep REITs and trusts, which are real companies.
+_FUND_NAME = re.compile(r"\b(fund|etf|trust)\b", re.IGNORECASE)
+_FUND_INDUSTRIES = frozenset({"Asset Management"})
+
+
+class DiscoverRow(OverviewRow):
+    """A watchlist-style row plus the figures Discover ranks by (money in the row's currency)."""
+
+    pe_ratio: float | None  # trailing twelve months
+    avg_traded_value: float | None  # 3-month average daily volume x price
+
+
+def _by_move(row: DiscoverRow) -> float | None:
+    return -abs(row.change_1w_pct) if row.change_1w_pct is not None else None
+
+
+def _by_pe(row: DiscoverRow) -> float | None:
+    return row.pe_ratio if row.pe_ratio is not None and row.pe_ratio > 0 else None
+
+
+def _by_traded_value(row: DiscoverRow) -> float | None:
+    return -row.avg_traded_value if row.avg_traded_value is not None else None
 
 
 @dataclass(frozen=True)
@@ -55,14 +80,18 @@ class Preset:
     id: str
     title: str
     description: str
+    order_label: str  # tells the reader how the rows are sorted
     query: ScreenQuery
+    rank: Callable[[DiscoverRow], float | None]  # smaller sorts first; None = cannot be ranked
+    keep_unranked: bool = False  # True: unranked rows go last instead of being dropped
 
 
 PRESETS: tuple[Preset, ...] = (
     Preset(
         "us_small_movers",
         "Small caps on the move",
-        "Smaller US companies whose shares moved most today.",
+        "Smaller US companies with the biggest moves this week.",
+        "Biggest 1-week move first",
         ScreenQuery(
             region="us",
             min_market_cap=300e6,
@@ -72,11 +101,14 @@ PRESETS: tuple[Preset, ...] = (
             sort_asc=False,
             size=SCREEN_SIZE,
         ),
+        _by_move,
+        keep_unranked=True,
     ),
     Preset(
         "us_value_small",
         "Lower-priced small caps",
         "Smaller US companies valued at under 15 times their earnings.",
+        "Lowest price-to-earnings first",
         ScreenQuery(
             region="us",
             min_market_cap=300e6,
@@ -87,11 +119,13 @@ PRESETS: tuple[Preset, ...] = (
             sort_asc=False,
             size=SCREEN_SIZE,
         ),
+        _by_pe,
     ),
     Preset(
         "sg_under_radar",
         "Under the radar in Singapore",
         "Smaller Singapore-listed companies with steady trading.",
+        "Most traded first",
         ScreenQuery(
             region="sg",
             min_market_cap=100e6,
@@ -101,6 +135,7 @@ PRESETS: tuple[Preset, ...] = (
             sort_asc=False,
             size=SCREEN_SIZE,
         ),
+        _by_traded_value,
     ),
 )
 
@@ -109,7 +144,8 @@ class DiscoverList(BaseModel):
     id: str
     title: str
     description: str
-    rows: list[OverviewRow]
+    order_label: str
+    rows: list[DiscoverRow]
     status: DataStatus
 
 
@@ -228,31 +264,56 @@ class DiscoverService:
             id=preset.id,
             title=preset.title,
             description=preset.description,
+            order_label=preset.order_label,
             rows=rows,
             status=status,
         )
 
-    async def _rows(self, preset: Preset) -> tuple[list[OverviewRow], bool]:
-        """The first ``ROWS_PER_LIST`` hits that build, one at a time; and whether none was lost.
+    async def _rows(self, preset: Preset) -> tuple[list[DiscoverRow], bool]:
+        """The top ``ROWS_PER_LIST`` hits by the preset's own order; and whether none was lost.
 
-        Raises when the screen fails, or when it found hits but none of them could be built (a
-        vendor problem, not an empty market).
+        Every hit is built (one at a time) and then ranked, so the order the reader sees is the
+        order the list promises. Raises when the screen fails, or when it found hits but none of
+        them could be built (a vendor problem, not an empty market).
         """
+        us = preset.query.region == "us"
         matches = await self._market.screen(preset.query)
-        rows: list[OverviewRow] = []
-        for match in matches:
-            if len(rows) == ROWS_PER_LIST:
-                break
+        candidates = [m for m in matches if not (us and _FUND_NAME.search(m.name))]
+        funds = 0  # hits whose profile says fund: not candidates, so they cannot make a list stale
+        built: list[DiscoverRow] = []
+        for match in candidates:
             # One row at a time: each costs about 3 vendor calls, and a burst would eat the
             # per-minute allowance users need.
             (row,) = await build_overview(
                 self._market, self._analysis, [match.symbol], concurrency=1
             )
-            if row.status != "unavailable":
-                rows.append(_with_cap(row, match))
-        if matches and not rows:
+            if row.status == "unavailable":
+                continue
+            profile = await self._profile_or_none(match.symbol)
+            if us and profile is not None and profile.industry in _FUND_INDUSTRIES:
+                funds += 1
+                continue
+            built.append(_discover_row(row, match, profile))
+        wanted = len(candidates) - funds
+        if wanted and not built:
             raise AppError(503, "data_unavailable", "No stock in the list could be loaded.")
-        return rows, len(rows) >= min(ROWS_PER_LIST, len(matches))
+        return _ranked(preset, built), len(built) >= min(ROWS_PER_LIST, wanted)
+
+    async def _profile_or_none(self, symbol: str) -> CompanyProfile | None:
+        """The profile the row build just cached (so normally no new vendor call)."""
+        try:
+            found, _ = await self._market.profile(symbol)
+        except (AppError, ProviderError):
+            return None
+        return found
+
+
+def _ranked(preset: Preset, rows: list[DiscoverRow]) -> list[DiscoverRow]:
+    """Rows in the preset's order, cut to ``ROWS_PER_LIST``; the sort is stable on ties."""
+    keyed = [(preset.rank(r), r) for r in rows]
+    with_key = sorted((p for p in keyed if p[0] is not None), key=lambda p: p[0] or 0.0)
+    without = [r for k, r in keyed if k is None] if preset.keep_unranked else []
+    return ([r for _, r in with_key] + without)[:ROWS_PER_LIST]
 
 
 def _kept(preset: Preset, old: DiscoverList | None, now: datetime) -> DiscoverList:
@@ -263,6 +324,7 @@ def _kept(preset: Preset, old: DiscoverList | None, now: datetime) -> DiscoverLi
             id=preset.id,
             title=preset.title,
             description=preset.description,
+            order_label=preset.order_label,
             rows=[],
             status=DataStatus(state="unavailable", reason=_NOTHING_REASON),
         )
@@ -270,13 +332,23 @@ def _kept(preset: Preset, old: DiscoverList | None, now: datetime) -> DiscoverLi
         update={
             "title": preset.title,
             "description": preset.description,
+            "order_label": preset.order_label,
             "status": DataStatus(state="stale", as_of=as_of, reason=_FAILED_REASON),
         }
     )
 
 
-def _with_cap(row: OverviewRow, match: ScreenMatch) -> OverviewRow:
-    """Fill a missing market cap from the screener hit (the profile call may have failed)."""
-    if row.market_cap is None and match.market_cap is not None:
-        return row.model_copy(update={"market_cap": match.market_cap})
-    return row
+def _discover_row(
+    row: OverviewRow, match: ScreenMatch, profile: CompanyProfile | None
+) -> DiscoverRow:
+    """Add the ranking figures, and fill a missing market cap from the screener hit."""
+    traded = (
+        match.avg_volume_3m * match.price
+        if match.avg_volume_3m is not None and match.price is not None
+        else None
+    )
+    pe = match.pe_ratio if match.pe_ratio is not None else (profile.pe_ratio if profile else None)
+    cap = row.market_cap if row.market_cap is not None else match.market_cap
+    return DiscoverRow(
+        **row.model_dump() | {"market_cap": cap}, pe_ratio=pe, avg_traded_value=traded
+    )

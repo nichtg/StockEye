@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -30,6 +31,39 @@ SG = ["D05.SI"]
 @pytest.fixture(autouse=True)
 def _hits(provider: FakeMarketData) -> None:
     provider.screen_hits = {"us": US, "sg": SG}
+    give_hits_traded_volume(provider)
+
+
+def give_hits_traded_volume(provider: FakeMarketData) -> None:
+    """The shared fake sends no 3-month volume; without one the Singapore list drops every row."""
+    real = provider.screen
+
+    async def screen(query: ScreenQuery) -> list[ScreenMatch]:
+        return [m.model_copy(update={"avg_volume_3m": 1e6}) for m in await real(query)]
+
+    provider.screen = screen  # type: ignore[method-assign]  # test double
+
+
+def _match(symbol: str, name: str | None = None, **fields: float | None) -> ScreenMatch:
+    base: dict[str, Any] = {
+        "symbol": symbol,
+        "name": name or symbol,
+        "exchange": "SGX" if symbol.endswith(".SI") else "US",
+        "currency": "SGD" if symbol.endswith(".SI") else "USD",
+        "market_cap": 1e9,
+        "pe_ratio": 12.0,
+        "price": 10.0,
+        "avg_volume_3m": 1e6,
+    }
+    return ScreenMatch(**{**base, **fields})
+
+
+def _screen_returns(provider: FakeMarketData, **by_region: list[ScreenMatch]) -> None:
+    async def screen(query: ScreenQuery) -> list[ScreenMatch]:
+        provider.calls["screen"] += 1
+        return by_region.get(query.region, [])
+
+    provider.screen = screen  # type: ignore[method-assign]  # test double
 
 
 async def test_refresh_builds_three_lists_with_full_rows(services: Services) -> None:
@@ -40,7 +74,7 @@ async def test_refresh_builds_three_lists_with_full_rows(services: Services) -> 
     assert [lst.id for lst in page.lists] == [p.id for p in PRESETS]
     assert len(PRESETS) == 3
     for lst in page.lists[:2]:
-        assert [r.symbol for r in lst.rows] == US
+        assert sorted(r.symbol for r in lst.rows) == sorted(US)
         assert lst.status.state == "ok"
     assert [r.symbol for r in page.lists[2].rows] == SG
     row = page.lists[0].rows[0]
@@ -69,18 +103,18 @@ async def test_refresh_asks_the_screener_for_more_than_it_shows(
     assert SCREEN_SIZE > ROWS_PER_LIST
 
 
-async def test_refresh_keeps_only_the_first_fifteen_rows_that_build(
+async def test_refresh_keeps_only_the_top_ten_rows_and_skips_unbuildable_hits(
     services: Services, provider: FakeMarketData
 ) -> None:
-    provider.screen_hits = {"us": ["ZZZZ"] + [f"S{n}" for n in range(24)], "sg": []}
+    hits = [_match("ZZZZ", pe_ratio=0.5)] + [_match(f"S{n}", pe_ratio=1.0 + n) for n in range(24)]
+    _screen_returns(provider, us=hits, sg=[])
 
     await services.discover.refresh()
 
-    page = await services.discover.lists()
-    first = page.lists[0]
-    assert len(first.rows) == ROWS_PER_LIST
-    assert first.rows[0].symbol == "S0"  # the unbuildable first hit was skipped
-    assert first.status.state == "ok"  # 15 built, so nothing was lost
+    value = (await services.discover.lists()).lists[1]
+    assert ROWS_PER_LIST == 10
+    assert [r.symbol for r in value.rows] == [f"S{n}" for n in range(10)]  # ZZZZ cannot build
+    assert value.status.state == "ok"  # 24 built, so nothing was lost
 
 
 async def test_list_that_lost_some_rows_is_marked_stale_with_a_plain_reason(
@@ -92,7 +126,7 @@ async def test_list_that_lost_some_rows_is_marked_stale_with_a_plain_reason(
 
     page = await services.discover.lists()
     lost = page.lists[0]
-    assert [r.symbol for r in lost.rows] == ["AAPL", "MSFT"]
+    assert sorted(r.symbol for r in lost.rows) == ["AAPL", "MSFT"]
     assert lost.status.state == "stale"
     assert lost.status.reason == "Some stocks in this list could not be loaded tonight."
     assert page.lists[2].status.state == "ok"
@@ -193,7 +227,7 @@ async def test_one_failing_preset_does_not_stop_the_others(
     page = await services.discover.lists()
     assert [lst.status.state for lst in page.lists] == ["stale", "stale", "ok"]
     assert [r.symbol for r in page.lists[2].rows] == ["AAPL"]  # updated
-    assert [r.symbol for r in page.lists[0].rows] == US  # kept
+    assert sorted(r.symbol for r in page.lists[0].rows) == US  # kept
 
 
 async def test_failing_preset_with_nothing_saved_is_an_empty_unavailable_list(
