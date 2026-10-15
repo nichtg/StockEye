@@ -19,6 +19,10 @@ describe('startIndex', () => {
     expect(startIndex(bars, '2026-02-01')).toBe(2);
     expect(startIndex([], '2026-02-01')).toBe(0);
   });
+
+  it('shows everything when the API sends no range start', () => {
+    expect(startIndex(bars, undefined)).toBe(0);
+  });
 });
 
 describe('onOrAfter', () => {

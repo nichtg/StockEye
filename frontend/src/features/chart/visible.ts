@@ -12,7 +12,9 @@ export function onOrAfter(time: BarTime, from: BarTime): boolean {
  * Position of the first bar at or after `from`: where a range view starts. When every bar is
  * earlier than `from` the view starts at the latest bar, never at the oldest.
  */
-export function startIndex(candles: Candle[], from: BarTime): number {
+export function startIndex(candles: Candle[], from: BarTime | undefined): number {
+  // An older API without `visible_from` sends only the chosen range: show all of it.
+  if (from === undefined) return 0;
   const i = candles.findIndex((c) => onOrAfter(c.time, from));
   return i === -1 ? Math.max(0, candles.length - 1) : i;
 }
