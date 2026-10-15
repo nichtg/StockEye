@@ -1,4 +1,5 @@
-from datetime import timedelta
+import math
+from datetime import date, timedelta
 from typing import Any
 
 import pytest
@@ -81,57 +82,73 @@ async def test_technical_unknown_symbol_raises_not_found(services: Services) -> 
     assert caught.value.status == 404
 
 
-async def test_chart_daily_indicators_have_no_nan_gap_at_left_edge(services: Services) -> None:
+async def test_chart_daily_indicators_are_finite_and_cover_most_of_the_history(
+    services: Services,
+) -> None:
     chart = await services.analysis.chart(
         "AAPL", "6M", ["sma50", "sma20", "rsi", "bollinger", "macd"]
     )
 
-    first_candle = chart.candles[0].time
     assert chart.interval == "1d"
-    assert isinstance(first_candle, str)
     for name in ("sma50", "sma20", "rsi", "bollinger_upper", "macd", "macd_signal"):
         series = chart.indicators[name]
         assert series, name
-        assert series[0].time == first_candle  # warm-up history fills the left edge
-        assert len(series) == len(chart.candles)
+        assert all(math.isfinite(p.value) for p in series), name  # warm-up NaNs are dropped
+        assert len(series) < len(chart.candles)  # lines start after their warm-up
 
 
-async def test_chart_daily_range_covers_about_six_months(services: Services) -> None:
+async def test_chart_daily_6m_returns_history_older_than_six_months(services: Services) -> None:
     chart = await services.analysis.chart("AAPL", "6M", [])
 
-    assert 120 <= len(chart.candles) <= 135
+    first, last = chart.candles[0].time, chart.candles[-1].time
+    assert isinstance(first, str) and isinstance(last, str)
+    assert (date.fromisoformat(last) - date.fromisoformat(first)).days > 183
+    assert isinstance(chart.visible_from, str)
+    assert (date.fromisoformat(last) - date.fromisoformat(chart.visible_from)).days <= 183
+    assert chart.visible_from > first
     assert chart.indicators == {}
 
 
-async def test_chart_1w_uses_hourly_bars_over_five_sessions_with_epoch_times(
+async def test_chart_1w_uses_hourly_bars_with_epoch_times_and_earlier_sessions(
     services: Services,
 ) -> None:
     chart = await services.analysis.chart("AAPL", "1W", ["sma20", "vwap"])
 
     assert chart.interval == "1h"
     assert all(isinstance(c.time, int) for c in chart.candles)
-    days = {c.time // 86400 for c in chart.candles if isinstance(c.time, int)}
-    assert len(days) == 5
-    assert len(chart.indicators["sma20"]) == len(chart.candles)
-    assert len(chart.indicators["vwap"]) == len(chart.candles)
+    assert isinstance(chart.visible_from, int)
+    shown = {
+        c.time // 86400
+        for c in chart.candles
+        if isinstance(c.time, int) and c.time >= chart.visible_from
+    }
+    assert len(shown) == 5
+    assert chart.candles[0].time < chart.visible_from
+    assert chart.indicators["vwap"]
+    assert len(chart.indicators["sma20"]) < len(chart.candles)
 
 
-async def test_chart_1m_shows_22_sessions_of_hourly_bars(services: Services) -> None:
+async def test_chart_1m_view_starts_22_sessions_back(services: Services) -> None:
     chart = await services.analysis.chart("AAPL", "1M", [])
 
-    days = {c.time // 86400 for c in chart.candles if isinstance(c.time, int)}
     assert chart.interval == "1h"
-    assert len(days) == 22
+    assert isinstance(chart.visible_from, int)
+    shown = {
+        c.time // 86400
+        for c in chart.candles
+        if isinstance(c.time, int) and c.time >= chart.visible_from
+    }
+    assert len(shown) == 22
 
 
-async def test_chart_daily_vwap_is_anchored_at_range_start(services: Services) -> None:
+async def test_chart_daily_vwap_is_anchored_at_visible_from(services: Services) -> None:
     chart = await services.analysis.chart("AAPL", "6M", ["vwap"])
 
     vwap = chart.indicators["vwap"]
-    assert vwap[0].time == chart.candles[0].time
-    first_bar = chart.candles[0]
-    typical = (first_bar.high + first_bar.low + first_bar.close) / 3
-    assert vwap[0].value == pytest.approx(typical)
+    assert vwap[0].time == chart.visible_from
+    anchor = next(c for c in chart.candles if c.time == chart.visible_from)
+    typical = (anchor.high + anchor.low + anchor.close) / 3
+    assert vwap[0].value == pytest.approx(typical, abs=1e-4)
 
 
 async def test_chart_markers_include_events_and_patterns_on_daily_ranges(
