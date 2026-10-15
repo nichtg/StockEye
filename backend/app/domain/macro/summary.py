@@ -7,9 +7,9 @@ over past news days, never a statement about today's price. Sentences say "On av
 "Across N news days studied" and carry the day count. The counts are the sessions the study
 selected (at most one per 6 trading days, earnings-excluded in that scope), hence "studied".
 
-Only the "biggest news days" list is limited to the past ``TOP_EVENTS_MONTHS`` months, because
-older news has probably stopped moving the price. Statistics, findings, regime, timeline and the
-chart's ``events`` keep the full study window.
+Only the "biggest news days" list is limited to the past ``TOP_EVENTS_MONTHS`` months, so it
+shows what is recent. Statistics, findings, regime, timeline and the chart's ``events`` keep the
+full study window.
 """
 
 from __future__ import annotations
@@ -389,7 +389,7 @@ def build_macro_report(  # noqa: PLR0917 - signature fixed by the service contra
     primary plus the regime line. ``earnings_note`` is set only when both scopes exist and the
     effect is clear with earnings days included but not without them (see ``_earnings_note``).
 
-    ``as_of`` is the date of the last completed session in the stock's price data. Only
+    ``as_of`` is the date of the last session in the stock's daily price data. Only
     ``top_events`` is limited, to the past ``TOP_EVENTS_MONTHS`` months up to ``as_of``
     (``top_events_since``); ``events``, statistics, findings, regime and timeline are not.
     """
