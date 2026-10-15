@@ -7,6 +7,11 @@ import { MacroTab } from './MacroTab';
 import { TechnicalTab } from './TechnicalTab';
 import { patternSentence, wilsonInterval } from './technicalText';
 
+const METHOD = 'How this was worked out';
+const expandMethod = async () => {
+  await userEvent.click(await screen.findByRole('button', { name: METHOD }));
+};
+
 describe('Technical tab', () => {
   it('explains reliability in plain language and never shows n= or p=', async () => {
     stubFetch((req) =>
@@ -133,7 +138,7 @@ describe('Macro tab', () => {
   it('replaces the bar with a quiet complete line, and no chip, once done', async () => {
     stubFetch((req) => (req.path === '/stocks/AAPL/macro' ? { body: macroFixture() } : undefined));
     renderApp(<MacroTab symbol="AAPL" exchange="US" />);
-    expect(await screen.findByText(/News complete: 24 months · updated .+/)).toBeInTheDocument();
+    expect(await screen.findByText(/News complete: 24 months, updated .+/)).toBeInTheDocument();
     expect(screen.queryByText('Preliminary')).not.toBeInTheDocument();
     expect(screen.queryByText(/Collecting news/)).not.toBeInTheDocument();
   });
@@ -166,10 +171,14 @@ describe('Macro tab', () => {
         : undefined,
     );
     renderApp(<MacroTab symbol="AAPL" exchange="US" />);
-    expect(await screen.findByText('Clear news effect')).toBeInTheDocument();
-    expect(screen.getByText('Possible news effect')).toBeInTheDocument();
-    expect(screen.getByText('No clear news effect')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'What is News effect?' })).toHaveLength(3);
+    await expandMethod();
+    const list = (await screen.findByText('Finding for clear_effect.')).closest(
+      'ul',
+    ) as HTMLElement;
+    expect(within(list).getByText('Clear news effect')).toBeInTheDocument();
+    expect(within(list).getByText('Possible news effect')).toBeInTheDocument();
+    expect(within(list).getByText('No clear news effect')).toBeInTheDocument();
+    expect(within(list).getAllByRole('button', { name: 'What is News effect?' })).toHaveLength(3);
   });
 
   it('shows the earnings note under the findings only when there is one', async () => {
@@ -183,6 +192,7 @@ describe('Macro tab', () => {
         : undefined,
     );
     const first = renderApp(<MacroTab symbol="AAPL" exchange="US" />);
+    await expandMethod();
     expect(
       await screen.findByText((_, el) => el?.tagName === 'P' && el.textContent === note),
     ).toBeInTheDocument();
@@ -190,7 +200,8 @@ describe('Macro tab', () => {
 
     stubFetch((req) => (req.path === '/stocks/AAPL/macro' ? { body: macroFixture() } : undefined));
     renderApp(<MacroTab symbol="AAPL" exchange="US" />);
-    await screen.findByText('Possible news effect');
+    await expandMethod();
+    await screen.findAllByText('Possible news effect');
     expect(screen.queryByText(/mostly from news around earnings/)).not.toBeInTheDocument();
   });
 
@@ -202,8 +213,7 @@ describe('Macro tab', () => {
     expect(
       await screen.findByText('News over the last 30 days is more positive than usual.'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Possible news effect')).toBeInTheDocument();
-    expect(screen.getByText(/A pattern this strong would appear by chance/)).toBeInTheDocument();
+    expect(screen.queryByText('Possible news effect')).not.toBeInTheDocument();
     expect(screen.getByText('3.3%')).toBeInTheDocument();
     expect(screen.getByText('above its usual market‑linked move')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Apple to Bring TV+ to Android' })).toHaveAttribute(
@@ -214,8 +224,10 @@ describe('Macro tab', () => {
     expect(container.textContent).not.toMatch(/p-value/i);
     expect(container.textContent).not.toMatch(/\bn=|\bp=/);
 
-    await user.click(screen.getByRole('button', { name: 'Details' }));
-    const details = await screen.findByRole('region', { name: 'Details' }).catch(() => null);
+    await user.click(screen.getByRole('button', { name: METHOD }));
+    expect((await screen.findAllByText('Possible news effect')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/A pattern this strong would appear by chance/)).toBeInTheDocument();
+    const details = await screen.findByRole('region', { name: METHOD }).catch(() => null);
     const scope = details ?? container;
     expect((await within(scope).findAllByText('p-value')).length).toBeGreaterThan(0);
     expect(screen.getByText('0.012')).toBeInTheDocument();
@@ -249,8 +261,8 @@ describe('Macro tab', () => {
     );
     const user = userEvent.setup();
     renderApp(<MacroTab symbol="AAPL" exchange="US" />);
+    await user.click(await screen.findByRole('button', { name: METHOD }));
     expect(await screen.findByText(/Excluding days near/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Details' }));
     expect((await screen.findAllByText('All news days')).length).toBeGreaterThan(0);
   });
 
@@ -359,6 +371,7 @@ describe('Macro tab period and counts', () => {
         });
       }),
     );
+    await expandMethod();
     const period = await screen.findByText(/Based on news from/);
     expect(period.textContent).toBe(PERIOD);
     expect(
@@ -385,6 +398,7 @@ describe('Macro tab period and counts', () => {
         });
       }),
     );
+    await expandMethod();
     expect((await screen.findByText(/Based on news from/)).textContent).toContain(
       'Based on news from Oct 2026. Each',
     );
@@ -401,6 +415,7 @@ describe('Macro tab period and counts', () => {
         r.stats_ex_earnings = stats(30, '2024-10-01', '2026-10-02');
       }),
     );
+    await expandMethod();
     expect(await findCounts(/^40 news days studied:/)).toBeInTheDocument();
     expect(screen.getByText(/Mar 2023 to Feb 2026/)).toBeInTheDocument();
     expect(screen.queryByText(/30 news days studied/)).not.toBeInTheDocument();
@@ -412,7 +427,8 @@ describe('Macro tab period and counts', () => {
         r.stats_ex_earnings = stats(0, null, '2026-10-02');
       }),
     );
-    await screen.findByText('Possible news effect');
+    await expandMethod();
+    await screen.findAllByText('Possible news effect');
     expect(screen.queryByText(/Based on news from/)).not.toBeInTheDocument();
     expect(screen.queryByText(isLine(/^[0-9]+ news days? studied/))).not.toBeInTheDocument();
   });
@@ -433,9 +449,8 @@ describe('Macro tab period and counts', () => {
         r.stats_all = stats(40, '2023-03-01', '2026-02-01', { neutral: bucket('neutral', 40) });
       }),
     );
-    const user = userEvent.setup();
+    await expandMethod();
     await findCounts(/^30 news days studied:/);
-    await user.click(screen.getByRole('button', { name: 'Details' }));
     expect(await findCounts(/^40 news days studied:/)).toBeInTheDocument();
     expect(screen.getByText(/Mar 2023 to Feb 2026/)).toBeInTheDocument();
   });
@@ -443,8 +458,8 @@ describe('Macro tab period and counts', () => {
   async function detailsText(mutate: Parameters<typeof withStats>[0]) {
     show(withStats(mutate));
     const user = userEvent.setup();
-    await screen.findByText('Possible news effect');
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await screen.findByRole('button', { name: METHOD });
+    await user.click(screen.getByRole('button', { name: METHOD }));
     return (await screen.findByText(/news days? found/)).textContent;
   }
 

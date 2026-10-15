@@ -41,3 +41,10 @@ export const SCOPE_NAME: Record<Scope, string> = {
   excluding_earnings: 'Excluding days near earnings releases',
   all_events: 'All news days',
 };
+
+/** The stats the headline answers and the chart are computed from: the primary scope's. */
+export function primaryStatsOf(report: MacroReportOut): MacroReportOut['stats_all'] {
+  return report.primary_scope === 'excluding_earnings'
+    ? report.stats_ex_earnings
+    : report.stats_all;
+}
