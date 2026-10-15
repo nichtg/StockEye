@@ -25,7 +25,7 @@ function storeSession() {
 
 describe('RequireAuth on the home route', () => {
   it('shows the landing page at once, with no /me request, when no session is stored', () => {
-    stubFetch(() => undefined);
+    const seen = stubFetch(() => undefined);
     renderApp(<App />);
 
     expect(
@@ -93,7 +93,7 @@ describe('RequireAuth on the home route', () => {
 
   it('goes to /login, not the landing page, after the account was deleted here', async () => {
     // Deletion clears the stored session, so this runs through the no-token short-circuit.
-    const seen = stubFetch(() => undefined);
+    stubFetch(() => undefined);
     renderApp(
       <>
         <App />
