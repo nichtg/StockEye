@@ -4,13 +4,12 @@ import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { useMemo, useRef } from 'react';
 import { QueryRegion } from '../components/QueryRegion';
-import { filterRows } from '../components/StockTable/sortFilter';
+import { filterRows, sortPhrase } from '../components/StockTable/sortFilter';
 import {
   discoverColumns,
   effectiveSort,
   type ExtraColumnId,
 } from '../components/StockTable/columns';
-import { sortPhrase } from '../components/StockTable/sortFilter';
 import {
   NoStocksFromCountry,
   StockTable,

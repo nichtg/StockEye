@@ -7,7 +7,13 @@ import { formatCompactCurrency, formatNumber, formatPrice } from '../../lib/form
 import { Direction } from '../Direction';
 import { Term } from '../Term';
 import { StaleNote } from './StaleNote';
-import type { SortKey, SortState, StockRow } from './sortFilter';
+import {
+  SORT_KEYS,
+  type SortKey,
+  type SortState,
+  type StockRow,
+  type TableColumns,
+} from './sortFilter';
 
 /** Every column after the symbol. The symbol is always first, so it is not in the model. */
 export type ColumnId =
@@ -129,6 +135,16 @@ export function visibleSortKeys(columns: readonly ColumnId[]): SortKey[] {
       return key ? [key] : [];
     }),
   ];
+}
+
+/**
+ * The sort keys each table offers, in menu order. Discover shows every column; the watchlist only
+ * the ones in its own column model (so market cap, P/E and trading value stay Discover-only).
+ */
+export function sortKeysFor(columns: TableColumns): readonly SortKey[] {
+  if (columns === 'discover') return SORT_KEYS;
+  const shown = visibleSortKeys(WATCHLIST_COLUMNS);
+  return SORT_KEYS.filter((k) => shown.includes(k));
 }
 
 /**

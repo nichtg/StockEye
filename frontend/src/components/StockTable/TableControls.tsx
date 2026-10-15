@@ -9,7 +9,8 @@ import type { OverviewRow } from '../../api/types';
 import type { Choice } from '../Choice';
 import { SegmentedChoice } from '../SegmentedChoice';
 import { ThemedSelect } from '../ThemedSelect';
-import { SORT_LABELS, countryOptions, parseSortKey, sortKeysFor } from './sortFilter';
+import { sortKeysFor } from './columns';
+import { SORT_LABELS, countryOptions, parseSortKey } from './sortFilter';
 import type { TableState } from './useTableState';
 
 interface Props {

@@ -41,13 +41,6 @@ const OUTLOOK_ORDER = { bearish: 0, neutral: 1, bullish: 2 } as const;
 
 export type TableColumns = 'watchlist' | 'discover';
 
-/** Market cap, P/E and trading value are shown, and so sortable, on Discover only. */
-export function sortKeysFor(columns: TableColumns): readonly SortKey[] {
-  return columns === 'discover'
-    ? SORT_KEYS
-    : SORT_KEYS.filter((k) => k !== 'cap' && k !== 'pe' && k !== 'traded');
-}
-
 export function parseSortKey(
   value: string | null,
   allowed: readonly SortKey[] = SORT_KEYS,

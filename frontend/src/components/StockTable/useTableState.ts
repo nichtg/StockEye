@@ -1,10 +1,10 @@
 import { useCallback } from 'react';
 import { useSearchParams } from 'react-router';
+import { sortKeysFor } from './columns';
 import {
   nextSort,
   parseSortDir,
   parseSortKey,
-  sortKeysFor,
   type SortKey,
   type SortState,
   type TableColumns,
