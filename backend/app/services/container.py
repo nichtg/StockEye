@@ -65,8 +65,7 @@ async def build_services(settings: Settings, db: Database) -> Services:
         settings.provider_limits,
         settings.quota_warning_ratio,
     )
-    yahoo = guard.wrap_market(YahooMarketData())
-    market = MarketDataService(db, yahoo)
+    market = MarketDataService(db, guard.wrap_market(YahooMarketData()))
     google = guard.wrap_news(GoogleNewsRss(http))
     keyed = [guard.wrap_news(adapter) for adapter in build_keyed_news_providers(settings, http)]
     news = NewsService(
@@ -81,7 +80,7 @@ async def build_services(settings: Settings, db: Database) -> Services:
     )
     analysis = AnalysisService(db, market, news, admission)
     feed = NewsFeed(NewsRepository(db), utc_now, news.status)
-    discover = DiscoverService(db, yahoo, market, analysis)
+    discover = DiscoverService(db, market, analysis)
     return Services(market, news, analysis, admission, guard, feed, discover, http)
 
 

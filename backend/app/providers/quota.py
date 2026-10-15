@@ -22,6 +22,10 @@ Priority = Literal["interactive", "scheduled"]
 # reserved so the scheduled refreshes still run after a busy day of browsing.
 INTERACTIVE_SHARE = 0.8
 
+# Share of each provider's per-minute allowance that scheduled work may use, mirroring
+# ``INTERACTIVE_SHARE``: a nightly build must never leave a signed-in user without headroom.
+SCHEDULED_MINUTE_SHARE = 0.7
+
 # Who is calling. A context variable (rather than a parameter on every service method) because
 # background tasks started by a scheduled job inherit it, which is exactly the attribution wanted.
 #
@@ -48,6 +52,13 @@ def scheduled_calls() -> Iterator[None]:
 def daily_cap(per_day: int, priority: Priority) -> int:
     """Calls per day ``priority`` may consume: the whole allowance, or the interactive share."""
     return per_day if priority == "scheduled" else math.ceil(INTERACTIVE_SHARE * per_day)
+
+
+def minute_cap(per_minute: int, priority: Priority) -> int:
+    """Calls per minute ``priority`` may consume: all of it, or the scheduled share (at least 1)."""
+    if priority == "interactive":
+        return per_minute
+    return max(1, math.floor(SCHEDULED_MINUTE_SHARE * per_minute))
 
 
 @dataclass(frozen=True)

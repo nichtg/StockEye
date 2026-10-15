@@ -117,8 +117,8 @@ class ScreenQuery(_Frozen):
     region: Literal["us", "sg"]
     min_market_cap: float
     max_market_cap: float
-    min_avg_volume: int  # shares per day, 3-month average
-    max_pe: float | None = None  # when set, a positive trailing P/E at or under it is required
+    min_avg_volume: int  # shares per day, 3-month average; at least this many
+    max_pe: float | None = None  # when set, a trailing P/E above 0 and at most this is required
     sort_field: str
     sort_asc: bool
     size: int = Field(ge=1, le=25)

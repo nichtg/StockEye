@@ -124,7 +124,7 @@ async def test_scheduler_has_one_weekday_job_per_exchange(services: Services, db
 
     jobs = {job.id: job for job in scheduler.get_jobs()}
 
-    assert set(jobs) == {"refresh_us", "refresh_sgx", "discover_refresh"}
+    assert set(jobs) == {"refresh_us", "refresh_sgx", "discover_refresh", "prune_market_data"}
     assert "21" in str(jobs["refresh_us"].trigger)
     assert "mon-fri" in str(jobs["refresh_sgx"].trigger)
     discover = jobs["discover_refresh"]
@@ -133,6 +133,9 @@ async def test_scheduler_has_one_weekday_job_per_exchange(services: Services, db
     assert "minute='30'" in str(discover.trigger)
     assert discover.max_instances == 1
     assert discover.coalesce
+    prune = str(jobs["prune_market_data"].trigger)
+    assert "day_of_week='sun'" in prune
+    assert "hour='3'" in prune
 
 
 async def test_startup_discover_build_is_scheduled_only_when_nothing_is_stored(
@@ -149,6 +152,17 @@ async def test_startup_discover_build_is_scheduled_only_when_nothing_is_stored(
 
     scheduler.remove_job("discover_startup")
     await services.discover.refresh()
+
+    assert not await schedule_startup_discover(scheduler, services)
+    assert scheduler.get_job("discover_startup") is None
+
+
+async def test_startup_discover_build_is_skipped_after_a_recent_attempt_with_no_page(
+    services: Services, db: Database
+) -> None:
+    await services.discover.refresh()
+    await db["analysis_cache"].delete_one({"key": "discover:v1"})  # crashed before it was saved
+    scheduler = build_scheduler(services, db)
 
     assert not await schedule_startup_discover(scheduler, services)
     assert scheduler.get_job("discover_startup") is None
