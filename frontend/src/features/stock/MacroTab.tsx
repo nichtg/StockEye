@@ -167,7 +167,7 @@ function Results({
         </section>
       )}
 
-      {report.top_events.length > 0 && <TopEvents events={report.top_events} exchange={exchange} />}
+      <TopEvents events={report.top_events} since={report.top_events_since} exchange={exchange} />
 
       <DetailsAccordion title="Details" unmountOnExit>
         {showScopes && (

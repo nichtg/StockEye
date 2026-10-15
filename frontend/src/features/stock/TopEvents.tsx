@@ -37,7 +37,7 @@ const segmentedSx = (theme: Theme) => {
   };
 };
 
-/** The same events, re-ordered; which events appear is decided by the backend, by impact. */
+/** The same events, re-ordered; the backend picks the biggest news days of the past 3 months. */
 function ordered(events: TopEventOut[], order: Order): TopEventOut[] {
   const sorted = [...events];
   if (order === 'newest') return sorted.sort((a, b) => b.date.localeCompare(a.date));
@@ -94,8 +94,9 @@ function EventRow({ event: e, exchange }: { event: TopEventOut; exchange: Exchan
             No headlines saved for this day.
           </Typography>
         )}
-        {e.headlines.map((h) => (
-          <Typography key={h.url} sx={{ mb: 0.5 }}>
+        {/* Two stories can share a URL (one article syndicated under two titles). */}
+        {e.headlines.map((h, i) => (
+          <Typography key={`${i}:${h.url}`} sx={{ mb: 0.5 }}>
             <Link href={h.url} target="_blank" rel="noopener noreferrer">
               {h.title}
             </Link>
@@ -112,8 +113,17 @@ function EventRow({ event: e, exchange }: { event: TopEventOut; exchange: Exchan
   );
 }
 
-/** The days news moved the price most, newest first or biggest move first, five at a time. */
-export function TopEvents({ events, exchange }: { events: TopEventOut[]; exchange: Exchange }) {
+/** The days in the past 3 months that news moved the price most, five at a time. */
+export function TopEvents({
+  events,
+  since,
+  exchange,
+}: {
+  events: TopEventOut[];
+  /** ISO date the 3-month window starts on; absent on reports saved before the window existed. */
+  since?: string | null;
+  exchange: Exchange;
+}) {
   const headingId = useId();
   const [all, setAll] = useState(false);
   const [order, setOrder] = useState<Order>('newest');
@@ -121,55 +131,77 @@ export function TopEvents({ events, exchange }: { events: TopEventOut[]; exchang
   const shown = all ? sorted : sorted.slice(0, TOP_SHOWN);
   return (
     <section aria-labelledby={headingId}>
-      <SectionTitle id={headingId}>Biggest news days</SectionTitle>
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 1,
-          mb: 1,
-        }}
-      >
-        <ToggleButtonGroup
-          exclusive
-          size="small"
-          value={order}
-          aria-label="Order of the biggest news days"
-          sx={segmentedSx}
-          onChange={(_e, value: Order | null) => {
-            if (value) setOrder(value);
-          }}
-        >
-          <ToggleButton value="newest">Newest</ToggleButton>
-          <ToggleButton value="biggest">Biggest move</ToggleButton>
-        </ToggleButtonGroup>
-        <Typography
-          variant="caption"
-          component="span"
-          sx={{ color: 'ink3', display: { xs: 'none', sm: 'inline' } }}
-        >
-          <Term id="market_adjusted_return">Market-adjusted move</Term> over 2 days
+      <SectionTitle id={headingId}>Biggest news days, past 3 months</SectionTitle>
+      <Typography variant="body2" sx={{ color: 'ink3', mb: 1.5 }}>
+        {since
+          ? `News days since ${formatDate(since, exchange)}.`
+          : 'News days from the past 3 months.'}{' '}
+        <Term id="recent_news_window" label="the 3-month window" />
+      </Typography>
+      {events.length === 0 ? (
+        <Typography>
+          No news days to show from the past 3 months: none were found, or they are too recent to
+          measure yet.
         </Typography>
-      </Box>
-      <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, borderTop: 1, borderColor: 'line' }}>
-        {shown.map((e) => (
-          <EventRow key={`${e.date}-${e.headlines[0]?.url ?? ''}`} event={e} exchange={exchange} />
-        ))}
-      </Box>
-      {events.length > TOP_SHOWN && (
-        <Button
-          variant="text"
-          size="small"
-          aria-expanded={all}
-          sx={{ mt: 1.5, ml: -1 }}
-          onClick={() => {
-            setAll((v) => !v);
-          }}
-        >
-          {all ? 'Show fewer' : `Show all ${String(events.length)}`}
-        </Button>
+      ) : (
+        <>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 1,
+              mb: 1,
+            }}
+          >
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={order}
+              aria-label="Order of the biggest news days"
+              sx={segmentedSx}
+              onChange={(_e, value: Order | null) => {
+                if (value) setOrder(value);
+              }}
+            >
+              <ToggleButton value="newest">Newest</ToggleButton>
+              <ToggleButton value="biggest">Biggest move</ToggleButton>
+            </ToggleButtonGroup>
+            <Typography
+              variant="caption"
+              component="span"
+              sx={{ color: 'ink3', display: { xs: 'none', sm: 'inline' } }}
+            >
+              <Term id="market_adjusted_return">Market-adjusted move</Term> over 2 days
+            </Typography>
+          </Box>
+          <Box
+            component="ul"
+            sx={{ listStyle: 'none', m: 0, p: 0, borderTop: 1, borderColor: 'line' }}
+          >
+            {shown.map((e) => (
+              <EventRow
+                key={`${e.date}-${e.headlines[0]?.url ?? ''}`}
+                event={e}
+                exchange={exchange}
+              />
+            ))}
+          </Box>
+          {events.length > TOP_SHOWN && (
+            <Button
+              variant="text"
+              size="small"
+              aria-expanded={all}
+              sx={{ mt: 1.5, ml: -1 }}
+              onClick={() => {
+                setAll((v) => !v);
+              }}
+            >
+              {all ? 'Show fewer' : `Show all ${String(events.length)}`}
+            </Button>
+          )}
+        </>
       )}
     </section>
   );
