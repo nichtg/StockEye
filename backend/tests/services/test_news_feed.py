@@ -310,7 +310,7 @@ async def test_page_when_recaps_exhaust_the_rounds_pages_still_return_every_arti
     async def status(_symbol: str) -> DataStatus:
         return ok()
 
-    feed = NewsFeed(source, lambda: NOW, status)  # type: ignore[arg-type]
+    feed = NewsFeed(source, lambda: NOW, status)
     assert MAX_ROUNDS * 2 < 20  # limit 1 scans 2 rows a round, so the real rows are out of reach
     pages = []
     cursor: str | None = None

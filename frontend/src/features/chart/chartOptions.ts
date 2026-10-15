@@ -84,8 +84,18 @@ export function chartOptions({
         enableResize: false,
       },
     },
-    handleScale: { mouseWheel: false },
-    handleScroll: { mouseWheel: false },
+    // Wheel, pinch and drag move the chart. Vertical touch drag stays off so a swipe still scrolls the page.
+    handleScale: {
+      mouseWheel: true,
+      pinch: true,
+      axisPressedMouseMove: { time: true, price: false },
+    },
+    handleScroll: {
+      mouseWheel: true,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
+      vertTouchDrag: false,
+    },
     grid: { vertLines: { visible: false }, horzLines: { color: palette.line } },
     crosshair: { mode: CrosshairMode.Normal, vertLine: crosshairLine, horzLine: crosshairLine },
     rightPriceScale: { borderVisible: false },
@@ -93,7 +103,8 @@ export function chartOptions({
       borderVisible: false,
       timeVisible: intraday,
       secondsVisible: false,
-      rightOffset: 2,
+      // Zooming out stops at the whole history (the edges are fixed too), so this is only a floor.
+      minBarSpacing: 0.5,
       fixLeftEdge: true,
       fixRightEdge: true,
       lockVisibleTimeRangeOnResize: true,

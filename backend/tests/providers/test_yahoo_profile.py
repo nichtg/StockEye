@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 import yfinance as yf
 
-from app.providers.errors import ProviderDataError, SymbolNotFoundError
+from app.providers.errors import SymbolNotFoundError
 from app.providers.models import CompanyProfile
 from app.providers.yahoo import YahooMarketData
 
@@ -175,26 +175,26 @@ async def test_profile_all_missing_fields_are_none(monkeypatch: pytest.MonkeyPat
     assert result.model_dump() == dict.fromkeys(result.model_dump())
 
 
-async def test_profile_unsupported_exchange_is_a_data_error_like_quote(
+async def test_profile_unsupported_exchange_is_not_found_like_quote(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _use_info(monkeypatch, _info(exchange="OQB", symbol="REEMF"))
 
-    with pytest.raises(ProviderDataError):
+    with pytest.raises(SymbolNotFoundError):
         await YahooMarketData().profile("REEMF")
 
 
-async def test_profile_missing_exchange_is_a_data_error(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_profile_missing_exchange_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     _use_info(monkeypatch, {"longName": "No Exchange Inc."})
 
-    with pytest.raises(ProviderDataError):
+    with pytest.raises(SymbolNotFoundError):
         await YahooMarketData().profile("AAPL")
 
 
 async def test_profile_description_with_sentence_end_exactly_at_the_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    text = "x" * 3998 + ". " + "tail without end"  # the period is character 4000
+    text = "x" * 3998 + ". " + "tail without end"  # the period is character 3999 (index 3998)
     _use_info(monkeypatch, _info(longBusinessSummary=text))
 
     result = (await YahooMarketData().profile("AAPL")).description
@@ -222,3 +222,14 @@ def test_company_profile_model_keeps_only_absolute_http_websites(
     raw: str | None, expected: str | None
 ) -> None:
     assert CompanyProfile(website=raw).website == expected
+
+
+async def test_profile_description_whose_period_sits_at_index_4000_stays_within_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_info(monkeypatch, _info(longBusinessSummary="x" * 4000 + ". more"))
+
+    result = (await YahooMarketData().profile("AAPL")).description
+
+    assert result is not None
+    assert len(result) <= 4000

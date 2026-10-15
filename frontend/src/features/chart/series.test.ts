@@ -1,4 +1,5 @@
 import { renderHook } from '@testing-library/react';
+import { useMemo } from 'react';
 import type { IChartApi } from 'lightweight-charts';
 import type { ChartData, SeriesPoint } from '../../api/types';
 import { tokens } from '../../theme/tokens';
@@ -14,6 +15,7 @@ const data: ChartData = {
   symbol: 'AAPL',
   range: '6M',
   interval: '1d',
+  visible_from: '2026-10-02',
   candles: [1, 2, 3].map((d) => ({
     time: `2026-10-0${d}`,
     open: 10,
@@ -130,6 +132,7 @@ function fakeChart() {
   const stretch = [1, 2, 3].map(() => vi.fn<(factor: number) => void>());
   const timeScale = {
     fitContent: vi.fn(),
+    setVisibleRange: vi.fn(),
     getVisibleLogicalRange: vi.fn(() => ({ from: 10, to: 40 })),
     setVisibleLogicalRange: vi.fn(),
   };
@@ -225,5 +228,36 @@ describe('useChartSeries', () => {
 
     rerender({ selection: ['rsi'], fitKey: 'AAPL|1W' });
     expect(timeScale.fitContent).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('useChartSeries view', () => {
+  const view = { startIndex: 1, barCount: 3 };
+
+  it('shows the chosen range, not the whole history, for a new symbol or range', () => {
+    const { chart, timeScale } = fakeChart();
+    const specs = buildSeriesSpecs(data, [], p);
+    renderHook(() => useChartSeries(chart, specs, 420, 'AAPL|6M', view));
+    // The final range (not just some call) is the start bar to the last bar.
+    expect(timeScale.setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 1, to: 2 });
+    expect(timeScale.fitContent).not.toHaveBeenCalled();
+  });
+
+  it('keeps the zoom when indicators toggle, and resets for a new range', () => {
+    const { chart, timeScale } = fakeChart();
+    const { rerender } = renderHook(
+      ({ selection, fitKey }) => {
+        const specs = useMemo(() => buildSeriesSpecs(data, selection, p), [selection]);
+        return useChartSeries(chart, specs, 420, fitKey, view);
+      },
+      { initialProps: { selection: [] as IndicatorId[], fitKey: 'AAPL|6M' } },
+    );
+    expect(timeScale.setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 1, to: 2 });
+
+    rerender({ selection: ['rsi'], fitKey: 'AAPL|6M' });
+    expect(timeScale.setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 10, to: 40 });
+
+    rerender({ selection: ['rsi'], fitKey: 'AAPL|1Y' });
+    expect(timeScale.setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 1, to: 2 });
   });
 });

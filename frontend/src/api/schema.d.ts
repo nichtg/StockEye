@@ -449,6 +449,8 @@ export interface components {
        * @enum {string}
        */
       interval: '1d' | '1h';
+      /** Visible From */
+      visible_from: string | number;
       /** Candles */
       candles: components['schemas']['Candle'][];
       /** Indicators */
