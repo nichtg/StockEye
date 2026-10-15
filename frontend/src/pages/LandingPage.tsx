@@ -3,8 +3,9 @@ import Button from '@mui/material/Button';
 import { styled } from '@mui/material/styles';
 import Typography from '@mui/material/Typography';
 import { Link as RouterLink } from 'react-router';
-import homeDark from '../assets/landing/home-dark.webp';
-import homeLight from '../assets/landing/home-light.webp';
+import discoverDark from '../assets/landing/discover-dark.webp';
+import discoverLight from '../assets/landing/discover-light.webp';
+import macroDark from '../assets/landing/macro-dark.webp';
 import macroLight from '../assets/landing/macro-light.webp';
 import stockDark from '../assets/landing/stock-dark.webp';
 import stockLight from '../assets/landing/stock-light.webp';
@@ -33,22 +34,23 @@ const features: Feature[] = [
   {
     title: 'The week ahead, in one line',
     body: 'The Technical tab sums up the short-term lean as bullish, neutral or bearish. Candlestick patterns and indicators sit underneath, each explained in plain words, on a chart you can move and zoom.',
-    alt: 'A StockEye stock page: a candlestick chart for Apple with earnings and dividend markers, and a short-term lean of bullish with the signals behind it.',
-    light: { src: stockLight, width: 1440, height: 1100 },
-    dark: { src: stockDark, width: 1440, height: 1100 },
+    alt: 'A StockEye stock page for Apple: price, sector and country, chart controls and indicator chips above a candlestick chart with earnings and dividend markers.',
+    light: { src: stockLight, width: 1504, height: 1280 },
+    dark: { src: stockDark, width: 1504, height: 1280 },
   },
   {
     title: 'What the news really did',
     body: 'The Macro tab compares each news day over the past two years with what the market alone would have predicted. You see whether the news moved the price or whether it was just the market. The News tab lists the last six months of articles.',
-    alt: 'The Macro tab for DBS Group: plain sentences on what the news did to the price, and a weekly sentiment chart.',
-    light: { src: macroLight, width: 1440, height: 1020 },
+    alt: 'The Macro tab for DBS Group: plain sentences on what the news did to the price over 29 news days, each with how likely it is to be chance.',
+    light: { src: macroLight, width: 1504, height: 774 },
+    dark: { src: macroDark, width: 1504, height: 774 },
   },
   {
     title: 'Find smaller companies to look into',
     body: 'Discover brings you nightly lists of smaller US and Singapore companies. Keep the ones you like on your watchlist, and sort it by country.',
-    alt: 'A StockEye watchlist: a table of stocks with last price, one-week change, a small trend line and an outlook.',
-    light: { src: homeLight, width: 1440, height: 900 },
-    dark: { src: homeDark, width: 1440, height: 900 },
+    alt: 'The Discover page: a list of smaller US companies with their country, market value, price, one-week change, trend line and outlook.',
+    light: { src: discoverLight, width: 1504, height: 1040 },
+    dark: { src: discoverDark, width: 1504, height: 1040 },
   },
 ];
 
