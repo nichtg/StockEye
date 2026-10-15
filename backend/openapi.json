@@ -1180,6 +1180,28 @@
               }
             ],
             "title": "Label"
+          },
+          "ci_low_0_1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Low 0 1"
+          },
+          "ci_high_0_1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci High 0 1"
           }
         },
         "type": "object",
@@ -2107,6 +2129,17 @@
               }
             ],
             "title": "Earnings Note"
+          },
+          "verdicts": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictOut"
+            },
+            "type": "array",
+            "title": "Verdicts"
+          },
+          "value_statement": {
+            "type": "string",
+            "title": "Value Statement"
           }
         },
         "type": "object",
@@ -2124,7 +2157,9 @@
           "regime",
           "timeline",
           "events_total",
-          "events_insufficient"
+          "events_insufficient",
+          "verdicts",
+          "value_statement"
         ],
         "title": "MacroReportOut"
       },
@@ -3570,6 +3605,52 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerdictOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "good_news",
+              "bad_news",
+              "overall"
+            ],
+            "title": "Id"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "answer_kind": {
+            "type": "string",
+            "enum": [
+              "clear",
+              "possible",
+              "none",
+              "opposite",
+              "insufficient"
+            ],
+            "title": "Answer Kind"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "question",
+          "answer",
+          "answer_kind",
+          "detail"
+        ],
+        "title": "VerdictOut",
+        "description": "One plain question with a one-word answer chip and one supporting sentence."
       },
       "WatchlistOut": {
         "properties": {
