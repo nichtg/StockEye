@@ -1730,6 +1730,18 @@
             ],
             "title": "Status Reason"
           },
+          "status_as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status As Of"
+          },
           "pe_ratio": {
             "anyOf": [
               {
@@ -2764,6 +2776,18 @@
               }
             ],
             "title": "Status Reason"
+          },
+          "status_as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status As Of"
           }
         },
         "type": "object",

@@ -1,8 +1,10 @@
 """Fixed-window call quotas per provider, plus last-error health, in MongoDB.
 
 Consumption is atomic: one ``find_one_and_update`` guarded by ``used < limit`` on a document
-unique per (provider, window, start). A duplicate-key error on the upsert means the document
-exists and is full.
+unique per (provider, window, start). A duplicate-key error on the upsert does NOT mean the
+window is full: when the document does not exist yet, concurrent callers all miss the filter and
+race to insert, and the unique index rejects the losers. The document exists by then, so the
+loser retries the conditional update; only a miss on an existing document means full.
 """
 
 import math
@@ -58,15 +60,19 @@ class QuotaLedger:
         self, provider: str, window: Window, start: datetime, limit: int, ttl: timedelta
     ) -> Document | None:
         """Atomically add one call to a window. None means the window is already full."""
+        filter_ = {"provider": provider, "window": window, "start": start, "used": {"$lt": limit}}
+        update = {"$inc": {"used": 1}, "$setOnInsert": {"expires_at": start + ttl}}
         try:
             return await self._db[QUOTA].find_one_and_update(
-                {"provider": provider, "window": window, "start": start, "used": {"$lt": limit}},
-                {"$inc": {"used": 1}, "$setOnInsert": {"expires_at": start + ttl}},
-                upsert=True,
-                return_document=ReturnDocument.AFTER,
+                filter_, update, upsert=True, return_document=ReturnDocument.AFTER
             )
         except DuplicateKeyError:
-            return None
+            # Either we lost the insert race or the document is full and the upsert collided with
+            # it. Either way the document exists now, so a plain update (no upsert, hence no more
+            # insert races) is decisive: a miss means the window is full.
+            return await self._db[QUOTA].find_one_and_update(
+                filter_, update, upsert=False, return_document=ReturnDocument.AFTER
+            )
 
     async def _flag_once(self, provider: str, window: Window, start: datetime, flag: str) -> bool:
         """Set ``flag`` on the window document only if unset; True means we were first."""

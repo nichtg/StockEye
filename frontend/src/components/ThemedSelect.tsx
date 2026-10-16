@@ -4,11 +4,13 @@ import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import Typography from '@mui/material/Typography';
 import { useId } from 'react';
-import { countSx, type Choice } from './Choice';
+import type { Choice } from './Choice';
+import { visuallyHidden } from '../lib/a11y';
+import { LabelWithCount } from './LabelWithCount';
 
 /**
  * A non-native single-choice menu in the app's look: static label above the field, ink-toned
- * highlight, a check on the chosen item, counts right-aligned. The first item is the "all" /
+ * highlight, a check on the chosen item, count badges after the label. The first item is the "all" /
  * default entry and carries a bottom border as its divider (a Divider child would become a
  * bogus, clickable option).
  */
@@ -18,12 +20,15 @@ export function ThemedSelect({
   value,
   onChange,
   minWidth,
+  unit,
 }: {
   label: string;
   choices: Choice[];
   value: string;
   onChange: (value: string) => void;
   minWidth: number;
+  /** What the counts count (singular, plural): gives each option a spoken "42 articles". */
+  unit?: readonly [string, string];
 }) {
   const labelId = useId();
   const current = choices.find((c) => c.value === value);
@@ -43,7 +48,22 @@ export function ThemedSelect({
         displayEmpty
         labelId={labelId}
         value={value}
-        renderValue={() => current?.label ?? value}
+        renderValue={() => {
+          const text = current?.label ?? value;
+          if (current?.count === undefined) return text;
+          return (
+            <>
+              <LabelWithCount count={current.count} hideBadgeFromSpeech>
+                {text}
+              </LabelWithCount>
+              {unit && (
+                <Box component="span" sx={visuallyHidden}>
+                  , {current.count} {current.count === 1 ? unit[0] : unit[1]}
+                </Box>
+              )}
+            </>
+          );
+        }}
         onChange={(e) => {
           onChange(e.target.value);
         }}
@@ -54,6 +74,11 @@ export function ThemedSelect({
           <MenuItem
             key={c.value}
             value={c.value}
+            aria-label={
+              unit && c.count !== undefined
+                ? `${c.label}, ${String(c.count)} ${c.count === 1 ? unit[0] : unit[1]}`
+                : undefined
+            }
             sx={{
               gap: 1,
               ...(i === 0 && { borderBottom: 1, borderColor: 'line', mb: 0.5 }),
@@ -69,13 +94,12 @@ export function ThemedSelect({
               aria-hidden="true"
               sx={{ visibility: c.value === value ? 'visible' : 'hidden', flexShrink: 0 }}
             />
-            <Box component="span" sx={{ flexGrow: 1 }}>
-              {c.label}
-            </Box>
-            {c.count !== undefined && (
-              <Box component="span" sx={{ ml: 2, ...countSx }}>
-                {c.count}
-              </Box>
+            {c.count === undefined ? (
+              c.label
+            ) : (
+              <LabelWithCount count={c.count} inverted={c.value === value}>
+                {c.label}
+              </LabelWithCount>
             )}
           </MenuItem>
         ))}

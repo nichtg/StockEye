@@ -319,6 +319,14 @@ describe('StockTable on a phone', () => {
     expect(within(list).getAllByText('10.0')).toHaveLength(4);
   });
 
+  it('shows the stale-price note under the price, so touch users can reach it', () => {
+    renderApp(<Harness rows={[row('AAA', { status: 'stale', status_as_of: null })]} />);
+    const list = screen.getByRole('list', { name: 'Test list' });
+    expect(
+      within(list).getByRole('button', { name: "Last saved price, couldn't refresh" }),
+    ).toBeInTheDocument();
+  });
+
   it('shows the country under the name and a Sort by select', async () => {
     const user = userEvent.setup();
     renderApp(<Harness />);

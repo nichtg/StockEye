@@ -128,7 +128,7 @@ export default function StockPage() {
           ) : tab === 'macro' ? (
             <MacroTab symbol={symbol} exchange={exchange} news={news.data} />
           ) : (
-            <NewsTab symbol={symbol} name={stock.data?.name} exchange={exchange} news={news.data} />
+            <NewsTab symbol={symbol} exchange={exchange} news={news.data} />
           )}
         </Box>
       </Box>

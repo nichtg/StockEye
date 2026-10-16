@@ -23,6 +23,7 @@ import { radius } from '../../theme/tokens';
 import { Direction } from '../Direction';
 import { Term } from '../Term';
 import { COLUMNS, effectiveSort, type ColumnId } from './columns';
+import { StaleNote } from './StaleNote';
 import { filterRows, sortRows, type SortKey, type SortState, type StockRow } from './sortFilter';
 import { formatPrice } from '../../lib/format';
 import type { TableState } from './useTableState';
@@ -243,6 +244,7 @@ function MobileList({ rows, ariaLabel, renderAction, columns }: ListProps) {
                   <Box sx={{ color: 'ink', fontWeight: 500, fontSize: '0.9375rem' }}>
                     {formatPrice(row.last_price, row.currency, row.exchange)}
                   </Box>
+                  <StaleNote row={row} />
                   {columns.map((id) => {
                     const line = COLUMNS[id].mobile?.(row);
                     return line ? (
