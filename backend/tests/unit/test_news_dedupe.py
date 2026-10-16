@@ -72,3 +72,14 @@ def test_fold_repeated_key_in_one_batch_is_left_to_the_upsert() -> None:
     new = [_story("k", NEUTRON, 13), _story("k", NEUTRON, 13)]
 
     assert fold_near_duplicates(new, [], NY, IGNORE) == {}
+
+
+def test_fold_outcome_does_not_depend_on_the_order_of_stored_stories() -> None:
+    older = _story("a-older", NEUTRON, 12)
+    newer = _story("b-newer", "Rocket Lab delays Neutron debut to 2027", 14)
+    new = [_story("n", NEUTRON_ALT, 16)]
+
+    forward = fold_near_duplicates(new, [older, newer], NY, IGNORE)
+    backward = fold_near_duplicates(new, [newer, older], NY, IGNORE)
+
+    assert forward == backward == {"n": "a-older"}  # the earliest stored story is the head

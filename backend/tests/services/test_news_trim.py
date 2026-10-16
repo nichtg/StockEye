@@ -1,5 +1,6 @@
 """Trimming news at ingest (near-duplicates, low-value items), the flags and the macro input."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -10,9 +11,15 @@ from app.db import Database
 from app.domain.macro import is_price_recap
 from app.domain.news import is_low_value
 from app.providers.models import NewsItem, NewsQuery
-from app.repositories.news import ARTICLES, SIMILAR_CAP, NewsRepository, dedupe_key
+from app.repositories.news import ARTICLES, SIMILAR_CAP, STATE, dedupe_key
+from app.repositories.news_maintenance import (
+    NewsMaintenanceRepository,
+    SimilarEntry,
+    similar_entry,
+)
 from app.services.container import Services
-from app.services.news import NewsService, backfill_news_flags
+from app.services.news import NewsService
+from app.services.news_trim import backfill_stored_news
 from tests.services.fakes import CLOSED_NOW, FakeClock, FakeScorer
 from tests.services.test_news_feed import seed
 
@@ -178,10 +185,10 @@ async def test_backfill_flags_marks_old_documents_and_is_idempotent(db: Database
     await seed(db, "AAPL", "Apple Inc. $AAPL Holdings Trimmed by Birch Capital", DAY)
     await seed(db, "AAPL", "Apple unveils new MacBook lineup", DAY)
 
-    first = await backfill_news_flags(db)
-    second = await backfill_news_flags(db)
+    first = await backfill_stored_news(db)
+    second = await backfill_stored_news(db)
 
-    assert (first, second) == (3, 0)
+    assert (first.flagged, second.flagged) == (3, 0)
     docs = {d["title"]: d async for d in db[ARTICLES].find({})}
     assert len(docs) == 3  # flagged documents stay stored
     assert docs[recap]["is_recap"] is True
@@ -191,12 +198,14 @@ async def test_backfill_flags_marks_old_documents_and_is_idempotent(db: Database
 
 
 async def test_backfill_flags_never_raises(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def boom(_self: NewsRepository) -> int:
+    async def boom(_self: NewsMaintenanceRepository) -> int:
         raise RuntimeError("mongo down")
 
-    monkeypatch.setattr(NewsRepository, "backfill_flags", boom)
+    monkeypatch.setattr(NewsMaintenanceRepository, "backfill_flags", boom)
 
-    assert await backfill_news_flags(db) == 0
+    summary = await backfill_stored_news(db)
+
+    assert (summary.flagged, summary.folded) == (0, 0)
 
 
 async def test_month_counts_exclude_recaps_and_low_value_and_match_the_title_scan(
@@ -215,7 +224,7 @@ async def test_month_counts_exclude_recaps_and_low_value_and_match_the_title_sca
     ]
     for title, when in rows:
         await seed(db, "AAPL", title, when)
-    await NewsRepository(db).backfill_flags()
+    await NewsMaintenanceRepository(db).backfill_flags()
 
     page = await services.news_feed.page("AAPL")
 
@@ -233,7 +242,7 @@ async def test_month_counts_exclude_recaps_and_low_value_and_match_the_title_sca
 async def test_feed_excludes_low_value_documents(db: Database, services: Services) -> None:
     await seed(db, "AAPL", "Apple unveils new MacBook lineup", DAY)
     await seed(db, "AAPL", "Apple Inc. $AAPL Holdings Trimmed by Birch Capital", DAY)
-    await NewsRepository(db).backfill_flags()
+    await NewsMaintenanceRepository(db).backfill_flags()
 
     page = await services.news_feed.page("AAPL")
 
@@ -317,10 +326,173 @@ async def test_scored_articles_for_the_study_never_include_low_value_documents(
         CLOSED_NOW - timedelta(days=3),
         0.5,
     )
-    await NewsRepository(db).backfill_flags()
+    await NewsMaintenanceRepository(db).backfill_flags()
 
     articles, _ = await services.news.scored_articles(
         "AAPL", CLOSED_NOW - timedelta(days=30), CLOSED_NOW
     )
 
     assert [a.title for a in articles] == ["Apple unveils new MacBook lineup"]
+
+
+async def test_ingest_inserted_documents_never_carry_is_low_value_true(
+    db: Database, clock: FakeClock
+) -> None:
+    items = [
+        _news("Apple Inc. $AAPL Stake Cut by Denali Advisors LLC", DAY),
+        _news("Apple unveils new MacBook lineup", DAY, "Wire B"),
+        _news("Apple stock drops 6% after report", DAY, "Wire C"),
+    ]
+
+    await _run(db, clock, items)
+
+    flags = [d["is_low_value"] async for d in db[ARTICLES].find({})]
+    assert flags == [False, False]  # the filing was dropped, never stored with the flag
+
+
+async def test_ingest_item_folded_for_one_symbol_is_still_stored_for_another(
+    db: Database, clock: FakeClock
+) -> None:
+    first = "Apple and Microsoft sign a big cloud deal for Siri"
+    second = "Apple and Microsoft: big Siri cloud deal signed"
+    await _run(
+        db, clock, [_news(first, DAY, "Wire A"), _news(second, DAY + timedelta(hours=1), "Wire B")]
+    )
+    assert await db[ARTICLES].count_documents({"title": second}) == 0  # folded for AAPL
+    clock.now += timedelta(hours=7)
+
+    # MSFT has nothing kept that day, so for MSFT the same item is a story of its own.
+    await _run(db, clock, [_news(second, DAY + timedelta(hours=1), "Wire B")], symbol="MSFT")
+
+    stored = await db[ARTICLES].find_one({"title": second})
+    assert stored is not None
+    assert stored["symbols"] == ["MSFT"]
+
+
+async def test_ingest_item_already_stored_on_another_day_is_not_a_duplicate_candidate(
+    db: Database, clock: FakeClock
+) -> None:
+    await _run(db, clock, [_news(FOLDABLE, DAY, "Wire A")])
+    clock.now += timedelta(hours=7)
+
+    # The same article, now reported a day later: already stored, so nothing is folded.
+    await _run(db, clock, [_news(FOLDABLE, DAY + timedelta(days=1), "Wire A")])
+
+    docs = await _docs(db)
+    assert len(docs) == 1
+    assert "similar_count" not in docs[f"{FOLDABLE}|Wire A"]
+
+
+async def test_ingest_stored_recap_is_never_a_fold_target(db: Database, clock: FakeClock) -> None:
+    recap = "Apple shares jump 5% on iPhone launch news today"
+    assert is_price_recap(recap)
+    await seed(db, "AAPL", recap, DAY)  # stored but not flagged yet (backfill has not run)
+
+    await _run(db, clock, [_news("Apple shares jump on iPhone launch news today", DAY, "Wire B")])
+
+    docs = await _docs(db)
+    assert len(docs) == 2
+    assert all("similar_count" not in d for d in docs.values())
+
+
+async def test_add_similar_is_atomic_and_idempotent_under_concurrent_writers(
+    db: Database,
+) -> None:
+    await seed(db, "AAPL", FOLDABLE, DAY)
+    main = dedupe_key(FOLDABLE, "Wire")
+    maint = NewsMaintenanceRepository(db)
+    entries: list[SimilarEntry] = [
+        similar_entry(_news(FOLDABLE_ALT, DAY + timedelta(minutes=n), f"Wire {n}"))
+        for n in range(1, 9)
+    ]
+
+    results = await asyncio.gather(*(maint.add_similar({main: [e]}) for e in entries))
+    again = await maint.add_similar({main: entries})
+
+    doc = await db[ARTICLES].find_one({"dedupe_key": main})
+    assert doc is not None
+    assert sum(results) == 8
+    assert again == 0
+    assert doc["similar_count"] == 8
+    assert len(doc["similar_keys"]) == 8
+    assert [e["source"] for e in doc["similar"]][:2] == ["Wire 8", "Wire 7"]
+
+
+async def test_backfill_folds_stored_near_duplicates_and_is_idempotent(db: Database) -> None:
+    for n in range(12):  # ordinary Apple headlines, one a day, so "apple" is the shared word
+        await seed(
+            db, "AAPL", f"Apple filler headline number{n} {'x' * n}", DAY - timedelta(days=n + 3)
+        )
+    await seed(db, "AAPL", FOLDABLE, DAY)  # earliest of the day: stays
+    await seed(db, "AAPL", FOLDABLE_ALT, DAY + timedelta(hours=1))
+    await seed(db, "AAPL", "Apple delays foldable iPhone debut to 2027", DAY + timedelta(hours=2))
+    await seed(db, "AAPL", "Apple unveils new MacBook lineup", DAY)  # unrelated: stays
+    await seed(db, "AAPL", FOLDABLE, DAY + timedelta(days=2))  # another day: stays
+    # A duplicate that another symbol also holds only loses AAPL.
+    shared = "Apple delays foldable iPhone launch until 2027"
+    await seed(db, "AAPL", shared, DAY + timedelta(hours=3), symbols=["AAPL", "MSFT"])
+
+    first = await backfill_stored_news(db)
+    second = await backfill_stored_news(db)
+
+    assert (first.folded, second.folded) == (3, 0)
+    main = await db[ARTICLES].find_one({"title": FOLDABLE, "published_at": DAY})
+    assert main is not None
+    assert main["similar_count"] == 3
+    assert {e["title"] for e in main["similar"]} == {
+        FOLDABLE_ALT,
+        "Apple delays foldable iPhone debut to 2027",
+        shared,
+    }
+    assert await db[ARTICLES].count_documents({"title": FOLDABLE_ALT}) == 0  # nobody else held it
+    kept_shared = await db[ARTICLES].find_one({"title": shared})
+    assert kept_shared is not None
+    assert kept_shared["symbols"] == ["MSFT"]  # AAPL was unlinked, MSFT keeps the story
+    state = await db[STATE].find_one({"symbol": "AAPL"})
+    assert state is not None
+    assert state["dedupe_version"] == 1
+
+
+async def test_backfill_leaves_recaps_and_other_days_alone(db: Database) -> None:
+    recap = "Apple shares jump 5% on iPhone launch news today"
+    await seed(db, "AAPL", recap, DAY)
+    await seed(
+        db, "AAPL", "Apple shares jump on iPhone launch news today", DAY + timedelta(hours=1)
+    )
+    await seed(db, "AAPL", FOLDABLE, DAY)
+    await seed(db, "AAPL", FOLDABLE_ALT, DAY + timedelta(days=1))
+
+    summary = await backfill_stored_news(db)
+
+    assert summary.folded == 0
+    assert await db[ARTICLES].count_documents({}) == 4
+
+
+async def test_backfill_fold_failure_for_one_symbol_is_logged_not_raised(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await seed(db, "AAPL", FOLDABLE, DAY)
+
+    async def boom(_self: NewsMaintenanceRepository, _symbol: str) -> list[object]:
+        raise RuntimeError("mongo hiccup")
+
+    monkeypatch.setattr(NewsMaintenanceRepository, "showable_articles", boom)
+
+    summary = await backfill_stored_news(db)
+
+    assert summary.folded == 0
+    assert await db[STATE].count_documents({"dedupe_version": {"$exists": True}}) == 0  # retried
+
+
+async def test_service_backfill_runs_in_the_background_and_shutdown_cancels_it(
+    db: Database, services: Services
+) -> None:
+    await seed(db, "AAPL", "Apple stock drops 6% after report", DAY)
+
+    services.news.backfill_flags()
+    services.news.backfill_flags()  # idempotent while one is running or done
+    await services.aclose()
+
+    # Either it finished before the cancel or it was cancelled cleanly; it never raises.
+    doc = await db[ARTICLES].find_one({})
+    assert doc is not None

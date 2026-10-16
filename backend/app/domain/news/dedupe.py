@@ -31,12 +31,13 @@ def fold_near_duplicates(
 
     A new story folds into a ``stored`` article, or into an earlier new story, when the two
     were published on the same ``tz`` day and ``cluster_stories`` calls them near-duplicates.
-    The stored article always stays the main one; among new stories the earliest published
-    stays (ties by key, so the outcome never depends on fetch order). Stories whose key is
-    already stored, or repeated within ``new``, are not duplicates of anything: they are
-    left out of the result (the caller upserts them as usual). ``ignore`` holds company-name
-    and ticker words every headline shares.
+    The stored article always stays the main one (the earliest of them); among new stories the
+    earliest published stays (ties by key, so the outcome never depends on fetch order).
+    Stories whose key is already stored, or repeated within ``new``, are not duplicates of
+    anything: they are left out of the result (the caller upserts them as usual). ``ignore``
+    holds company-name and ticker words every headline shares.
     """
+    stored = sorted(stored, key=lambda s: (s.published_at, s.key))  # a deterministic head
     stored_keys = {s.key for s in stored}
     fresh: dict[str, Story] = {}
     for story in sorted(new, key=lambda s: (s.published_at, s.key)):

@@ -7,21 +7,19 @@ their ``YYYY-MM`` keys stay stable from day to day) fetched from one ``backfill`
 current, partial month is covered by the incremental pass over every ``live`` provider that covers
 the symbol's exchange. Providers arrive already guarded.
 
-Before storing, items that carry no news are dropped (fund-holdings filings, quote tickers) and
-same-day near-duplicates of an article already kept for the symbol are folded into it (see
-``NewsService._store``), which keeps the collection, the scoring work and the macro study lean.
+Before storing, no-news items and same-day near-duplicates are trimmed (``services.news_trim``).
 """
 
 import asyncio
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, timedelta
 
 from app.clock import utc_now
 from app.db import Database
-from app.domain.macro import ScoredArticle, is_price_recap
-from app.domain.news import Story, fold_near_duplicates, is_low_value
+from app.domain.macro import ScoredArticle
+from app.domain.news import core_name
 from app.logging_setup import get_logger
 from app.providers.base import NewsProvider
 from app.providers.errors import ProviderError, QuotaExhaustedError
@@ -32,10 +30,11 @@ from app.repositories.news import (
     IngestState,
     NewsRepository,
     SentimentRecord,
-    dedupe_key,
 )
+from app.repositories.news_maintenance import NewsMaintenanceRepository
 from app.sentiment.scorer import SentimentScore, SentimentScorer, SentimentUnavailableError
-from app.services.calendars import exchange_for, exchange_tz, root_ticker
+from app.services.calendars import exchange_for, root_ticker
+from app.services.news_trim import backfill_stored_news, trim_items
 from app.services.status import DataStatus, ok
 
 log = get_logger(__name__)
@@ -49,28 +48,11 @@ SCORE_BATCH = 64
 # Vendor error text can echo request details, so state (shown to users) gets this instead.
 INGEST_FAILED = "News collection failed; it will retry automatically."
 
-_SUFFIXES = frozenset(
-    {"inc", "corp", "corporation", "ltd", "limited", "holdings", "group", "co", "plc", "nv", "sa"}
-)
-_NAME_NOISE = re.compile(r"[^\w&\s-]")
-_SPACES = re.compile(r"\s+")
 _MIN_TICKER_LENGTH = 3
 
 SENTIMENT_DOWN_REASON = (
     "News sentiment is unavailable: the sentiment model is not installed or could not be loaded."
 )
-
-
-def core_name(company_name: str) -> str:
-    """Company name without legal suffixes and punctuation, e.g. "DBS Group Holdings Ltd" -> "DBS".
-
-    Only trailing suffix words are stripped, so a name that is nothing but suffixes is kept whole.
-    """
-    cleaned = _SPACES.sub(" ", _NAME_NOISE.sub("", company_name.replace(".", ""))).strip()
-    words = cleaned.split(" ")
-    while len(words) > 1 and words[-1].lower() in _SUFFIXES:
-        words.pop()
-    return " ".join(words)
 
 
 def is_relevant(symbol: str, company_name: str, title: str, summary: str | None) -> bool:
@@ -88,38 +70,10 @@ def is_relevant(symbol: str, company_name: str, title: str, summary: str | None)
     )
 
 
-def ignore_tokens(symbol: str, company_name: str) -> set[str]:
-    """Words every headline about the symbol shares: ticker parts and the company's core name.
-
-    ("D05.SI" gives d05 and si; "Rocket Lab Holdings, Inc." gives rocket and lab.)
-    """
-    text = f"{symbol} {core_name(company_name)}"
-    return {part for part in re.split(r"[^a-z0-9]+", text.lower()) if part}
-
-
 @dataclass
-class _RunCounts:
-    """What one ingest run left out, for its single log line."""
-
+class _RunCounts:  # what one ingest run left out, for its single log line
     low_value: int = 0
     near_duplicates: int = 0
-
-
-async def backfill_news_flags(db: Database) -> int:
-    """One-off, idempotent: flag stored articles that predate ``is_recap`` / ``is_low_value``.
-
-    Meant to run as a background task at startup. Never raises (failures are logged); returns
-    how many documents were updated.
-    """
-    try:
-        count = await NewsRepository(db).backfill_flags()
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        log.exception("news_flag_backfill_failed")
-        return 0
-    log.info("news_flag_backfill_finished", updated=count)
-    return count
 
 
 @dataclass(frozen=True)
@@ -162,12 +116,16 @@ class NewsService:
         max_concurrent: int = 2,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
+        self._db = db
         self._repo = NewsRepository(db)
+        self._maint = NewsMaintenanceRepository(db)
         self._backfill = backfill  # the one adapter that can reach far back
         self._live = live
         self._scorer = scorer
         self._clock = clock
         self._tasks: dict[str, asyncio.Task[None]] = {}  # running ingestions only
+        self._runs: dict[str, _RunCounts] = {}  # trimming counts of the runs in progress
+        self._backfill_task: asyncio.Task[object] | None = None
         self._gate = asyncio.Semaphore(max_concurrent)  # vendors and the scorer are shared
 
     # --- ingestion -------------------------------------------------------------------------
@@ -223,10 +181,22 @@ class NewsService:
             tasks = [self._tasks[symbol]] if symbol in self._tasks else []
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    def backfill_flags(self) -> None:
+        """Start the one-off tidy of stored news (flags, folding) in the background; idempotent.
+
+        Never blocks or raises; ``shutdown`` cancels it. The caller can go once every deployment
+        has run it.
+        """
+        if self._backfill_task is None or self._backfill_task.done():
+            self._backfill_task = asyncio.create_task(backfill_stored_news(self._db))
+
     async def shutdown(self) -> None:
-        for task in self._tasks.values():
+        tasks: list[asyncio.Task[None] | asyncio.Task[object]] = list(self._tasks.values())
+        if self._backfill_task is not None:
+            tasks.append(self._backfill_task)
+        for task in tasks:
             task.cancel()
-        await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
 
     async def _run(
@@ -234,6 +204,7 @@ class NewsService:
     ) -> None:
         """The task body. Catches everything: a background task must never take the app down."""
         failed = False
+        counts = self._runs[symbol] = _RunCounts()
         try:
             async with self._gate:
                 await self._repo.begin_run(symbol, self._clock())
@@ -248,6 +219,13 @@ class NewsService:
             await self._repo.end_run(symbol, error)
         except Exception:
             log.exception("news_ingest_state_write_failed", symbol=symbol)
+        del self._runs[symbol]
+        log.info(
+            "news_ingest_trimmed",
+            symbol=symbol,
+            low_value=counts.low_value,
+            near_duplicates=counts.near_duplicates,
+        )
 
     async def _ingest(
         self, symbol: str, company_name: str, windows: list[tuple[datetime, datetime]]
@@ -255,33 +233,15 @@ class NewsService:
         """Backfill then incremental pass; True if any window failed (details are logged)."""
         state = await self._repo.get_state(symbol)
         missing = _missing(windows, state)
-        counts = _RunCounts()
         try:
-            return await self._ingest_windows(symbol, company_name, missing, counts)
-        finally:
-            log.info(
-                "news_ingest_trimmed",
-                symbol=symbol,
-                low_value=counts.low_value,
-                near_duplicates=counts.near_duplicates,
-            )
-
-    async def _ingest_windows(
-        self,
-        symbol: str,
-        company_name: str,
-        missing: list[tuple[datetime, datetime]],
-        counts: _RunCounts,
-    ) -> bool:
-        try:
-            failures = await self._backfill_months(symbol, company_name, missing, counts)
+            failures = await self._backfill_months(symbol, company_name, missing)
         except QuotaExhaustedError as exc:
             # The daily budget is gone: every remaining window would fail the same way.
             log.warning("news_backfill_stopped", symbol=symbol, error=str(exc))
             return True
         now = self._clock()
         recent = self._query(symbol, company_name, now - timedelta(days=INCREMENTAL_DAYS), now)
-        incremental_failures = await self._incremental(symbol, company_name, recent, counts)
+        incremental_failures = await self._incremental(symbol, company_name, recent)
         if not incremental_failures:
             await self._repo.mark_incremental(symbol, now)
         return bool(failures or incremental_failures)
@@ -300,7 +260,6 @@ class NewsService:
         symbol: str,
         company_name: str,
         windows: list[tuple[datetime, datetime]],
-        counts: _RunCounts,
     ) -> int:
         """Fetch and store each missing month, newest first; returns how many were skipped.
 
@@ -327,13 +286,11 @@ class NewsService:
                     error=str(exc),
                 )
                 continue
-            await self._store(symbol, company_name, items, counts)
+            await self._store(symbol, company_name, items)
             await self._repo.mark_month_done(symbol, month)
         return failures
 
-    async def _incremental(
-        self, symbol: str, company_name: str, recent: NewsQuery, counts: _RunCounts
-    ) -> int:
+    async def _incremental(self, symbol: str, company_name: str, recent: NewsQuery) -> int:
         """Fetch the last ``INCREMENTAL_DAYS`` from every covering live provider; count failures.
 
         A provider that does not cover the query's exchange is skipped before it is called, so
@@ -353,52 +310,20 @@ class NewsService:
             elif isinstance(result, BaseException):
                 raise result
             else:
-                await self._store(symbol, company_name, result, counts)
+                await self._store(symbol, company_name, result)
         return failures
 
-    async def _store(
-        self, symbol: str, company_name: str, items: list[NewsItem], counts: _RunCounts
-    ) -> None:
-        """Keep the relevant, newsworthy items; fold same-day near-duplicates into kept ones.
-
-        A folded item is not stored for ``symbol``: it is recorded on the article that was kept
-        (``similar``). Articles are shared across symbols, so the same item may still be stored
-        for another symbol, where nothing like it is kept that day.
-        """
+    async def _store(self, symbol: str, company_name: str, items: list[NewsItem]) -> None:
+        """Keep the relevant, newsworthy items and fold same-day near-duplicates (``news_trim``)."""
         relevant = [i for i in items if is_relevant(symbol, company_name, i.title, i.summary)]
-        newsworthy = [i for i in relevant if not is_low_value(i.title)]
-        counts.low_value += len(relevant) - len(newsworthy)
-        keep, folds = await self._fold_duplicates(symbol, company_name, newsworthy)
-        counts.near_duplicates += sum(len(folded) for folded in folds.values())
-        await self._repo.upsert_articles(symbol, keep)
-        await self._repo.add_similar(folds)
+        trimmed = await trim_items(self._repo, symbol, company_name, relevant)
+        await self._repo.upsert_articles(symbol, trimmed.keep)
+        await self._maint.add_similar(trimmed.folds)
+        counts = self._runs.get(symbol)
+        if counts is not None:
+            counts.low_value += trimmed.low_value
+            counts.near_duplicates += trimmed.folded
         await self._score(symbol)
-
-    async def _fold_duplicates(
-        self, symbol: str, company_name: str, items: list[NewsItem]
-    ) -> tuple[list[NewsItem], dict[str, list[NewsItem]]]:
-        """Split ``items`` into those to store and ``{kept article key: its duplicates}``.
-
-        Price recaps are never folded (they are hidden from the feed, so nothing may hide
-        behind them and they hide nothing).
-        """
-        candidates = {
-            dedupe_key(i.title, i.source): i for i in items if not is_price_recap(i.title)
-        }
-        if not candidates:
-            return items, {}
-        tz = exchange_tz(symbol)
-        days = [i.published_at.astimezone(tz).date() for i in candidates.values()]
-        start = datetime.combine(min(days), time.min, tzinfo=tz).astimezone(UTC)
-        end = datetime.combine(max(days) + timedelta(days=1), time.min, tzinfo=tz).astimezone(UTC)
-        stored = await self._repo.stories_between(symbol, start, end)
-        new = [Story(key, i.title, i.published_at) for key, i in candidates.items()]
-        folded = fold_near_duplicates(new, stored, tz, ignore_tokens(symbol, company_name))
-        folds: dict[str, list[NewsItem]] = {}
-        for key, main in folded.items():
-            folds.setdefault(main, []).append(candidates[key])
-        keep = [i for i in items if dedupe_key(i.title, i.source) not in folded]
-        return keep, folds
 
     async def _score(self, symbol: str) -> None:
         """Score every unscored article for ``symbol`` in batches; stop quietly if no model."""

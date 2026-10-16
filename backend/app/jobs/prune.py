@@ -8,16 +8,16 @@ News is trimmed by date alone: articles older than 25 months go, for every symbo
 study reads 24 months, so the extra month is slack for the window edge).
 """
 
-import calendar
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from app.clock import utc_now
 from app.db import Database
+from app.domain.calendar_months import months_before
 from app.logging_setup import get_logger
 from app.repositories.bars import BarsRepository
 from app.repositories.events import EventsRepository
-from app.repositories.news import NewsRepository
+from app.repositories.news_maintenance import NewsMaintenanceRepository
 from app.repositories.watchlists import WatchlistsRepository
 from app.services.container import Services
 
@@ -33,14 +33,6 @@ class PruneSummary:
     bars: int
     events: int
     articles: int = 0  # news articles older than the retention window
-
-
-def months_before(moment: datetime, months: int) -> datetime:
-    """``moment`` shifted back by whole calendar months; the day is clamped to the month's end."""
-    index = moment.year * 12 + moment.month - 1 - months
-    year, month = divmod(index, 12)
-    day = min(moment.day, calendar.monthrange(year, month + 1)[1])
-    return moment.replace(year=year, month=month + 1, day=day)
 
 
 async def prune_orphan_market_data(
@@ -66,7 +58,7 @@ async def prune_orphan_market_data(
     articles = 0
     try:
         cutoff = months_before(now, NEWS_RETENTION_MONTHS)
-        articles = await NewsRepository(db).delete_published_before(cutoff)
+        articles = await NewsMaintenanceRepository(db).delete_published_before(cutoff)
     except Exception:
         log.exception("prune_news_failed")
     log.info(

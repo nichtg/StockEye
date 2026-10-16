@@ -8,6 +8,7 @@ import pytest
 
 from app.db import Database
 from app.repositories.news import NewsRepository
+from app.repositories.news_maintenance import NewsMaintenanceRepository
 from app.services.container import Services
 from app.services.errors import AppError
 from app.services.news_feed import NewsFeed
@@ -118,7 +119,9 @@ async def test_months_counts_exclude_recaps_omit_empty_months_and_are_newest_fir
     await seed(db, "AAPL", "aug one", datetime(2026, 8, 10, 15, tzinfo=UTC))
     await seed(db, "AAPL", "aug two", datetime(2026, 8, 11, 15, tzinfo=UTC))
     await seed(db, "MSFT", "msft only", datetime(2026, 7, 11, 15, tzinfo=UTC))
-    await NewsRepository(db).backfill_flags()  # the counts read the flags, as in production
+    await NewsMaintenanceRepository(
+        db
+    ).backfill_flags()  # the counts read the flags, as in production
 
     page = await services.news_feed.page("AAPL")
 

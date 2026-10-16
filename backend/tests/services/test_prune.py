@@ -4,10 +4,12 @@ import pytest
 from bson import ObjectId
 
 from app.db import Database
-from app.jobs.prune import months_before, prune_orphan_market_data
+from app.domain.calendar_months import months_before
+from app.jobs.prune import prune_orphan_market_data
 from app.repositories.bars import BarsRepository
 from app.repositories.events import EventsRepository
-from app.repositories.news import ARTICLES, STATE, NewsRepository
+from app.repositories.news import ARTICLES, STATE
+from app.repositories.news_maintenance import NewsMaintenanceRepository
 from app.repositories.watchlists import WatchlistsRepository
 from app.services.container import Services
 from tests.services.fakes import FakeClock, FakeMarketData
@@ -90,7 +92,7 @@ async def test_prune_news_failure_is_logged_not_raised(
     async def boom(*_args: object) -> int:
         raise RuntimeError("mongo down")
 
-    monkeypatch.setattr(NewsRepository, "delete_published_before", boom)
+    monkeypatch.setattr(NewsMaintenanceRepository, "delete_published_before", boom)
 
     summary = await prune_orphan_market_data(services, db, clock.now)
 

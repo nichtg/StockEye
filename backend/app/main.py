@@ -3,7 +3,6 @@
 Append new routers to ``ROUTERS`` and new repository index installers to ``INDEX_INSTALLERS``.
 """
 
-import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -30,7 +29,6 @@ from app.repositories import (
     watchlists,
 )
 from app.services.container import ServicesFactory, build_services
-from app.services.news import backfill_news_flags
 
 ROUTERS: list[APIRouter] = [
     health.router,
@@ -85,15 +83,14 @@ def create_app(
                 await schedule_startup_discover(scheduler, services)
             except Exception:  # a cache hiccup must not stop the app from starting
                 log.exception("discover_startup_schedule_failed")
-        # One-off flag backfill for articles stored before the flags existed. Background, so it
-        # never delays startup; it logs its own failures.
-        flag_backfill = asyncio.create_task(backfill_news_flags(db))
+        # One-off tidy of stored news (flags, retroactive near-duplicate folding). Runs in the
+        # background, owned by the news service (cancelled by ``services.aclose``). Once every
+        # deployment has been through it, this call can go.
+        services.news.backfill_flags()
         log.info("startup_complete", database=settings.mongodb_db)
         try:
             yield
         finally:
-            flag_backfill.cancel()
-            await asyncio.gather(flag_backfill, return_exceptions=True)
             if scheduler is not None:
                 scheduler.shutdown(wait=False)
             await services.aclose()

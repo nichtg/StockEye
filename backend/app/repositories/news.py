@@ -27,7 +27,6 @@ from app.providers.models import NewsItem
 ARTICLES = "news_articles"
 STATE = "news_ingest_state"
 SIMILAR_CAP = 10  # entries kept per article; ``similar_count`` still counts them all
-FLAG_BATCH = 500
 
 _PUNCT = re.compile(r"[^\w\s]")
 _SPACES = re.compile(r"\s+")
@@ -181,62 +180,18 @@ class NewsRepository:
         cursor = self._articles.find(
             {"symbols": symbol, "published_at": {"$gte": start, "$lt": end}, **SHOWABLE},
             {"title": 1, "published_at": 1, "dedupe_key": 1},
+            sort=[("published_at", ASCENDING), ("dedupe_key", ASCENDING)],  # a stable group head
         )
         return [Story(doc["dedupe_key"], doc["title"], doc["published_at"]) async for doc in cursor]
 
-    async def add_similar(self, folds: dict[str, list[NewsItem]]) -> int:
-        """Record each folded item on its kept article (``folds`` maps kept key to items).
-
-        Returns how many entries were new. Re-recording an item is a no-op, also after the
-        capped ``similar`` list has dropped it, because ``similar_keys`` remembers every key.
-        Articles are shared between symbols, so the record is per article, not per symbol.
-        """
-        if not folds:
-            return 0
-        docs = {
-            doc["dedupe_key"]: doc
-            async for doc in self._articles.find(
-                {"dedupe_key": {"$in": list(folds)}},
-                {"dedupe_key": 1, "similar": 1, "similar_keys": 1},
-            )
-        }
-        ops: list[UpdateOne] = []
-        added = 0
-        for main_key, items in folds.items():
-            doc = docs.get(main_key)
-            if doc is None:  # deleted meanwhile (retention): nothing to attach to
-                continue
-            known = set(doc.get("similar_keys", []))
-            entries: list[Document] = list(doc.get("similar", []))
-            for item in items:
-                key = dedupe_key(item.title, item.source)
-                if key not in known:
-                    known.add(key)
-                    added += 1
-                    entries.append(
-                        {
-                            "title": item.title,
-                            "url": str(item.url),
-                            "source": item.source,
-                            "published_at": item.published_at,
-                        }
-                    )
-            entries.sort(key=lambda e: e["published_at"], reverse=True)
-            ops.append(
-                UpdateOne(
-                    {"dedupe_key": main_key},
-                    {
-                        "$set": {
-                            "similar": entries[:SIMILAR_CAP],
-                            "similar_keys": sorted(known),
-                            "similar_count": len(known),
-                        }
-                    },
-                )
-            )
-        if ops:
-            await self._articles.bulk_write(ops, ordered=False)
-        return added
+    async def existing_keys(self, symbol: str, keys: list[str]) -> set[str]:
+        """Which of ``keys`` are already stored for ``symbol`` (on any day, flagged or not)."""
+        if not keys:
+            return set()
+        cursor = self._articles.find(
+            {"symbols": symbol, "dedupe_key": {"$in": keys}}, {"dedupe_key": 1}
+        )
+        return {doc["dedupe_key"] async for doc in cursor}
 
     async def unscored(self, symbol: str, limit: int) -> list[ArticleText]:
         cursor = self._articles.find(
@@ -348,8 +303,8 @@ class NewsRepository:
         """Showable articles per exchange-local month (``"YYYY-MM"``) since ``since``.
 
         Recaps and low-value documents are not counted. No ``until``: deliberately the whole
-        window, whichever month the tab shows. Documents without the flags (before the
-        startup backfill reaches them) are counted, recaps included.
+        window, whichever month the tab shows. Until the startup flag backfill has finished,
+        documents without the flags are counted, unflagged recaps included.
         """
         pipeline: list[Document] = [
             {"$match": _recent_query(symbol, since, None)},
@@ -368,46 +323,6 @@ class NewsRepository:
         ]
         cursor = await self._articles.aggregate(pipeline)
         return {doc["_id"]: int(doc["n"]) async for doc in cursor}
-
-    # --- flags and retention ---------------------------------------------------------------
-
-    async def backfill_flags(self) -> int:
-        """Set ``is_recap`` / ``is_low_value`` on documents that lack either; returns the count.
-
-        Idempotent: updated documents leave the filter, so each pass takes the next batch and
-        a second run finds nothing. Documents flagged low-value stay stored.
-        """
-        missing: Document = {
-            "$or": [{"is_recap": {"$exists": False}}, {"is_low_value": {"$exists": False}}]
-        }
-        done = 0
-        while True:
-            docs = [
-                doc async for doc in self._articles.find(missing, {"title": 1}, limit=FLAG_BATCH)
-            ]
-            if not docs:
-                return done
-            await self._articles.bulk_write(
-                [
-                    UpdateOne(
-                        {"_id": doc["_id"]},
-                        {
-                            "$set": {
-                                "is_recap": is_price_recap(doc["title"]),
-                                "is_low_value": is_low_value(doc["title"]),
-                            }
-                        },
-                    )
-                    for doc in docs
-                ],
-                ordered=False,
-            )
-            done += len(docs)
-
-    async def delete_published_before(self, cutoff: datetime) -> int:
-        """Delete every article with ``published_at < cutoff``, whatever its symbols."""
-        result = await self._articles.delete_many({"published_at": {"$lt": cutoff}})
-        return result.deleted_count
 
     # --- ingestion state -------------------------------------------------------------------
 

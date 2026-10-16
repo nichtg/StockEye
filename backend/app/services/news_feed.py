@@ -15,11 +15,10 @@ from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from app.domain.macro import bucket_of, is_price_recap
-from app.domain.news import InvalidMonthError, cluster_stories, month_window
+from app.domain.news import InvalidMonthError, cluster_stories, ignore_tokens, month_window
 from app.repositories.news import RecentArticle, dedupe_key
 from app.services.calendars import exchange_tz, root_ticker
 from app.services.errors import AppError
-from app.services.news import ignore_tokens
 from app.services.reports import (
     NewsArticleOut,
     NewsArticlesOut,

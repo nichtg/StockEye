@@ -30,6 +30,10 @@ LOW_VALUE = [
     "Sandisk stock at USD 1,711.11 on September 28, 2026",
     "PepsiCo stock at USD 128.20 on September 28, 2026",
     "DBS Group Holdings Ltd (D05.SI) Stock Price, News, Quote & History",
+    "Apple Inc. $AAPL Shares Newly Purchased by Bank of America Corp DE",
+    "Apple Inc. $AAPL Shares Newly Acquired by Caisse de depot et placement du Quebec",
+    "Apple Inc. $AAPL Shares Newly Bought by University of Wisconsin Foundation",
+    "Apple Inc. (AAPL): Renaissance Technologies Opens New Position",
 ]
 
 # Real news that looks a little like the above and must be kept.
@@ -56,6 +60,13 @@ NEWS = [
     "DBS Is Said to Revise Malaysia's Alliance Bank Offer Proposal to 30% Stake",
     "Dutch court confirms Apple abused dominant position in dating apps",
     "Walton family holdings trust sells $403 million in Walmart (WMT) stock",
+    "Microsoft (MSFT) cuts stake in OpenAI",
+    "SoftBank (9984.T) raises stake in Arm",
+    "Nvidia (NVDA) boosts stake in Intel with $5 billion investment",
+    "Google parent (GOOGL) acquires new stake in Anthropic",
+    "Intel stake cut by US government",
+    "The stakes raised by Apple's antitrust trial",
+    "Apple (AAPL) adds 5,000 shares of buyback",
 ]
 
 
