@@ -105,11 +105,15 @@ function changeText(stock: StockOut): string {
 function IndustryChip({ symbol }: { symbol: string }) {
   const industry = describeIndustry(useProfile(symbol).data?.industry);
   return (
-    <Box sx={{ mt: 0.75, minHeight: 24, display: 'flex', alignItems: 'center' }}>
+    <Box
+      data-testid="industry-row"
+      sx={{ mt: 0.75, minHeight: 24, display: 'flex', alignItems: 'center' }}
+    >
       {industry && (
         <Chip
           size="small"
           variant="outlined"
+          data-testid="industry-chip"
           label={industry}
           sx={{
             height: 24,

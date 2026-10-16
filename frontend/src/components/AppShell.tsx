@@ -19,7 +19,7 @@ export function AppShell() {
         <>
           <MainNav />
           <Box sx={{ flex: 1 }} />
-          <Box sx={{ flex: { xs: '0 0 auto', sm: '0 1 360px' }, minWidth: 0 }}>
+          <Box sx={{ flex: { xs: '0 0 auto', sm: '0 1 360px' }, minWidth: { sm: 160 } }}>
             <SearchBox />
           </Box>
           <ThemeToggle />

@@ -32,9 +32,12 @@ describe('StockHeader industry chip', () => {
 
   it('shows no chip when the industry is unknown', async () => {
     show({ industry: null });
+    // The row is reserved before the profile resolves, so nothing jumps.
+    expect(screen.getByTestId('industry-row')).toBeInTheDocument();
     await screen.findByRole('button', { name: /watchlist/i });
     expect(screen.queryByText(/headquartered/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Consumer electronics')).not.toBeInTheDocument();
-    expect(document.querySelectorAll('.MuiChip-label')).toHaveLength(2); // the US and USD tags only
+    expect(screen.queryByTestId('industry-chip')).not.toBeInTheDocument();
+    expect(screen.getByTestId('industry-row')).toBeInTheDocument();
   });
 });

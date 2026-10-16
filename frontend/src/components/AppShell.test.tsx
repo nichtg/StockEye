@@ -58,16 +58,8 @@ describe('AppShell navigation', () => {
     const active = within(nav).getByRole('link', { name: 'Discover', hidden: true });
     const idle = within(nav).getByRole('link', { name: 'Watchlist', hidden: true });
     expect(active).toHaveAttribute('aria-current', 'page');
-    // jsdom does not cascade emotion's rules, so read them: both links share one sx class, which sets
-    // weight 500 once and never again for the [aria-current] state.
-    const sxClass = (el: Element) => [...el.classList].find((c) => /^css-.*-MuiLink-root$/.test(c));
-    expect(sxClass(active)).toBe(sxClass(idle));
-    const css = [...document.querySelectorAll('style')].map((st) => st.textContent).join('');
-    const pattern = new RegExp(String.raw`.${sxClass(active) ?? ''}([^{]*){([^}]*)}`, 'g');
-    const weights = [...css.matchAll(pattern)].flatMap(([, selector, body]) =>
-      [...(body ?? '').matchAll(/font-weight:(\d+)/g)].map((m) => [selector, m[1]]),
-    );
-    expect(weights).toEqual([['', '500']]);
+    expect(getComputedStyle(active).fontWeight).toBe('500');
+    expect(getComputedStyle(idle).fontWeight).toBe(getComputedStyle(active).fontWeight);
   });
 
   it('keeps the links out of the account menu on a wide screen, so the arrow keys reach Log out', async () => {

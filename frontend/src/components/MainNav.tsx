@@ -29,6 +29,7 @@ export function MainNav() {
           to={item.to}
           end={item.to === '/'}
           underline="none"
+          variant="body2"
           sx={{
             position: 'relative',
             display: 'flex',
@@ -38,13 +39,15 @@ export function MainNav() {
             // One weight in both states, so the active link never changes the row's width.
             fontWeight: 500,
             '&:hover': { color: 'ink' },
+            // Inset ring: the link is as tall as the bar, so an outer ring would be clipped.
+            '&:focus-visible': { outlineOffset: -2 },
             // A 2px tab indicator on the bar's bottom edge; absolutely placed, so the text stays put.
             '&::after': {
               content: '""',
               position: 'absolute',
               left: 0,
               right: 0,
-              bottom: 0,
+              bottom: -1, // covers the bar's 1px bottom border
               height: 2,
               bgcolor: 'ink',
               opacity: 0,

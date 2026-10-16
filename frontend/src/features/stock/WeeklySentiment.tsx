@@ -127,10 +127,10 @@ export function WeeklySentiment({ points, exchange }: Props) {
             order: 0,
           }}
         >
-          <Typography variant="caption" sx={{ color: 'ink3', order: 0, pb: { xs: 1, sm: 0 } }}>
+          <Typography variant="caption" aria-hidden="true" sx={{ color: 'ink3', order: 0 }}>
             More positive
           </Typography>
-          <Typography variant="caption" sx={{ color: 'ink3', order: 2, pt: { xs: 1, sm: 0 } }}>
+          <Typography variant="caption" aria-hidden="true" sx={{ color: 'ink3', order: 2 }}>
             More negative
           </Typography>
         </Box>
