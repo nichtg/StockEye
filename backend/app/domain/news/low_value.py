@@ -140,7 +140,12 @@ _BUYER_SUFFIX = re.compile(
     r"|\b(?:Corp|Inc)\.?\s+[A-Z]{2}$"
 )
 # Family and estate vehicles and foundations are news ("Walton Family Holdings Trust").
-_NOT_A_FUND = re.compile(r"\b(?:Family|Revocable|Living|Estate|Foundation)\b", _FLAGS)
+# Family vehicles and sovereign or state buyers are news even when the name ends in a fund word.
+_NOT_A_FUND = re.compile(
+    r"\b(?:Family|Revocable|Living|Estate|Foundation|Sovereign|Public\s+Investment|Government"
+    r"|Treasury|Department|Ministry)\b",
+    _FLAGS,
+)
 # "Apple Inc. (AAPL): Renaissance Technologies Opens New Position",
 # "Apple Inc. $AAPL Stock: HighTower Advisors LLC Lowers Stake": the mark leads, then a colon,
 # then the actor and the verb, and the title ends with the noun.
