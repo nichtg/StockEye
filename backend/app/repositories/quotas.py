@@ -30,7 +30,6 @@ log = get_logger(__name__)
 QUOTA = "provider_quota"
 HEALTH = "provider_health"
 DEFAULT_WARNING_RATIO = 0.8
-_BUMP_ATTEMPTS = 3  # one retry suffices after a lost insert race; the rest is slack
 
 
 def _minute_start(now: datetime) -> datetime:
@@ -61,25 +60,19 @@ class QuotaLedger:
         self, provider: str, window: Window, start: datetime, limit: int, ttl: timedelta
     ) -> Document | None:
         """Atomically add one call to a window. None means the window is already full."""
-        for _ in range(_BUMP_ATTEMPTS):
-            try:
-                return await self._db[QUOTA].find_one_and_update(
-                    {
-                        "provider": provider,
-                        "window": window,
-                        "start": start,
-                        "used": {"$lt": limit},
-                    },
-                    {"$inc": {"used": 1}, "$setOnInsert": {"expires_at": start + ttl}},
-                    upsert=True,
-                    return_document=ReturnDocument.AFTER,
-                )
-            except DuplicateKeyError:
-                # Either we lost the insert race (the document now exists, so retry the
-                # conditional update) or the document is full and the upsert collided with it
-                # (the retry hits the same error again and we stop after a few attempts).
-                continue
-        return None
+        filter_ = {"provider": provider, "window": window, "start": start, "used": {"$lt": limit}}
+        update = {"$inc": {"used": 1}, "$setOnInsert": {"expires_at": start + ttl}}
+        try:
+            return await self._db[QUOTA].find_one_and_update(
+                filter_, update, upsert=True, return_document=ReturnDocument.AFTER
+            )
+        except DuplicateKeyError:
+            # Either we lost the insert race or the document is full and the upsert collided with
+            # it. Either way the document exists now, so a plain update (no upsert, hence no more
+            # insert races) is decisive: a miss means the window is full.
+            return await self._db[QUOTA].find_one_and_update(
+                filter_, update, upsert=False, return_document=ReturnDocument.AFTER
+            )
 
     async def _flag_once(self, provider: str, window: Window, start: datetime, flag: str) -> bool:
         """Set ``flag`` on the window document only if unset; True means we were first."""

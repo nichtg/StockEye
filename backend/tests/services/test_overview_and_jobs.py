@@ -230,3 +230,22 @@ async def test_overview_failed_row_has_no_status_as_of(
 
     assert row.status == "unavailable"
     assert row.status_as_of is None
+
+
+async def test_overview_stale_history_and_quote_report_the_oldest_saved_copy(
+    services: Services, clock: FakeClock, provider: FakeMarketData
+) -> None:
+    clock.now = CLOSED_NOW
+    _, history_status = await services.market.daily_history("AAPL")
+    older = history_status.as_of
+    assert older is not None
+    clock.now = CLOSED_NOW + timedelta(hours=1)
+    quote, _ = await services.market.quote("AAPL")
+    assert quote.as_of > older
+    clock.now = CLOSED_NOW + timedelta(days=4)
+    provider.fail_with = RateLimitedError("yahoo")
+
+    (row,) = await build_overview(services.market, services.analysis, ["AAPL"])
+
+    assert row.status != "ok"
+    assert row.status_as_of == older

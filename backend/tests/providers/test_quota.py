@@ -278,13 +278,14 @@ async def test_try_consume_concurrent_first_calls_on_fresh_day_all_allowed(
             *(ledger.try_consume(f"dayrace{i}", limits, day, "scheduled") for _ in range(12))
         )
         allowed += sum(d.allowed for d in decisions)
+        assert all(d.window_blocked is None for d in decisions)  # no refusal, so no false block
         assert (await ledger.snapshot(f"dayrace{i}", limits, day)).used_today == 12
 
     assert allowed == 120
 
 
 async def test_try_consume_concurrent_calls_above_day_limit_allow_exactly_the_limit(
-    ledger: QuotaLedger,
+    ledger: QuotaLedger, db: Database
 ) -> None:
     limits = ProviderLimits(per_minute=1000, per_day=5)
     allowed = 0
@@ -294,5 +295,11 @@ async def test_try_consume_concurrent_calls_above_day_limit_allow_exactly_the_li
             *(ledger.try_consume(f"daycap{i}", limits, day, "scheduled") for _ in range(12))
         )
         allowed += sum(d.allowed for d in decisions)
+        # Day-blocked calls roll their minute increment back, even under concurrency.
+        minute_doc = await db["provider_quota"].find_one(
+            {"provider": f"daycap{i}", "window": "minute"}
+        )
+        assert minute_doc is not None
+        assert minute_doc["used"] == 5
 
     assert allowed == 50
