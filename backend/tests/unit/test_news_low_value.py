@@ -42,7 +42,6 @@ LOW_VALUE = [
     "Apple Inc. $AAPL Stock Sold by Denver PWM LLC",
     "McDonald's Corporation $MCD Stock Acquired by Envestnet Portfolio Solutions Inc.",
     "Nebius Group N.V. $NBIS Shares Sold by Carnegie Investment Counsel",
-    "Apple Inc. $AAPL Position Purchased by Birch Capital Management LLC",
 ]
 
 # Real news that looks a little like the above and must be kept.
@@ -85,6 +84,23 @@ NEWS = [
     "Apple $AAPL stock purchased by Berkshire Hathaway: what it means",
     "$AAPL stock sold by General Counsel",
     "Apple stock bought by PFW Advisors LLC",
+    "$AAPL stock bought by Cathie Wood's ARK",
+    "$TSLA Stock Sold by Elon Musk's Trust",
+    "$META Stock Sold by Mark Zuckerberg Foundation",
+    "$X stock bought by Japan's Nippon Steel",
+    "$X stock acquired by Nippon Steel for $14.9 billion",
+    "$ATVI stock acquired by Microsoft",
+    "$WBD stock acquired by Paramount Skydance in hostile bid",
+    "$TWTR stock bought by Musk",
+    "$AAPL Stock Sold by Berkshire Hathaway as Buffett trims",
+    "$BABA Stock Sold by SoftBank Group",
+    "$INTC stock bought by the U.S. government",
+    "$AAPL Stock Sold by Marjorie Taylor Greene",
+    "$AMZN stock sold by Jeff Bezos for $5 billion",
+    "$PLTR stock sold by Alex Karp, again",
+    "$AAPL stock bought by Dan Ives — here's why",
+    "$AAPL stock sold by hedge funds in Q3",
+    "$AAPL holdings sold by Norway's wealth fund",
 ]
 
 

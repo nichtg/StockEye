@@ -22,12 +22,18 @@ row; the opposite error costs a real article.
 
 import re
 
+# Bump whenever the is_low_value rule changes: stored articles stamped with an older (or no)
+# version are re-flagged by the startup backfill. It does not version is_recap. A change that
+# narrows the rule un-flags articles: the backfill then also clears the dedupe marker of their
+# symbols, so the near-duplicate fold runs again over what became visible.
+LOW_VALUE_VERSION = 2
+
 _FLAGS = re.IGNORECASE
 
 # A person with a role, or an activist, is news and not a filing.
 _INSIDER_OR_ACTIVIST = re.compile(
     r"\b(?:CEO|CFO|COO|CTO|CRO|CAO|EVP|SVP|VP|director|president|chairman|chairwoman|officer"
-    r"|insider|chief|executive|founder|cofounder|(?<!investment\s)counsel|activist|billionaire|Rep\.|Sen\.)"
+    r"|insider|chief|executive|founder|cofounder|counsel|activist|billionaire|Rep\.|Sen\.)"
     r"(?!\w)|\b(?:Elliott|Icahn|Starboard|Trian|Pershing)\b",
     _FLAGS,
 )
@@ -107,16 +113,26 @@ _SHARES_BOUGHT_BY = re.compile(
     _FLAGS,
 )
 # "Rocket Lab Corporation $RKLB Shares Acquired by Hsbc Holdings PLC", "... Shares Newly
-# Purchased by Bank of America Corp DE", "Apple Inc. $AAPL Stock Bought by PFW Advisors LLC": a
-# cashtag first, the auto-written template.
+# Purchased by Bank of America Corp DE": a cashtag first, the auto-written template.
 _CASHTAG_SHARES_BY = re.compile(
-    r"\$[A-Z]{1,5}\b.{0,40}?\b(?:shares|stock|(?:stock\s+)?(?:position|holdings?))\s+"
-    r"(?:newly\s+)?(?:acquired|purchased|bought|sold)\s+by\b",
+    r"\$[A-Z]{1,5}\b.{0,40}?\bshares\s+(?:newly\s+)?(?:acquired|purchased|bought|sold)\s+by\b",
     _FLAGS,
 )
-# A real filing names the buyer and stops; a question, colon or exclamation after "by" is prose
-# ("Apple stock purchased by Warren Buffett's Berkshire? Here's why").
-_PROSE_MARK = re.compile(r"[?!:]")
+# The exact auto-written shape "Apple Inc. $AAPL Stock Bought by PFW Advisors LLC": company
+# name, cashtag, the verb phrase, then only a capitalised fund or corporate name up to the end.
+# "Stock" is the wording real news also uses ("$ATVI stock acquired by Microsoft", "$TSLA Stock
+# Sold by Elon Musk's Trust"), so the buyer must be a bare name carrying a fund or corporate
+# suffix: no possessive, no lowercase word, no punctuation, no trailing commentary. "Group" is
+# left out of the suffixes on purpose ("SoftBank Group" is a strategic investor); stored
+# fund names with it also carry LLC or Inc.
+_STRICT_FILING = re.compile(
+    r"^[^$]{2,80}?\s\$[A-Z]{1,5}\s+(?i:(?:shares|stock)\s+(?:newly\s+)?"
+    r"(?:acquired|purchased|bought|sold)\s+by)\s+"
+    r"(?P<buyer>(?:(?:[A-Z][\w.-]*|&)\s+)*[A-Z][\w.-]*)\s*$"
+)
+_BUYER_SUFFIX = re.compile(
+    rf"\b(?:{_FUND_WORDS}|Inc|Corp|Co|Ltd|LLP|PLC|Associates|Counsel|PWM)(?!\w)"
+)
 # "Apple Inc. (AAPL): Renaissance Technologies Opens New Position",
 # "Apple Inc. $AAPL Stock: HighTower Advisors LLC Lowers Stake": the mark leads, then a colon,
 # then the actor and the verb, and the title ends with the noun.
@@ -156,6 +172,11 @@ def _verb_filing(rule: re.Pattern[str], title: str) -> bool:
     )
 
 
+def _strict_filing(title: str) -> bool:
+    m = _STRICT_FILING.match(title)
+    return m is not None and _BUYER_SUFFIX.search(m["buyer"]) is not None
+
+
 def _position_by_shares(title: str) -> bool:
     return any(
         _TICKER_MARK.search(title, 0, m.start()) is None
@@ -170,10 +191,8 @@ def _filing(title: str) -> bool:
         if marked_before or _INSTITUTION.search(title, match.end()):
             return True
     # The cashtag template is specific enough; only a person as the buyer or seller is news.
-    if (
-        (m := _CASHTAG_SHARES_BY.search(title))
-        and _PROSE_MARK.search(title, m.end()) is None
-        and (_INSTITUTION.search(title, m.end()) or not _PERSON.fullmatch(title, m.end()))
+    if (m := _CASHTAG_SHARES_BY.search(title)) and (
+        _INSTITUTION.search(title, m.end()) or not _PERSON.fullmatch(title, m.end())
     ):
         return True
     if _INSIDER_FORMAT.search(title):
@@ -187,11 +206,6 @@ def _filing(title: str) -> bool:
     )
 
 
-# Bump whenever this rule changes: stored articles stamped with an older (or no) version are
-# re-flagged by the startup backfill.
-LOW_VALUE_VERSION = 2
-
-
 def is_low_value(title: str) -> bool:
     """True for a fund-holdings filing headline or a quote-ticker price stamp.
 
@@ -199,6 +213,9 @@ def is_low_value(title: str) -> bool:
     (insider trades, activist stakes, acquisitions, ratings and earnings are never matched).
     """
     if _QUOTE_CODE.search(title) or _QUOTE_PAGE.search(title):
+        return True
+    # Before the role guard: "Carnegie Investment Counsel" is a fund, not a general counsel.
+    if _strict_filing(title):
         return True
     if _INSIDER_OR_ACTIVIST.search(title):
         return False

@@ -106,7 +106,9 @@ class NewsMaintenanceRepository:
 
         Idempotent: updated documents carry the current version and leave the filter, so each
         pass takes the next batch and a second run finds nothing. Documents flagged low-value
-        stay stored.
+        stay stored. A document flipped from low-value to showable may be a duplicate the fold
+        skipped while it was hidden, so its symbols lose their ``dedupe_version`` marker and the
+        startup fold that follows runs over them again.
         """
         missing: Document = {
             "$or": [
@@ -118,10 +120,19 @@ class NewsMaintenanceRepository:
         done = 0
         while True:
             docs = [
-                doc async for doc in self._articles.find(missing, {"title": 1}, limit=FLAG_BATCH)
+                doc
+                async for doc in self._articles.find(
+                    missing, {"title": 1, "is_low_value": 1, "symbols": 1}, limit=FLAG_BATCH
+                )
             ]
             if not docs:
                 return done
+            exposed = {
+                symbol
+                for doc in docs
+                if doc.get("is_low_value") is True and not is_low_value(doc["title"])
+                for symbol in doc.get("symbols", [])
+            }
             await self._articles.bulk_write(
                 [
                     UpdateOne(
@@ -138,6 +149,10 @@ class NewsMaintenanceRepository:
                 ],
                 ordered=False,
             )
+            if exposed:
+                await self._state.update_many(
+                    {"symbol": {"$in": sorted(exposed)}}, {"$unset": {"dedupe_version": ""}}
+                )
             done += len(docs)
 
     async def delete_published_before(self, cutoff: datetime) -> int:
