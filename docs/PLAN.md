@@ -595,5 +595,14 @@ Branches, each from `main`:
   unchanged: it needs the admin login).
 - Measured locally: AAPL 2,125 → 1,928 stored articles (146 low-value, 51 duplicates); the startup pass took ~7 s on
   9,301 articles (234 folds). RKLB's regime label moves from typical to more negative: each story now counts once.
-- Deploys: Pages publishes on merge; the backend image (#52, #56) waits for the user's `production` approval.
-- Follow-ups: Dependabot major bumps; the discover marker test flake under full-suite load.
+- [x] Segmented chips use the app font (IBM Plex Sans) like the tabs; a bare `ButtonBase` rendered them in Arial (#59)
+- [x] Filing headlines in the "Stock" wording ("$AAPL Stock Purchased by RVW Wealth LLC") are caught by a strict filing
+  shape (fund-type buyer only; takeovers, activists, insiders, family trusts, foundations and sovereign buyers stay
+  news). `LOW_VALUE_VERSION` is stamped on every article, and the startup pass re-flags older stamps, so changing the
+  rule means bumping it (#60). Locally 350 → 374 flagged, none un-flagged.
+- Deployed 2026-10-16: backend image `f7e5df4` (#52, #56, #60), live health ok; Pages has #53–#59.
+- Follow-ups:
+  - The older, looser "Shares … by" rule in `low_value.py` can still drop real news ("$BABA shares sold by SoftBank",
+    "$NVDA shares purchased by Nancy Pelosi's husband"). About 35 stored filings without a fund word depend on it, so
+    narrowing it needs its own pass over the data.
+  - Dependabot major bumps; the discover marker test flake under full-suite load.
