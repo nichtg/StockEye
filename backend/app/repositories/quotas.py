@@ -1,8 +1,10 @@
 """Fixed-window call quotas per provider, plus last-error health, in MongoDB.
 
 Consumption is atomic: one ``find_one_and_update`` guarded by ``used < limit`` on a document
-unique per (provider, window, start). A duplicate-key error on the upsert means the document
-exists and is full.
+unique per (provider, window, start). A duplicate-key error on the upsert does NOT mean the
+window is full: when the document does not exist yet, concurrent callers all miss the filter and
+race to insert, and the unique index rejects the losers. The document exists by then, so the
+loser retries the conditional update; only a miss on an existing document means full.
 """
 
 import math
@@ -28,6 +30,7 @@ log = get_logger(__name__)
 QUOTA = "provider_quota"
 HEALTH = "provider_health"
 DEFAULT_WARNING_RATIO = 0.8
+_BUMP_ATTEMPTS = 3  # one retry suffices after a lost insert race; the rest is slack
 
 
 def _minute_start(now: datetime) -> datetime:
@@ -58,15 +61,25 @@ class QuotaLedger:
         self, provider: str, window: Window, start: datetime, limit: int, ttl: timedelta
     ) -> Document | None:
         """Atomically add one call to a window. None means the window is already full."""
-        try:
-            return await self._db[QUOTA].find_one_and_update(
-                {"provider": provider, "window": window, "start": start, "used": {"$lt": limit}},
-                {"$inc": {"used": 1}, "$setOnInsert": {"expires_at": start + ttl}},
-                upsert=True,
-                return_document=ReturnDocument.AFTER,
-            )
-        except DuplicateKeyError:
-            return None
+        for _ in range(_BUMP_ATTEMPTS):
+            try:
+                return await self._db[QUOTA].find_one_and_update(
+                    {
+                        "provider": provider,
+                        "window": window,
+                        "start": start,
+                        "used": {"$lt": limit},
+                    },
+                    {"$inc": {"used": 1}, "$setOnInsert": {"expires_at": start + ttl}},
+                    upsert=True,
+                    return_document=ReturnDocument.AFTER,
+                )
+            except DuplicateKeyError:
+                # Either we lost the insert race (the document now exists, so retry the
+                # conditional update) or the document is full and the upsert collided with it
+                # (the retry hits the same error again and we stop after a few attempts).
+                continue
+        return None
 
     async def _flag_once(self, provider: str, window: Window, start: datetime, flag: str) -> bool:
         """Set ``flag`` on the window document only if unset; True means we were first."""

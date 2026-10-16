@@ -227,3 +227,72 @@ async def test_throttle_log_names_priority_and_cap_and_keeps_one_flag_per_priori
         ("scheduled", 7),
         ("interactive", 10),
     ]
+
+
+async def _fresh_window_burst(ledger: QuotaLedger, limits: ProviderLimits, calls: int) -> int:
+    """Allowed count over 10 fresh minute windows, each hit by ``calls`` concurrent callers."""
+    allowed = 0
+    for i in range(10):
+        when = NOW + timedelta(minutes=i + 1)
+        decisions = await asyncio.gather(
+            *(ledger.try_consume(f"race{i}", limits, when, "interactive") for _ in range(calls))
+        )
+        allowed += sum(d.allowed for d in decisions)
+    return allowed
+
+
+async def test_try_consume_concurrent_first_calls_on_fresh_minute_all_allowed(
+    ledger: QuotaLedger, db: Database
+) -> None:
+    limits = ProviderLimits(per_minute=60, per_day=10_000)
+
+    allowed = await _fresh_window_burst(ledger, limits, 12)
+
+    assert allowed == 120  # a lost insert race must not read as "window full"
+    for i in range(10):
+        doc = await db["provider_quota"].find_one(
+            {"provider": f"race{i}", "window": "minute", "start": {"$gt": NOW}}
+        )
+        assert doc is not None
+        assert doc["used"] == 12
+
+
+async def test_try_consume_concurrent_calls_above_minute_limit_allow_exactly_the_limit(
+    ledger: QuotaLedger,
+) -> None:
+    limits = ProviderLimits(per_minute=5, per_day=10_000)
+
+    allowed = await _fresh_window_burst(ledger, limits, 12)
+
+    assert allowed == 50
+
+
+async def test_try_consume_concurrent_first_calls_on_fresh_day_all_allowed(
+    ledger: QuotaLedger,
+) -> None:
+    limits = ProviderLimits(per_minute=1000, per_day=1000)
+    allowed = 0
+    for i in range(10):
+        day = NOW + timedelta(days=i + 1)
+        decisions = await asyncio.gather(
+            *(ledger.try_consume(f"dayrace{i}", limits, day, "scheduled") for _ in range(12))
+        )
+        allowed += sum(d.allowed for d in decisions)
+        assert (await ledger.snapshot(f"dayrace{i}", limits, day)).used_today == 12
+
+    assert allowed == 120
+
+
+async def test_try_consume_concurrent_calls_above_day_limit_allow_exactly_the_limit(
+    ledger: QuotaLedger,
+) -> None:
+    limits = ProviderLimits(per_minute=1000, per_day=5)
+    allowed = 0
+    for i in range(10):
+        day = NOW + timedelta(days=i + 1)
+        decisions = await asyncio.gather(
+            *(ledger.try_consume(f"daycap{i}", limits, day, "scheduled") for _ in range(12))
+        )
+        allowed += sum(d.allowed for d in decisions)
+
+    assert allowed == 50
