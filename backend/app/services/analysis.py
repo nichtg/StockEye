@@ -55,7 +55,8 @@ CACHE_SCHEMA = 3
 # ``earnings_note``. 6 = scope period dates, averaged-finding wording, ``n_car_pre_5``.
 # 7 = ``top_events`` limited to the past 3 months, ``top_events_since``.
 # Reports cached under an older method must never be served.
-MACRO_CACHE_SCHEMA = 8
+# 9 = the study inputs changed (no near-duplicates, no low-value items).
+MACRO_CACHE_SCHEMA = 9
 RECAP_ONLY_REASON = (
     "Only price-move recap headlines were found; they are left out of the news study."
 )

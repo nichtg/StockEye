@@ -1,14 +1,13 @@
 """The News tab's article feed, as one deep module: ``NewsFeed.page`` and nothing else public.
 
-Cursors, price-recap filtering, paging and sentiment labels are internal. Read-only: nothing
-here starts ingestion (the News tab's progress poll does that).
+Cursors, recap filtering, paging, story grouping and sentiment labels are internal. Read-only:
+nothing here starts ingestion (the News tab's progress poll does that).
 """
 
 import asyncio
 import base64
 import binascii
 import json
-import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -17,10 +16,10 @@ from zoneinfo import ZoneInfo
 
 from app.domain.macro import bucket_of, is_price_recap
 from app.domain.news import InvalidMonthError, cluster_stories, month_window
-from app.repositories.news import RecentArticle
+from app.repositories.news import RecentArticle, dedupe_key
 from app.services.calendars import exchange_tz, root_ticker
 from app.services.errors import AppError
-from app.services.news import core_name
+from app.services.news import ignore_tokens
 from app.services.reports import (
     NewsArticleOut,
     NewsArticlesOut,
@@ -57,7 +56,7 @@ class _ArticleSource(Protocol):
         until: datetime | None = None,
     ) -> list[RecentArticle]: ...
 
-    async def window_titles(self, symbol: str, since: datetime) -> list[tuple[datetime, str]]: ...
+    async def month_counts(self, symbol: str, since: datetime, tz: ZoneInfo) -> dict[str, int]: ...
 
 
 def _bad_cursor() -> AppError:
@@ -114,39 +113,45 @@ def _month_key(moment: datetime, tz: ZoneInfo) -> str:
     return f"{local.year:04d}-{local.month:02d}"
 
 
-def _month_counts(titles: list[tuple[datetime, str]], tz: ZoneInfo) -> list[NewsMonthOut]:
-    """Non-recap articles per exchange-local month, newest month first; empty months omitted."""
-    counts: dict[str, int] = {}
-    for published_at, title in titles:
-        if not is_price_recap(title):
-            key = _month_key(published_at, tz)
-            counts[key] = counts.get(key, 0) + 1
+def _month_outs(counts: dict[str, int]) -> list[NewsMonthOut]:
+    """Per-month counts (keyed ``"YYYY-MM"``), newest month first; empty months omitted."""
     return [
         NewsMonthOut(
             month=key, label=f"{_MONTH_NAMES[int(key[5:]) - 1]} {key[:4]}", count=counts[key]
         )
         for key in sorted(counts, reverse=True)
+        if counts[key] > 0
     ]
-
-
-def _ignore_tokens(symbol: str, company_name: str) -> set[str]:
-    """Words every headline about the symbol shares: ticker parts and the company's core name.
-
-    ("D05.SI" gives d05 and si; "Rocket Lab Holdings, Inc." gives rocket and lab.)
-    """
-    text = f"{symbol} {core_name(company_name)}"
-    return {part for part in re.split(r"[^a-z0-9]+", text.lower()) if part}
 
 
 def _group_out(members: list[RecentArticle]) -> NewsArticleOut:
     """One item for a group (newest first): the main article plus its look-alikes.
 
-    The sentiment is the mean of the members that have a score; none scored means
-    ``not_scored``.
+    The look-alikes are the other stored members of the group (read-time grouping) merged with
+    the near-duplicates recorded on any member at ingest (``RecentArticle.similar``), newest
+    first, each story once. The sentiment is the mean of the *stored* members that have a
+    score; recorded look-alikes were never stored, so they have no score and do not count.
+    None scored means ``not_scored``.
     """
     main = members[0]
     scores = [m.score for m in members if m.score is not None]
     mean = sum(scores) / len(scores) if scores else None
+    similar: dict[str, SimilarArticleOut] = {}
+    for member in members[1:]:
+        similar.setdefault(member.dedupe_key, _similar_out(member))
+    for member in members:
+        for entry in member.similar:
+            similar.setdefault(
+                dedupe_key(entry.title, entry.source),
+                SimilarArticleOut(
+                    title=entry.title,
+                    url=entry.url,
+                    source=entry.source,
+                    published_at=entry.published_at,
+                ),
+            )
+    similar.pop(main.dedupe_key, None)
+    ordered = sorted(similar.values(), key=lambda a: a.published_at, reverse=True)
     return NewsArticleOut(
         published_at=main.published_at,
         title=main.title,
@@ -154,20 +159,25 @@ def _group_out(members: list[RecentArticle]) -> NewsArticleOut:
         source=main.source,
         sentiment_label=_sentiment_label(mean),
         sentiment=mean,
-        similar=[
-            SimilarArticleOut(
-                title=m.title, url=m.url, source=m.source, published_at=m.published_at
-            )
-            for m in members[1:]
-        ],
+        similar=ordered,
+    )
+
+
+def _similar_out(article: RecentArticle) -> SimilarArticleOut:
+    return SimilarArticleOut(
+        title=article.title,
+        url=article.url,
+        source=article.source,
+        published_at=article.published_at,
     )
 
 
 def _grouped(articles: list[RecentArticle], ignore: set[str], tz: ZoneInfo) -> list[NewsArticleOut]:
     """Collapse same-exchange-day near-duplicate stories within one page (newest first).
 
-    Grouping only sees the page it is given, so a story can split across a page edge; that
-    is accepted rather than paying for look-ahead.
+    Newer data is deduplicated at ingest, so this mostly serves articles stored before that
+    and look-alikes that landed in different batches. Grouping only sees the page it is given,
+    so a story can split across a page edge; that is accepted rather than paying for look-ahead.
     """
     items = [(a.published_at.astimezone(tz).date(), a.title) for a in articles]
     return [_group_out([articles[i] for i in g]) for g in cluster_stories(items, ignore)]
@@ -195,6 +205,8 @@ async def _collect_page(
     for _ in range(MAX_ROUNDS):
         rows = await fetch(position)
         for row in rows:
+            # The query already drops flagged recaps; this is the fallback for documents the
+            # startup flag backfill has not reached yet (and keeps the rule in one place).
             if is_price_recap(row.title):
                 continue
             if len(kept) == limit:
@@ -277,7 +289,7 @@ class NewsFeed:
             return await self._month_counts(symbol, now, since, tz, status_task)
 
         async def ignore() -> set[str]:
-            return _ignore_tokens(symbol, await self._name_of(symbol, now))
+            return ignore_tokens(symbol, await self._name_of(symbol, now))
 
         page, status, month_counts, skip = await asyncio.gather(
             _collect_page(fetch, limit, start), status_task, months(), ignore()
@@ -327,7 +339,7 @@ class NewsFeed:
                 return cached[1]
             try:
                 complete = (await status).state == "ok"
-                counts = _month_counts(await self._repo.window_titles(symbol, since), tz)
+                counts = _month_outs(await self._repo.month_counts(symbol, since, tz))
                 if complete:
                     self._months = {k: v for k, v in self._months.items() if now < v[0]}
                     self._months[key] = (now + MONTHS_TTL, counts)

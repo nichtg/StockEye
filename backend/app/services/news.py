@@ -6,17 +6,22 @@ failed window is simply retried on the next run. Backfill windows are whole cale
 their ``YYYY-MM`` keys stay stable from day to day) fetched from one ``backfill`` provider; the
 current, partial month is covered by the incremental pass over every ``live`` provider that covers
 the symbol's exchange. Providers arrive already guarded.
+
+Before storing, items that carry no news are dropped (fund-holdings filings, quote tickers) and
+same-day near-duplicates of an article already kept for the symbol are folded into it (see
+``NewsService._store``), which keeps the collection, the scoring work and the macro study lean.
 """
 
 import asyncio
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 from app.clock import utc_now
 from app.db import Database
-from app.domain.macro import ScoredArticle
+from app.domain.macro import ScoredArticle, is_price_recap
+from app.domain.news import Story, fold_near_duplicates, is_low_value
 from app.logging_setup import get_logger
 from app.providers.base import NewsProvider
 from app.providers.errors import ProviderError, QuotaExhaustedError
@@ -27,9 +32,10 @@ from app.repositories.news import (
     IngestState,
     NewsRepository,
     SentimentRecord,
+    dedupe_key,
 )
 from app.sentiment.scorer import SentimentScore, SentimentScorer, SentimentUnavailableError
-from app.services.calendars import exchange_for, root_ticker
+from app.services.calendars import exchange_for, exchange_tz, root_ticker
 from app.services.status import DataStatus, ok
 
 log = get_logger(__name__)
@@ -80,6 +86,40 @@ def is_relevant(symbol: str, company_name: str, title: str, summary: str | None)
     return len(root) >= _MIN_TICKER_LENGTH and bool(
         re.search(rf"(?<![\w.]){re.escape(root)}(?![\w])", text)
     )
+
+
+def ignore_tokens(symbol: str, company_name: str) -> set[str]:
+    """Words every headline about the symbol shares: ticker parts and the company's core name.
+
+    ("D05.SI" gives d05 and si; "Rocket Lab Holdings, Inc." gives rocket and lab.)
+    """
+    text = f"{symbol} {core_name(company_name)}"
+    return {part for part in re.split(r"[^a-z0-9]+", text.lower()) if part}
+
+
+@dataclass
+class _RunCounts:
+    """What one ingest run left out, for its single log line."""
+
+    low_value: int = 0
+    near_duplicates: int = 0
+
+
+async def backfill_news_flags(db: Database) -> int:
+    """One-off, idempotent: flag stored articles that predate ``is_recap`` / ``is_low_value``.
+
+    Meant to run as a background task at startup. Never raises (failures are logged); returns
+    how many documents were updated.
+    """
+    try:
+        count = await NewsRepository(db).backfill_flags()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("news_flag_backfill_failed")
+        return 0
+    log.info("news_flag_backfill_finished", updated=count)
+    return count
 
 
 @dataclass(frozen=True)
@@ -215,15 +255,33 @@ class NewsService:
         """Backfill then incremental pass; True if any window failed (details are logged)."""
         state = await self._repo.get_state(symbol)
         missing = _missing(windows, state)
+        counts = _RunCounts()
         try:
-            failures = await self._backfill_months(symbol, company_name, missing)
+            return await self._ingest_windows(symbol, company_name, missing, counts)
+        finally:
+            log.info(
+                "news_ingest_trimmed",
+                symbol=symbol,
+                low_value=counts.low_value,
+                near_duplicates=counts.near_duplicates,
+            )
+
+    async def _ingest_windows(
+        self,
+        symbol: str,
+        company_name: str,
+        missing: list[tuple[datetime, datetime]],
+        counts: _RunCounts,
+    ) -> bool:
+        try:
+            failures = await self._backfill_months(symbol, company_name, missing, counts)
         except QuotaExhaustedError as exc:
             # The daily budget is gone: every remaining window would fail the same way.
             log.warning("news_backfill_stopped", symbol=symbol, error=str(exc))
             return True
         now = self._clock()
         recent = self._query(symbol, company_name, now - timedelta(days=INCREMENTAL_DAYS), now)
-        incremental_failures = await self._incremental(symbol, company_name, recent)
+        incremental_failures = await self._incremental(symbol, company_name, recent, counts)
         if not incremental_failures:
             await self._repo.mark_incremental(symbol, now)
         return bool(failures or incremental_failures)
@@ -238,7 +296,11 @@ class NewsService:
         )
 
     async def _backfill_months(
-        self, symbol: str, company_name: str, windows: list[tuple[datetime, datetime]]
+        self,
+        symbol: str,
+        company_name: str,
+        windows: list[tuple[datetime, datetime]],
+        counts: _RunCounts,
     ) -> int:
         """Fetch and store each missing month, newest first; returns how many were skipped.
 
@@ -265,11 +327,13 @@ class NewsService:
                     error=str(exc),
                 )
                 continue
-            await self._store(symbol, company_name, items)
+            await self._store(symbol, company_name, items, counts)
             await self._repo.mark_month_done(symbol, month)
         return failures
 
-    async def _incremental(self, symbol: str, company_name: str, recent: NewsQuery) -> int:
+    async def _incremental(
+        self, symbol: str, company_name: str, recent: NewsQuery, counts: _RunCounts
+    ) -> int:
         """Fetch the last ``INCREMENTAL_DAYS`` from every covering live provider; count failures.
 
         A provider that does not cover the query's exchange is skipped before it is called, so
@@ -289,13 +353,52 @@ class NewsService:
             elif isinstance(result, BaseException):
                 raise result
             else:
-                await self._store(symbol, company_name, result)
+                await self._store(symbol, company_name, result, counts)
         return failures
 
-    async def _store(self, symbol: str, company_name: str, items: list[NewsItem]) -> None:
+    async def _store(
+        self, symbol: str, company_name: str, items: list[NewsItem], counts: _RunCounts
+    ) -> None:
+        """Keep the relevant, newsworthy items; fold same-day near-duplicates into kept ones.
+
+        A folded item is not stored for ``symbol``: it is recorded on the article that was kept
+        (``similar``). Articles are shared across symbols, so the same item may still be stored
+        for another symbol, where nothing like it is kept that day.
+        """
         relevant = [i for i in items if is_relevant(symbol, company_name, i.title, i.summary)]
-        await self._repo.upsert_articles(symbol, relevant)
+        newsworthy = [i for i in relevant if not is_low_value(i.title)]
+        counts.low_value += len(relevant) - len(newsworthy)
+        keep, folds = await self._fold_duplicates(symbol, company_name, newsworthy)
+        counts.near_duplicates += sum(len(folded) for folded in folds.values())
+        await self._repo.upsert_articles(symbol, keep)
+        await self._repo.add_similar(folds)
         await self._score(symbol)
+
+    async def _fold_duplicates(
+        self, symbol: str, company_name: str, items: list[NewsItem]
+    ) -> tuple[list[NewsItem], dict[str, list[NewsItem]]]:
+        """Split ``items`` into those to store and ``{kept article key: its duplicates}``.
+
+        Price recaps are never folded (they are hidden from the feed, so nothing may hide
+        behind them and they hide nothing).
+        """
+        candidates = {
+            dedupe_key(i.title, i.source): i for i in items if not is_price_recap(i.title)
+        }
+        if not candidates:
+            return items, {}
+        tz = exchange_tz(symbol)
+        days = [i.published_at.astimezone(tz).date() for i in candidates.values()]
+        start = datetime.combine(min(days), time.min, tzinfo=tz).astimezone(UTC)
+        end = datetime.combine(max(days) + timedelta(days=1), time.min, tzinfo=tz).astimezone(UTC)
+        stored = await self._repo.stories_between(symbol, start, end)
+        new = [Story(key, i.title, i.published_at) for key, i in candidates.items()]
+        folded = fold_near_duplicates(new, stored, tz, ignore_tokens(symbol, company_name))
+        folds: dict[str, list[NewsItem]] = {}
+        for key, main in folded.items():
+            folds.setdefault(main, []).append(candidates[key])
+        keep = [i for i in items if dedupe_key(i.title, i.source) not in folded]
+        return keep, folds
 
     async def _score(self, symbol: str) -> None:
         """Score every unscored article for ``symbol`` in batches; stop quietly if no model."""

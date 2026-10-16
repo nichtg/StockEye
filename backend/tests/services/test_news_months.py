@@ -118,6 +118,7 @@ async def test_months_counts_exclude_recaps_omit_empty_months_and_are_newest_fir
     await seed(db, "AAPL", "aug one", datetime(2026, 8, 10, 15, tzinfo=UTC))
     await seed(db, "AAPL", "aug two", datetime(2026, 8, 11, 15, tzinfo=UTC))
     await seed(db, "MSFT", "msft only", datetime(2026, 7, 11, 15, tzinfo=UTC))
+    await NewsRepository(db).backfill_flags()  # the counts read the flags, as in production
 
     page = await services.news_feed.page("AAPL")
 
@@ -262,10 +263,10 @@ class _CountingRepo(NewsRepository):
         super().__init__(db)
         self.scans = 0
 
-    async def window_titles(self, symbol: str, since: datetime) -> list[tuple[datetime, str]]:
+    async def month_counts(self, symbol: str, since: datetime, tz: ZoneInfo) -> dict[str, int]:
         self.scans += 1
         await asyncio.sleep(0.05)  # keep the scan open so concurrent callers overlap
-        return await super().window_titles(symbol, since)
+        return await super().month_counts(symbol, since, tz)
 
 
 async def test_months_cold_cache_scans_once_under_concurrency(db: Database) -> None:

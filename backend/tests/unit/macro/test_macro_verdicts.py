@@ -366,5 +366,5 @@ def test_verdict_text_never_contains_bare_statistical_symbols(mean: float, p: fl
 
 
 def test_macro_cache_schema_bumped_so_stale_reports_are_rebuilt() -> None:
-    assert analysis.MACRO_CACHE_SCHEMA == 8
-    assert analysis.macro_cache_key("AAPL") == "macro:v8:AAPL"
+    assert analysis.MACRO_CACHE_SCHEMA == 9
+    assert analysis.macro_cache_key("AAPL") == "macro:v9:AAPL"
