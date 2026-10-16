@@ -34,6 +34,15 @@ LOW_VALUE = [
     "Apple Inc. $AAPL Shares Newly Acquired by Caisse de depot et placement du Quebec",
     "Apple Inc. $AAPL Shares Newly Bought by University of Wisconsin Foundation",
     "Apple Inc. (AAPL): Renaissance Technologies Opens New Position",
+    "Apple Inc. $AAPL Stock Purchased by RVW Wealth LLC",
+    "Apple Inc. $AAPL Stock Bought by PFW Advisors LLC",
+    "Apple Inc. $AAPL Stock Acquired by Congress Asset Management Co.",
+    "Apple Inc. $AAPL Stock Bought by Park National Corp OH",
+    "Apple Inc. $AAPL Stock Purchased by Global Wealth Strategies & Associates",
+    "Apple Inc. $AAPL Stock Sold by Denver PWM LLC",
+    "McDonald's Corporation $MCD Stock Acquired by Envestnet Portfolio Solutions Inc.",
+    "Nebius Group N.V. $NBIS Shares Sold by Carnegie Investment Counsel",
+    "Apple Inc. $AAPL Position Purchased by Birch Capital Management LLC",
 ]
 
 # Real news that looks a little like the above and must be kept.
@@ -71,6 +80,11 @@ NEWS = [
     "Microsoft raises its stake in OpenAI to 49% ($MSFT)",
     "Exxon (XOM) sells shares of Imperial Oil (IMO)",
     "Toyota stake in Denso reduced by Toyota Industries Corp",
+    "$NVDA stock bought by Nancy Pelosi",
+    "Apple stock purchased by Warren Buffett's Berkshire? Here's why",
+    "Apple $AAPL stock purchased by Berkshire Hathaway: what it means",
+    "$AAPL stock sold by General Counsel",
+    "Apple stock bought by PFW Advisors LLC",
 ]
 
 

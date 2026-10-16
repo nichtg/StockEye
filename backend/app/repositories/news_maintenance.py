@@ -12,7 +12,7 @@ from pymongo import ASCENDING, UpdateOne
 
 from app.db import Database, Document
 from app.domain.macro import is_price_recap
-from app.domain.news import is_low_value
+from app.domain.news import LOW_VALUE_VERSION, is_low_value
 from app.providers.models import NewsItem
 from app.repositories.news import ARTICLES, SHOWABLE, SIMILAR_CAP, STATE, dedupe_key
 
@@ -101,13 +101,19 @@ class NewsMaintenanceRepository:
         return result.modified_count
 
     async def backfill_flags(self) -> int:
-        """Set ``is_recap`` / ``is_low_value`` on documents that lack either; returns the count.
+        """(Re)set ``is_recap`` / ``is_low_value`` on documents that lack either flag or were
+        flagged under an older ``LOW_VALUE_VERSION``; returns the count.
 
-        Idempotent: updated documents leave the filter, so each pass takes the next batch and
-        a second run finds nothing. Documents flagged low-value stay stored.
+        Idempotent: updated documents carry the current version and leave the filter, so each
+        pass takes the next batch and a second run finds nothing. Documents flagged low-value
+        stay stored.
         """
         missing: Document = {
-            "$or": [{"is_recap": {"$exists": False}}, {"is_low_value": {"$exists": False}}]
+            "$or": [
+                {"is_recap": {"$exists": False}},
+                {"is_low_value": {"$exists": False}},
+                {"low_value_version": {"$not": {"$gte": LOW_VALUE_VERSION}}},
+            ]
         }
         done = 0
         while True:
@@ -124,6 +130,7 @@ class NewsMaintenanceRepository:
                             "$set": {
                                 "is_recap": is_price_recap(doc["title"]),
                                 "is_low_value": is_low_value(doc["title"]),
+                                "low_value_version": LOW_VALUE_VERSION,
                             }
                         },
                     )
