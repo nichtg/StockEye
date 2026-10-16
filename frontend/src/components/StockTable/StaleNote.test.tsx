@@ -63,7 +63,7 @@ describe('StaleNote', () => {
     await user.hover(screen.getByRole('button'));
     expect(
       await screen.findByText(
-        /Couldn't refresh just now; showing the last saved price. Yahoo timed out./,
+        /Couldn't refresh just now; showing the last saved price\. Yahoo timed out\./,
       ),
     ).toBeInTheDocument();
     await user.keyboard('{Escape}');
