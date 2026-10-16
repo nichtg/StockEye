@@ -24,11 +24,13 @@ export function StaleNote({ row, locale }: { row: StockRow; locale?: string }) {
 
   return (
     <ClickAwayListener
+      mouseEvent={open ? 'onClick' : false}
+      touchEvent={open ? 'onTouchEnd' : false}
       onClickAway={() => {
         setOpen(false);
       }}
     >
-      <span>
+      <span style={{ display: 'block' }}>
         <Tooltip
           title={tip}
           open={open}
@@ -38,13 +40,14 @@ export function StaleNote({ row, locale }: { row: StockRow; locale?: string }) {
           onClose={() => {
             setOpen(false);
           }}
-          disableFocusListener={false}
+          describeChild
+          enterDelay={0}
           disableTouchListener
         >
           <ButtonBase
             aria-label={name}
             onClick={() => {
-              setOpen((v) => !v);
+              setOpen(true);
             }}
             onBlur={() => {
               setOpen(false);
@@ -53,13 +56,15 @@ export function StaleNote({ row, locale }: { row: StockRow; locale?: string }) {
               if (e.key === 'Escape') setOpen(false);
             }}
             sx={{
-              display: 'block',
+              display: 'inline-flex',
+              alignItems: 'center',
+              verticalAlign: 'top',
               minHeight: 24,
               minWidth: 24,
               px: 0.5,
-              ml: -0.5,
+              mr: -0.5,
+              my: -0.25,
               borderRadius: 1,
-              textAlign: 'left',
               color: 'ink3',
               typography: 'caption',
               cursor: 'help',

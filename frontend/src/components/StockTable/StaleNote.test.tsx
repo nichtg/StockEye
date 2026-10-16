@@ -52,18 +52,32 @@ describe('StaleNote', () => {
     expect(screen.getByRole('button')).toHaveTextContent('Partial data');
   });
 
-  it('opens the reason on click and closes it on Escape', async () => {
+  it('shows "Last saved price" for an invalid timestamp', () => {
+    render(<StaleNote row={row({ status_as_of: 'garbage' })} />);
+    expect(screen.getByRole('button')).toHaveTextContent('Last saved price');
+  });
+
+  it('opens the reason on hover and closes it on Escape without reopening', async () => {
     const user = userEvent.setup();
     render(<StaleNote row={row({ status_reason: 'Yahoo timed out.' })} />);
-    await user.click(screen.getByRole('button'));
+    await user.hover(screen.getByRole('button'));
     expect(
       await screen.findByText(
-        /Couldn't refresh just now; showing the last saved price\. Yahoo timed out\./,
+        /Couldn't refresh just now; showing the last saved price. Yahoo timed out./,
       ),
     ).toBeInTheDocument();
     await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(screen.queryByText(/Couldn't refresh just now/)).not.toBeInTheDocument();
     });
+  });
+
+  it('stays open when clicked after hover', async () => {
+    const user = userEvent.setup();
+    render(<StaleNote row={row({})} />);
+    await user.hover(screen.getByRole('button'));
+    expect(await screen.findByText(/Couldn't refresh just now/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button'));
+    expect(screen.getByText(/Couldn't refresh just now/)).toBeInTheDocument();
   });
 });

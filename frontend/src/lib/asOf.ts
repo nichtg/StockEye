@@ -13,7 +13,9 @@ export function formatAsOfShort(
     new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'numeric', day: 'numeric' }).format(
       d,
     );
-  if (day(date) === day(now)) {
+  // Over 12 h old always shows the date, so a tab left open overnight can't pass yesterday off as today.
+  const fresh = now.getTime() - date.getTime() <= 12 * 3_600_000;
+  if (fresh && day(date) === day(now)) {
     return new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(date);
   }
   return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);

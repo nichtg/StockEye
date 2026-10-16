@@ -12,7 +12,7 @@ const STALE_REFETCH_MAX = 3;
  * at most 3 times in a row. Background refetches keep the previous data, so nothing flickers.
  */
 export function useWatchlistOverview() {
-  // dataUpdateCount when the current run of stale responses began.
+  // Fetch attempts (successes + failures) when the current run of stale responses began.
   const staleSince = useRef<number | null>(null);
   return useQuery({
     queryKey: overviewKey,
@@ -22,10 +22,9 @@ export function useWatchlistOverview() {
         staleSince.current = null;
         return false;
       }
-      staleSince.current ??= query.state.dataUpdateCount;
-      return query.state.dataUpdateCount - staleSince.current >= STALE_REFETCH_MAX
-        ? false
-        : STALE_REFETCH_MS;
+      const attempts = query.state.dataUpdateCount + query.state.errorUpdateCount;
+      staleSince.current ??= attempts;
+      return attempts - staleSince.current >= STALE_REFETCH_MAX ? false : STALE_REFETCH_MS;
     },
   });
 }

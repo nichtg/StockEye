@@ -2,6 +2,7 @@ import { act, screen } from '@testing-library/react';
 import type { OverviewRow } from '../../api/types';
 import { stubFetch } from '../../test/mockApi';
 import { renderApp } from '../../test/render';
+import { overviewKey } from '../../api/keys';
 import { useWatchlistOverview } from './useWatchlist';
 
 function Probe() {
@@ -45,6 +46,39 @@ describe('useWatchlistOverview refetch', () => {
       expect(overviewCalls(seen)).toBe(i);
     }
     await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(overviewCalls(seen)).toBe(4);
+  });
+
+  it('starts a fresh run of 3 after a stale, ok, stale sequence', async () => {
+    let n = 0;
+    const seen = stubFetch(() => {
+      n += 1;
+      return { body: [{ ...base, status: n === 2 ? 'ok' : 'stale' }] };
+    });
+    const { client } = renderApp(<Probe />);
+    await screen.findByText('rows 1');
+    await act(() => vi.advanceTimersByTimeAsync(30_000)); // call 2 is ok: polling stops
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(overviewCalls(seen)).toBe(2);
+    await act(() => client.refetchQueries({ queryKey: overviewKey })); // call 3 is stale again
+    expect(overviewCalls(seen)).toBe(3);
+    for (let i = 4; i <= 6; i++) {
+      await act(() => vi.advanceTimersByTimeAsync(30_000));
+      expect(overviewCalls(seen)).toBe(i);
+    }
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(overviewCalls(seen)).toBe(6);
+  });
+
+  it('stops polling when the refetch keeps failing', async () => {
+    let n = 0;
+    const seen = stubFetch(() => {
+      n += 1;
+      return n === 1 ? { body: [{ ...base, status: 'stale' }] } : { status: 500, body: {} };
+    });
+    renderApp(<Probe />);
+    await screen.findByText('rows 1');
+    await act(() => vi.advanceTimersByTimeAsync(300_000));
     expect(overviewCalls(seen)).toBe(4);
   });
 

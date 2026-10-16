@@ -15,6 +15,13 @@ describe('formatAsOfShort', () => {
     );
   });
 
+  it('shows the date when over 12 hours old, even on the same calendar day', () => {
+    const late = new Date(2026, 9, 16, 23, 0);
+    expect(formatAsOfShort(new Date(2026, 9, 16, 1, 0).toISOString(), late, 'en-US')).toBe(
+      'Oct 16',
+    );
+  });
+
   it('returns null for an unparseable value', () => {
     expect(formatAsOfShort('nope', now, 'en-US')).toBeNull();
   });
