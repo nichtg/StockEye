@@ -133,6 +133,10 @@ class NewsMaintenanceRepository:
                 if doc.get("is_low_value") is True and not is_low_value(doc["title"])
                 for symbol in doc.get("symbols", [])
             }
+            if exposed:  # before the flags change, so a crash in between cannot lose the reset
+                await self._state.update_many(
+                    {"symbol": {"$in": sorted(exposed)}}, {"$unset": {"dedupe_version": ""}}
+                )
             await self._articles.bulk_write(
                 [
                     UpdateOne(
@@ -149,10 +153,6 @@ class NewsMaintenanceRepository:
                 ],
                 ordered=False,
             )
-            if exposed:
-                await self._state.update_many(
-                    {"symbol": {"$in": sorted(exposed)}}, {"$unset": {"dedupe_version": ""}}
-                )
             done += len(docs)
 
     async def delete_published_before(self, cutoff: datetime) -> int:

@@ -130,9 +130,17 @@ _STRICT_FILING = re.compile(
     r"(?:acquired|purchased|bought|sold)\s+by)\s+"
     r"(?P<buyer>(?:(?:[A-Z][\w.-]*|&)\s+)*[A-Z][\w.-]*)\s*$"
 )
+# The buyer must name a fund-type business. Bare legal forms (LLC, LLP, Inc, Corp, Co, Ltd, PLC)
+# also end operating companies and family vehicles ("Skydance Media LLC", "X Holdings Corp"), so
+# they only count next to a fund word, or as "Corp OH" / "Inc NY" (a US state code ends the
+# title, as in "Park National Corp OH").
 _BUYER_SUFFIX = re.compile(
-    rf"\b(?:{_FUND_WORDS}|Inc|Corp|Co|Ltd|LLP|PLC|Associates|Counsel|PWM)(?!\w)"
+    r"\b(?:Advisors?|Advisory|Management|Capital|Wealth|Partners|Trust|Assets?|Securities"
+    r"|Investments?|Funds?|Associates|Counsel|PWM|Financial|Insurance|Portfolio)(?!\w)"
+    r"|\b(?:Corp|Inc)\.?\s+[A-Z]{2}$"
 )
+# Family and estate vehicles and foundations are news ("Walton Family Holdings Trust").
+_NOT_A_FUND = re.compile(r"\b(?:Family|Revocable|Living|Estate|Foundation)\b", _FLAGS)
 # "Apple Inc. (AAPL): Renaissance Technologies Opens New Position",
 # "Apple Inc. $AAPL Stock: HighTower Advisors LLC Lowers Stake": the mark leads, then a colon,
 # then the actor and the verb, and the title ends with the noun.
@@ -173,8 +181,18 @@ def _verb_filing(rule: re.Pattern[str], title: str) -> bool:
 
 
 def _strict_filing(title: str) -> bool:
+    """The exact "Co $X Stock Bought by <fund>" shape; roles and activists still win.
+
+    "Investment Counsel" is a fund, so only that phrase is removed before the role guard
+    ("Carnegie Investment Counsel" is kept as a filing, "General Counsel" is not).
+    """
     m = _STRICT_FILING.match(title)
-    return m is not None and _BUYER_SUFFIX.search(m["buyer"]) is not None
+    if m is None:
+        return False
+    buyer = m["buyer"]
+    if _INSIDER_OR_ACTIVIST.search(re.sub(r"\bInvestment\s+Counsel\b", "", buyer, flags=_FLAGS)):
+        return False
+    return _BUYER_SUFFIX.search(buyer) is not None and _NOT_A_FUND.search(buyer) is None
 
 
 def _position_by_shares(title: str) -> bool:
