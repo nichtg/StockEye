@@ -559,3 +559,41 @@ macro wording; a security review for the changed news endpoint.
   `production` approval.
 - Follow-ups: `test_discover.py::test_a_marker_older_than_six_hours_no_longer_blocks_the_startup_build` flakes under full-suite
   load (passes alone); Dependabot major bumps.
+
+## Phase 8 (approved 2026-10-16): polish from Phase 7 testing
+
+The user tested Phase 7 locally and chose these options from `.handoff/sdd/report-P8.md`:
+
+| Item | Choice | What |
+|---|---|---|
+| Count chips | 1A | Count in a small bordered badge on the shared baseline; the selected chip's badge inverts |
+| Header line | 2A | Industry as an outlined sentence-case chip under the name; no "headquartered in…" (still in About) |
+| News months on phones | 3A | Chips on desktop, a themed select below `sm`; a one-line intro with one combined "?" term |
+| Sentiment chart | 4A | 8–12 px plot padding; the captions become a small axis with space around it |
+| Article volume | 5A + 5C | Drop same-day near-duplicates and low-value items at ingest; `is_recap`/`is_low_value` flags; delete articles older than 25 months |
+| "Delayed" price | Race fix + 6A | Root cause: a quota-ledger race refused calls falsely; "As of 3:58 PM" note with the reason on tap |
+| Top bar | 7A | Grouped spacing, search on the right, active link by ink colour plus a 2 px indicator |
+
+Branches, each from `main`:
+- `feat/backend-news-trim` (5A + 5C; methodology check, macro cache schema bump)
+- `feat/frontend-chips-news` (1A + 3A)
+- `feat/frontend-header-bar` (2A + 4A + 7A)
+
+### Phase 8 status
+- [x] "Delayed" price, root cause (item 6): a race in the quota ledger refused calls as "per-minute limit reached" with
+  3–4 of 60 used, so watchlist rows fell back to the saved price. Fixed; overview rows gain `status_as_of` (#52)
+- [x] Header industry chip, sentiment chart axis, grouped top bar (2A + 4A + 7A) (#53)
+- [x] Count badges (one shared `LabelWithCount`) and the News month select on phones (1A + 3A) (#54)
+- [x] Stale-price note (6A): "As of 3:58 PM", tap or hover for the reason, also on phones; a quiet refetch after 30 s, at
+  most 3 times (#55)
+- [x] News trim and retention (5A + 5C): same-day near-duplicates and low-value items (fund filings, quote stamps) are not
+  stored; `is_recap`/`is_low_value` flags; month counts in Mongo; a one-off startup pass flags and deduplicates stored
+  history; the study re-checks low-value titles; articles older than 25 months are pruned weekly; macro cache schema 9
+  (#56), with matching glossary wording (#57)
+- Reviews: Opus code review per item, iterated to APPROVED; security review of the overview field; methodology check of
+  the news trim (approved after history dedupe). Live checks at desktop and 375 px. Screenshots re-shot (admin shot
+  unchanged: it needs the admin login).
+- Measured locally: AAPL 2,125 → 1,928 stored articles (146 low-value, 51 duplicates); the startup pass took ~7 s on
+  9,301 articles (234 folds). RKLB's regime label moves from typical to more negative: each story now counts once.
+- Deploys: Pages publishes on merge; the backend image (#52, #56) waits for the user's `production` approval.
+- Follow-ups: Dependabot major bumps; the discover marker test flake under full-suite load.
