@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderApp } from '../../test/render';
 import { WeeklySentiment } from './WeeklySentiment';
@@ -10,6 +10,13 @@ const points = [
 ];
 
 describe('WeeklySentiment', () => {
+  it('puts the two captions in the axis container, positive first', () => {
+    renderApp(<WeeklySentiment points={points} exchange="US" />);
+    const axis = screen.getByTestId('sentiment-axis');
+    const captions = within(axis).getAllByText(/^More (positive|negative)$/);
+    expect(captions.map((c) => c.textContent)).toEqual(['More positive', 'More negative']);
+  });
+
   it('lists every week in the hidden table', () => {
     renderApp(<WeeklySentiment points={points} exchange="US" />);
     expect(screen.getAllByRole('row')).toHaveLength(points.length + 1);

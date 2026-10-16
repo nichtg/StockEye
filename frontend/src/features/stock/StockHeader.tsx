@@ -3,6 +3,7 @@ import Star from '@mui/icons-material/Star';
 import StarBorder from '@mui/icons-material/StarBorder';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -10,7 +11,7 @@ import { useTheme } from '@mui/material/styles';
 import type { DataStatus, StockOut } from '../../api/types';
 import { Direction } from '../../components/Direction';
 import { visuallyHidden } from '../../lib/a11y';
-import { describeCompany } from '../../lib/describeCompany';
+import { describeIndustry } from '../../lib/describeIndustry';
 import { formatAsOf, formatPct, formatPrice, formatSigned } from '../../lib/format';
 import { ExchangeTag } from '../search/ExchangeTag';
 import { useWatchlistSymbols } from '../watchlist/useWatchlist';
@@ -100,14 +101,29 @@ function changeText(stock: StockOut): string {
   return `${amount} (${formatPct(stock.change_pct, { signed: true, digits: 2 })})`;
 }
 
-/** One plain-English line (industry, headquarters); its height is reserved so nothing shifts. */
-function ProfileLine({ symbol }: { symbol: string }) {
-  const profile = useProfile(symbol).data;
-  const line = describeCompany(profile?.industry, profile?.country);
+/** The industry as an outlined chip; its row height is reserved so nothing shifts when it arrives. */
+function IndustryChip({ symbol }: { symbol: string }) {
+  const industry = describeIndustry(useProfile(symbol).data?.industry);
   return (
-    <Typography variant="body2" sx={{ mt: 0.25, minHeight: '1.3125rem', color: 'ink2' }}>
-      {line}
-    </Typography>
+    <Box
+      data-testid="industry-row"
+      sx={{ mt: 0.75, minHeight: 24, display: 'flex', alignItems: 'center' }}
+    >
+      {industry && (
+        <Chip
+          size="small"
+          variant="outlined"
+          data-testid="industry-chip"
+          label={industry}
+          sx={{
+            height: 24,
+            fontSize: '0.8125rem',
+            color: 'ink2',
+            '& .MuiChip-label': { px: 1 },
+          }}
+        />
+      )}
+    </Box>
   );
 }
 
@@ -138,7 +154,7 @@ export function StockHeader({ symbol, stock, loading, statuses }: Props) {
           ) : (
             loading && <Skeleton width={200} />
           )}
-          <ProfileLine symbol={symbol} />
+          <IndustryChip symbol={symbol} />
         </Box>
         <WatchlistToggle symbol={symbol} />
       </Box>

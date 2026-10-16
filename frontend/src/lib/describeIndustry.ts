@@ -1,20 +1,6 @@
 /** Words kept upper-case when the rest of an industry name is lowercased. */
 const ACRONYMS = new Set(['ETF', 'IT', 'US', 'REIT', 'REITs', 'E&P']);
 
-/** Countries whose name reads naturally with "the" ("headquartered in the Netherlands"). */
-const COUNTRIES_WITH_ARTICLE = new Set([
-  'United States',
-  'United Kingdom',
-  'Netherlands',
-  'Philippines',
-  'United Arab Emirates',
-  'Cayman Islands',
-  'Marshall Islands',
-  'Bahamas',
-  'British Virgin Islands',
-  'Czech Republic',
-]);
-
 /**
  * Industries where the second part is already a full noun, so swapping "X - Y" into "Y X" would
  * read wrongly ("Reinsurance insurance"). Keyed by the lowercase Yahoo name.
@@ -57,18 +43,12 @@ function industryPhrase(industry: string): string {
 }
 
 /**
- * One plain-English line for the stock header: "Telecom services, headquartered in Mexico".
- * Either input may be missing; returns '' when both are.
+ * The industry as a sentence-case label for the stock header chip: "Regional banks", "Retail REITs".
+ * Returns '' when the industry is missing.
  */
-export function describeCompany(
-  industry: string | null | undefined,
-  country: string | null | undefined,
-): string {
+export function describeIndustry(industry: string | null | undefined): string {
   const ind = clean(industry);
-  const ctry = clean(country);
-  const parts: string[] = [];
-  if (ind) parts.push(industryPhrase(ind));
-  if (ctry) parts.push(`headquartered in ${COUNTRIES_WITH_ARTICLE.has(ctry) ? 'the ' : ''}${ctry}`);
-  const line = parts.join(', ');
-  return line.charAt(0).toUpperCase() + line.slice(1);
+  if (!ind) return '';
+  const phrase = industryPhrase(ind);
+  return phrase.charAt(0).toUpperCase() + phrase.slice(1);
 }

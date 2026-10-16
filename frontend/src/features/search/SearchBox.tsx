@@ -150,6 +150,7 @@ function SearchField({ onPick, inputRef, showShortcut }: SearchFieldProps) {
                       borderColor: 'line',
                       borderRadius: 1,
                       px: 0.75,
+                      display: { xs: 'none', md: 'block' },
                       fontFamily: 'inherit',
                     }}
                   >
@@ -194,7 +195,7 @@ export function SearchBox() {
 
   if (compact) {
     return (
-      <Box sx={{ ml: 'auto' }}>
+      <Box>
         <IconButton
           aria-label="Search for a stock"
           onClick={() => {
@@ -241,7 +242,7 @@ export function SearchBox() {
   }
 
   return (
-    <Box sx={{ flex: 1, maxWidth: 480, minWidth: 0 }}>
+    <Box sx={{ minWidth: 0 }}>
       <SearchField inputRef={fieldRef} showShortcut />
     </Box>
   );
