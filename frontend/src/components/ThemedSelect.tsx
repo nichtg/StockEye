@@ -5,7 +5,8 @@ import Select from '@mui/material/Select';
 import Typography from '@mui/material/Typography';
 import { useId } from 'react';
 import type { Choice } from './Choice';
-import { CountBadge } from './CountBadge';
+import { visuallyHidden } from '../lib/a11y';
+import { LabelWithCount } from './LabelWithCount';
 
 /**
  * A non-native single-choice menu in the app's look: static label above the field, ink-toned
@@ -47,12 +48,22 @@ export function ThemedSelect({
         displayEmpty
         labelId={labelId}
         value={value}
-        renderValue={() => (
-          <Box component="span" sx={{ display: 'inline-flex', alignItems: 'baseline', gap: '6px' }}>
-            {current?.label ?? value}
-            {current?.count !== undefined && <CountBadge count={current.count} />}
-          </Box>
-        )}
+        renderValue={() => {
+          const text = current?.label ?? value;
+          if (current?.count === undefined) return text;
+          return (
+            <>
+              <LabelWithCount count={current.count} hideBadgeFromSpeech>
+                {text}
+              </LabelWithCount>
+              {unit && (
+                <Box component="span" sx={visuallyHidden}>
+                  , {current.count} {current.count === 1 ? unit[0] : unit[1]}
+                </Box>
+              )}
+            </>
+          );
+        }}
         onChange={(e) => {
           onChange(e.target.value);
         }}
@@ -83,8 +94,13 @@ export function ThemedSelect({
               aria-hidden="true"
               sx={{ visibility: c.value === value ? 'visible' : 'hidden', flexShrink: 0 }}
             />
-            <Box component="span">{c.label}</Box>
-            {c.count !== undefined && <CountBadge count={c.count} inverted={c.value === value} />}
+            {c.count === undefined ? (
+              c.label
+            ) : (
+              <LabelWithCount count={c.count} inverted={c.value === value}>
+                {c.label}
+              </LabelWithCount>
+            )}
           </MenuItem>
         ))}
       </Select>

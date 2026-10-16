@@ -61,6 +61,9 @@ describe('TableControls country filter', () => {
     const user = userEvent.setup();
     const { unmount } = renderApp(<Harness rows={MANY} />);
     await user.click(screen.getByRole('combobox', { name: /Country/ }));
+    expect(
+      screen.getByRole('option', { name: /Canada, [0-9]+ stocks?/ }).querySelector('.count-badge'),
+    ).not.toBeNull();
     await user.click(screen.getByRole('option', { name: /Canada/ }));
     expect(screen.getByTestId('loc')).toHaveTextContent('?country=Canada');
     unmount();

@@ -6,7 +6,7 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { useMemo } from 'react';
 import type { OverviewRow } from '../../api/types';
-import type { Choice } from '../Choice';
+import { STOCKS, type Choice } from '../Choice';
 import { SegmentedChoice } from '../SegmentedChoice';
 import { ThemedSelect } from '../ThemedSelect';
 import { sortKeysFor } from './columns';
@@ -71,6 +71,7 @@ export function TableControls({ rows, state }: Props) {
             value={country ?? ''}
             onChange={onCountry}
             minWidth={220}
+            unit={STOCKS}
           />
         ))}
       {compact && (

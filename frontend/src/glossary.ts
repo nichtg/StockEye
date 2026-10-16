@@ -245,7 +245,7 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   },
   news_labels: {
     title: 'News labels',
-    body: 'A language model scores each headline from −1 to +1: above +0.3 is Positive, below −0.3 is Negative, in between is Neutral. “Not scored yet” means unread. Similar same-day headlines are grouped as one story, labelled with their average.',
+    body: 'A language model scores each headline from −1 to +1: above +0.3 is Positive, below −0.3 Negative, else Neutral. “Not scored yet” means the model hasn’t read that headline yet. Similar same-day headlines show as one row, labelled with the average of their scores.',
   },
   market_cap: {
     title: 'Market cap',

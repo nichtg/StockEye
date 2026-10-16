@@ -3,8 +3,8 @@ import ButtonBase from '@mui/material/ButtonBase';
 import type { Theme } from '@mui/material/styles';
 import { useRef, type KeyboardEvent } from 'react';
 import { segmentedStyles } from '../theme/segmented';
-import type { Choice } from './Choice';
-import { CountBadge } from './CountBadge';
+import { STOCKS, type Choice } from './Choice';
+import { LabelWithCount } from './LabelWithCount';
 
 /** The Newest/Biggest-move look, applied to a group of radio buttons. */
 const groupSx = (theme: Theme) => {
@@ -23,8 +23,6 @@ const groupSx = (theme: Theme) => {
     },
   };
 };
-
-const STOCKS: readonly [string, string] = ['stock', 'stocks'];
 
 /**
  * A single-choice radio group in a segmented track. Arrow keys move the choice (and the focus)
@@ -89,14 +87,13 @@ export function SegmentedChoice({
               onChange(c.value);
             }}
           >
-            {/* Its own baseline row, so the button can still centre it vertically. */}
-            <Box
-              component="span"
-              sx={{ display: 'inline-flex', alignItems: 'baseline', gap: '6px' }}
-            >
-              {c.label}
-              {c.count !== undefined && <CountBadge count={c.count} inverted={checked} />}
-            </Box>
+            {c.count === undefined ? (
+              c.label
+            ) : (
+              <LabelWithCount count={c.count} inverted={checked}>
+                {c.label}
+              </LabelWithCount>
+            )}
           </ButtonBase>
         );
       })}

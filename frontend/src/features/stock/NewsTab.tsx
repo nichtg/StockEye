@@ -70,7 +70,6 @@ const MAX_AUTO_FETCHES = 3;
 
 interface Props {
   symbol: string;
-  name: string | undefined;
   exchange: Exchange;
   /** Live collection progress from the stock page's poller. */
   news: NewsProgress | undefined;

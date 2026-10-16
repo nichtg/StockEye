@@ -8,3 +8,6 @@ export interface Choice {
   /** Undefined for "all": it has no meaningful count of its own. */
   count?: number;
 }
+
+/** What the counts count, by default: singular then plural, for the spoken name ("42 stocks"). */
+export const STOCKS: readonly [string, string] = ['stock', 'stocks'];

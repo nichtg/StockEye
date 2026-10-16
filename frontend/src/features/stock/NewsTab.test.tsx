@@ -21,7 +21,7 @@ function Where() {
 function show(news: NewsProgress | undefined = idle, route = '/') {
   return renderApp(
     <>
-      <NewsTab symbol="AAPL" name="Apple Inc." exchange="US" news={news} />
+      <NewsTab symbol="AAPL" exchange="US" news={news} />
       <Where />
     </>,
     { route },
@@ -362,7 +362,17 @@ describe('NewsTab', () => {
       expect(await screen.findByText('Month 2026-10')).toBeInTheDocument();
       expect(screen.getByTestId('search')).toHaveTextContent('?month=2026-10');
       expect(seen.at(-1)?.search.get('month')).toBe('2026-10');
-      expect(screen.getByRole('combobox', { name: /Month/ })).toHaveTextContent('October 2026');
+      const box = screen.getByRole('combobox', { name: /Month/ });
+      expect(box).toHaveTextContent('October 2026');
+      expect(box.querySelector('.count-badge')).toHaveTextContent('42');
+      expect(box.querySelector('.count-badge')).toHaveAttribute('aria-hidden', 'true');
+      expect(box).toHaveTextContent(', 42 articles');
+      await user.click(box);
+      expect(screen.getByRole('option', { name: 'October 2026, 42 articles' })).toHaveTextContent(
+        '42',
+      );
+      const chosen = screen.getByRole('option', { name: 'October 2026, 42 articles' });
+      expect(chosen.querySelector('.count-badge')).toHaveAttribute('data-inverted', 'true');
     });
 
     it('keeps the chips and no select at sm and up', async () => {
