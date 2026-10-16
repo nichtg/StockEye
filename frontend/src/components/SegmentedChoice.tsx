@@ -17,6 +17,10 @@ const groupSx = (theme: Theme) => {
     flexWrap: 'wrap',
     '& .choice': {
       ...seg.item,
+      // A bare ButtonBase is a native <button>, which does not inherit the page font; match the
+      // Technical/Macro/News tabs (MuiTab) exactly.
+      fontFamily: theme.typography.fontFamily,
+      lineHeight: 1.25,
       fontSize: '0.9375rem',
       fontWeight: 500,
       '&[aria-checked="true"]': seg.selected,
