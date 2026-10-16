@@ -18,8 +18,10 @@ export function AppShell() {
       actions={
         <>
           <MainNav />
-          <SearchBox />
-          <Box sx={{ flex: 1, display: { xs: 'none', md: 'block' } }} />
+          <Box sx={{ flex: 1 }} />
+          <Box sx={{ flex: { xs: '0 0 auto', sm: '0 1 360px' }, minWidth: 0 }}>
+            <SearchBox />
+          </Box>
           <ThemeToggle />
           {user && <AccountMenu user={user} />}
         </>
