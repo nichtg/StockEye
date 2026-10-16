@@ -213,7 +213,7 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   },
   news_day_tones: {
     title: 'Positive, neutral and negative news days',
-    body: 'A day’s headlines are scored from −1 to +1 and averaged. Above +0.3 is a positive news day, below −0.3 is a negative one, and anything in between is neutral.',
+    body: 'A day’s headlines are scored from −1 to +1 and averaged. Above +0.3 is a positive news day, below −0.3 is a negative one, and anything in between is neutral. Repeats of one story count once.',
   },
   preliminary: {
     title: 'Preliminary',
@@ -245,7 +245,7 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
   },
   news_labels: {
     title: 'News labels',
-    body: 'A language model scores each headline from −1 to +1: above +0.3 is Positive, below −0.3 Negative, else Neutral. “Not scored yet” means the model hasn’t read that headline yet. Similar same-day headlines show as one row, labelled with the average of their scores.',
+    body: 'A language model scores each headline from −1 to +1: above +0.3 is Positive, below −0.3 Negative, else Neutral. “Not scored yet” means the model hasn’t read that headline yet. Similar same-day headlines show as one row, labelled with the average of those we scored.',
   },
   market_cap: {
     title: 'Market cap',
