@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from app.clock import utc_now
 from app.db import Database
 from app.domain.macro import ScoredArticle, exclude_price_recaps
+from app.domain.news import is_low_value
 from app.logging_setup import get_logger
 from app.repositories.cache import CacheRepository
 from app.services import compute
@@ -54,8 +55,10 @@ CACHE_SCHEMA = 3
 # masked, the ``events`` list, price-recap headlines excluded, renamed reliability labels and
 # ``earnings_note``. 6 = scope period dates, averaged-finding wording, ``n_car_pre_5``.
 # 7 = ``top_events`` limited to the past 3 months, ``top_events_since``.
+# 8 = plain verdicts and bucket ranges for the news findings.
+# 9 = the study inputs changed (no near-duplicates, no low-value items).
 # Reports cached under an older method must never be served.
-MACRO_CACHE_SCHEMA = 8
+MACRO_CACHE_SCHEMA = 9
 RECAP_ONLY_REASON = (
     "Only price-move recap headlines were found; they are left out of the news study."
 )
@@ -225,7 +228,12 @@ class AnalysisService:
         progress, stored, news_status = await news_inputs(name)
         # Recaps report a move that already happened (reverse causality). Dropped here, at read
         # time and for every path into the macro study, so already-stored news is cleaned too.
-        articles = exclude_price_recaps(stored)
+        # Low-value items (holdings filings, quote tickers) are dropped the same way: the stored
+        # flag only pre-filters in Mongo, and checking here keeps the study right while the
+        # startup backfill runs and whenever the detector is updated.
+        articles = [a for a in exclude_price_recaps(stored) if not is_low_value(a.title)]
+        # A report cached while the startup dedupe backfill runs may hold a few duplicates; it
+        # expires within the cache TTL, so we accept that rather than thread backfill state in.
         if stored and not articles and news_status.state == "ok":
             news_status = ok(news_status.as_of, RECAP_ONLY_REASON)
         report: MacroReportOut | None = None

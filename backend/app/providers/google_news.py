@@ -1,6 +1,5 @@
 """Google News RSS search. No API key; the only provider that can reach far back for backfill."""
 
-import calendar
 import html
 import re
 from datetime import UTC, datetime
@@ -9,6 +8,7 @@ from itertools import pairwise
 import feedparser
 import httpx
 
+from app.domain.calendar_months import months_before
 from app.providers.collect import collect_items
 from app.providers.http import get_text
 from app.providers.models import Exchange, NewsItem, NewsQuery
@@ -22,21 +22,12 @@ def _strip_html(raw: str) -> str:
     return _SPACES.sub(" ", html.unescape(_TAGS.sub(" ", raw))).strip()
 
 
-def _shift_months(moment: datetime, months: int) -> datetime:
-    """Move ``moment`` back by whole calendar months, clamping the day to the month length."""
-    index = moment.year * 12 + (moment.month - 1) - months
-    year, month = divmod(index, 12)
-    month += 1
-    day = min(moment.day, calendar.monthrange(year, month)[1])
-    return moment.replace(year=year, month=month, day=day)
-
-
 def monthly_windows(end: datetime, months: int = 24) -> list[tuple[datetime, datetime]]:
     """Consecutive one-month windows ending at ``end``, oldest first.
 
     Google News caps each RSS response at about 100 items, so history is fetched in slices.
     """
-    edges = [_shift_months(end, n) for n in range(months, -1, -1)]
+    edges = [months_before(end, n) for n in range(months, -1, -1)]
     return list(pairwise(edges))
 
 

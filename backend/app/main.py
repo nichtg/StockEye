@@ -83,6 +83,10 @@ def create_app(
                 await schedule_startup_discover(scheduler, services)
             except Exception:  # a cache hiccup must not stop the app from starting
                 log.exception("discover_startup_schedule_failed")
+        # One-off tidy of stored news (flags, retroactive near-duplicate folding). Runs in the
+        # background, owned by the news service (cancelled by ``services.aclose``). Once every
+        # deployment has been through it, this call can go.
+        services.news.backfill_flags(services.market.company_name)
         log.info("startup_complete", database=settings.mongodb_db)
         try:
             yield

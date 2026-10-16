@@ -15,6 +15,7 @@ from app.services.analysis import RECAP_ONLY_REASON, macro_cache_key
 from app.services.container import Services
 from app.services.errors import AppError
 from tests.services.fakes import CLOSED_NOW, FakeClock, FakeMarketData, FakeNews, FakeScorer
+from tests.services.test_news_feed import seed
 
 pytestmark = pytest.mark.integration
 
@@ -535,3 +536,21 @@ async def test_macro_with_only_recaps_stored_says_so_in_the_news_status(
     response = await services.analysis.macro("AAPL", USER)
 
     assert response.data_status.news.reason == RECAP_ONLY_REASON
+
+
+async def test_macro_report_never_sees_an_unflagged_low_value_article(
+    services: Services, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    filing = "Apple Inc. $AAPL Holdings Trimmed by Birch Capital Management LLC"
+    await services.news.ensure_ingested("AAPL", "Apple Inc.")
+    await services.news.wait("AAPL")
+    # Stored without flags, as before the backfill: Mongo cannot pre-filter it.
+    await seed(db, "AAPL", filing, CLOSED_NOW - timedelta(days=40), 0.9)
+    stored, _ = await services.news.scored_articles("AAPL", NOW_START, CLOSED_NOW)
+    assert filing in {a.title for a in stored}
+    seen = _capture_macro_titles(monkeypatch)
+
+    await services.analysis.macro("AAPL", USER)
+
+    assert seen
+    assert filing not in seen

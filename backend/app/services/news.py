@@ -6,30 +6,36 @@ failed window is simply retried on the next run. Backfill windows are whole cale
 their ``YYYY-MM`` keys stay stable from day to day) fetched from one ``backfill`` provider; the
 current, partial month is covered by the incremental pass over every ``live`` provider that covers
 the symbol's exchange. Providers arrive already guarded.
+
+Before storing, no-news items and same-day near-duplicates are trimmed (``services.news_trim``).
 """
 
 import asyncio
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from app.clock import utc_now
 from app.db import Database
 from app.domain.macro import ScoredArticle
+from app.domain.news import core_name
 from app.logging_setup import get_logger
 from app.providers.base import NewsProvider
 from app.providers.errors import ProviderError, QuotaExhaustedError
 from app.providers.google_news import monthly_windows
 from app.providers.models import NewsItem, NewsQuery
+from app.providers.quota import scheduled_calls
 from app.repositories.news import (
     ArticleText,
     IngestState,
     NewsRepository,
     SentimentRecord,
 )
+from app.repositories.news_maintenance import NewsMaintenanceRepository
 from app.sentiment.scorer import SentimentScore, SentimentScorer, SentimentUnavailableError
 from app.services.calendars import exchange_for, root_ticker
+from app.services.news_trim import backfill_stored_news, trim_items
 from app.services.status import DataStatus, ok
 
 log = get_logger(__name__)
@@ -43,28 +49,11 @@ SCORE_BATCH = 64
 # Vendor error text can echo request details, so state (shown to users) gets this instead.
 INGEST_FAILED = "News collection failed; it will retry automatically."
 
-_SUFFIXES = frozenset(
-    {"inc", "corp", "corporation", "ltd", "limited", "holdings", "group", "co", "plc", "nv", "sa"}
-)
-_NAME_NOISE = re.compile(r"[^\w&\s-]")
-_SPACES = re.compile(r"\s+")
 _MIN_TICKER_LENGTH = 3
 
 SENTIMENT_DOWN_REASON = (
     "News sentiment is unavailable: the sentiment model is not installed or could not be loaded."
 )
-
-
-def core_name(company_name: str) -> str:
-    """Company name without legal suffixes and punctuation, e.g. "DBS Group Holdings Ltd" -> "DBS".
-
-    Only trailing suffix words are stripped, so a name that is nothing but suffixes is kept whole.
-    """
-    cleaned = _SPACES.sub(" ", _NAME_NOISE.sub("", company_name.replace(".", ""))).strip()
-    words = cleaned.split(" ")
-    while len(words) > 1 and words[-1].lower() in _SUFFIXES:
-        words.pop()
-    return " ".join(words)
 
 
 def is_relevant(symbol: str, company_name: str, title: str, summary: str | None) -> bool:
@@ -80,6 +69,12 @@ def is_relevant(symbol: str, company_name: str, title: str, summary: str | None)
     return len(root) >= _MIN_TICKER_LENGTH and bool(
         re.search(rf"(?<![\w.]){re.escape(root)}(?![\w])", text)
     )
+
+
+@dataclass
+class _RunCounts:  # what one ingest run left out, for its single log line
+    low_value: int = 0
+    near_duplicates: int = 0
 
 
 @dataclass(frozen=True)
@@ -122,12 +117,16 @@ class NewsService:
         max_concurrent: int = 2,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
+        self._db = db
         self._repo = NewsRepository(db)
+        self._maint = NewsMaintenanceRepository(db)
         self._backfill = backfill  # the one adapter that can reach far back
         self._live = live
         self._scorer = scorer
         self._clock = clock
         self._tasks: dict[str, asyncio.Task[None]] = {}  # running ingestions only
+        self._runs: dict[str, _RunCounts] = {}  # trimming counts of the runs in progress
+        self._backfill_task: asyncio.Task[object] | None = None
         self._gate = asyncio.Semaphore(max_concurrent)  # vendors and the scorer are shared
 
     # --- ingestion -------------------------------------------------------------------------
@@ -183,10 +182,29 @@ class NewsService:
             tasks = [self._tasks[symbol]] if symbol in self._tasks else []
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    def backfill_flags(self, company_name: Callable[[str], Awaitable[str]] | None = None) -> None:
+        """Start the one-off tidy of stored news in the background; idempotent, never raises.
+
+        ``company_name`` is the feed's lookup. ``shutdown`` cancels it; drop the caller once
+        every deployment has run it.
+        """
+        if self._backfill_task is None or self._backfill_task.done():
+            # The task copies this context: its name lookups are background work, so they use
+            # the scheduled quota share and never crowd out users after a restart.
+            with scheduled_calls():
+                self._backfill_task = asyncio.create_task(
+                    backfill_stored_news(
+                        self._db, company_name=company_name, is_running=self._running
+                    )
+                )
+
     async def shutdown(self) -> None:
-        for task in self._tasks.values():
+        tasks: list[asyncio.Task[None] | asyncio.Task[object]] = list(self._tasks.values())
+        if self._backfill_task is not None:
+            tasks.append(self._backfill_task)
+        for task in tasks:
             task.cancel()
-        await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
 
     async def _run(
@@ -194,6 +212,7 @@ class NewsService:
     ) -> None:
         """The task body. Catches everything: a background task must never take the app down."""
         failed = False
+        counts = self._runs[symbol] = _RunCounts()
         try:
             async with self._gate:
                 await self._repo.begin_run(symbol, self._clock())
@@ -208,6 +227,13 @@ class NewsService:
             await self._repo.end_run(symbol, error)
         except Exception:
             log.exception("news_ingest_state_write_failed", symbol=symbol)
+        del self._runs[symbol]
+        log.info(
+            "news_ingest_trimmed",
+            symbol=symbol,
+            low_value=counts.low_value,
+            near_duplicates=counts.near_duplicates,
+        )
 
     async def _ingest(
         self, symbol: str, company_name: str, windows: list[tuple[datetime, datetime]]
@@ -238,7 +264,10 @@ class NewsService:
         )
 
     async def _backfill_months(
-        self, symbol: str, company_name: str, windows: list[tuple[datetime, datetime]]
+        self,
+        symbol: str,
+        company_name: str,
+        windows: list[tuple[datetime, datetime]],
     ) -> int:
         """Fetch and store each missing month, newest first; returns how many were skipped.
 
@@ -293,8 +322,15 @@ class NewsService:
         return failures
 
     async def _store(self, symbol: str, company_name: str, items: list[NewsItem]) -> None:
+        """Keep the relevant, newsworthy items and fold same-day near-duplicates (``news_trim``)."""
         relevant = [i for i in items if is_relevant(symbol, company_name, i.title, i.summary)]
-        await self._repo.upsert_articles(symbol, relevant)
+        trimmed = await trim_items(self._repo, symbol, company_name, relevant)
+        await self._repo.upsert_articles(symbol, trimmed.keep)
+        await self._maint.add_similar(trimmed.folds)
+        counts = self._runs.get(symbol)
+        if counts is not None:
+            counts.low_value += trimmed.low_value
+            counts.near_duplicates += trimmed.folded
         await self._score(symbol)
 
     async def _score(self, symbol: str) -> None:
