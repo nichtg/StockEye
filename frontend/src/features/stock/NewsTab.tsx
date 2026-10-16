@@ -76,7 +76,7 @@ interface Props {
   news: NewsProgress | undefined;
 }
 
-export function NewsTab({ symbol, name, exchange, news }: Props) {
+export function NewsTab({ symbol, exchange, news }: Props) {
   const [params, setParams] = useSearchParams();
   // The unfiltered list stays mounted: its first page carries the chips, which must not vanish
   // while a month (whose later pages have no counts) is showing.
@@ -89,7 +89,6 @@ export function NewsTab({ symbol, name, exchange, news }: Props) {
   const pages = query.data?.pages;
   const articles = useMemo(() => pages?.flatMap((p) => p.articles) ?? [], [pages]);
   const days = useMemo(() => groupByDay(articles, exchange), [articles, exchange]);
-  const hasGroups = articles.some((a) => a.similar.length > 0);
 
   const chooseMonth = (value: string) => {
     setParams(
@@ -206,22 +205,10 @@ export function NewsTab({ symbol, name, exchange, news }: Props) {
   return (
     <Box>
       <Typography sx={{ color: 'ink2', mb: 2, maxWidth: 720 }}>
-        {month
-          ? `News about ${name ?? symbol} in ${period}, newest first. `
-          : `News about ${name ?? symbol} from the past 6 months, newest first. `}
-        Headlines that only report a price move are left out.{' '}
-        <Term id="news_sentiment" label="a sentiment label">
-          How the labels work
+        Newest first; price-recap headlines left out.{' '}
+        <Term id="news_labels" label="a news label">
+          About these labels
         </Term>
-        {hasGroups && (
-          <>
-            {' '}
-            Similar headlines from the same day are grouped.{' '}
-            <Term id="grouped_stories" label="a grouped story">
-              How grouping works
-            </Term>
-          </>
-        )}
       </Typography>
       {months && months.length > 0 && (
         <Box sx={{ mb: 2 }}>

@@ -33,3 +33,14 @@ export function knownMonth(
 ): string | undefined {
   return value && months?.some((m) => m.month === value) ? value : undefined;
 }
+
+/**
+ * The phone menu's options: full month names, and "All months" carries the total so the menu reads
+ * "All months [744]". The total is the sum of the month counts (every article sits in one month).
+ */
+export function monthSelectChoices(months: readonly NewsMonth[]): Choice[] {
+  return [
+    { value: '', label: 'All months', count: months.reduce((sum, m) => sum + m.count, 0) },
+    ...months.map((m) => ({ value: m.month, label: monthName(m.month), count: m.count })),
+  ];
+}

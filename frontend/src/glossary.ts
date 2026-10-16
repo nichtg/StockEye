@@ -46,8 +46,7 @@ export const TERM_IDS = [
   'p_value',
   'statistical_reliability',
   'news_effect',
-  'news_sentiment',
-  'grouped_stories',
+  'news_labels',
   'market_cap',
   'discover_lists',
   'pe_ratio',
@@ -244,13 +243,9 @@ export const GLOSSARY: Record<TermId, GlossaryEntry> = {
     title: 'News effect',
     body: 'How sure we can be that news, rather than luck, is linked to these moves. It is not a buy or sell signal.',
   },
-  news_sentiment: {
-    title: 'News sentiment',
-    body: 'A language model scores each headline from −1 to +1. Above +0.3 shows as Positive, below −0.3 as Negative, and anything between as Neutral. “Not scored yet” means the model has not read that headline yet.',
-  },
-  grouped_stories: {
-    title: 'Grouped stories',
-    body: 'Headlines from the same day with very similar wording are usually one story told by several outlets. We show them as one row, and its label is the average of their sentiment.',
+  news_labels: {
+    title: 'News labels',
+    body: 'A language model scores each headline from −1 to +1: above +0.3 is Positive, below −0.3 is Negative, in between is Neutral. “Not scored yet” means unread. Similar same-day headlines are grouped as one story, labelled with their average.',
   },
   market_cap: {
     title: 'Market cap',

@@ -85,7 +85,7 @@ describe('NewsTab', () => {
     );
     show();
 
-    expect(await screen.findByText(/News about Apple Inc\. from the past 6 months/)).toBeVisible();
+    expect(await screen.findByText(/Newest first; price-recap headlines left out./)).toBeVisible();
     // 02:30 UTC on Oct 4 is still Oct 3 in New York, so it joins the Oct 3 group.
     const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
     expect(headings).toEqual(['Sat, Oct 3, 2026', 'Thu, Oct 1, 2026']);
@@ -96,7 +96,7 @@ describe('NewsTab', () => {
     const second = screen.getByRole('region', { name: 'Thu, Oct 1, 2026' });
     expect(within(second).getByText('Neutral')).toBeInTheDocument();
     expect(within(second).getByText('Not scored yet')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'What is a sentiment label?' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'What is a news label?' })).toBeVisible();
 
     const link = screen.getByRole('link', { name: 'Afternoon news' });
     expect(link).toHaveAttribute('href', 'https://example.com/a');
@@ -241,9 +241,6 @@ describe('NewsTab', () => {
       expect(await screen.findByText('Month 2026-10')).toBeInTheDocument();
       expect(screen.getByTestId('search')).toHaveTextContent('?month=2026-10');
       expect(seen.at(-1)?.search.get('month')).toBe('2026-10');
-      expect(
-        screen.getByText(/News about Apple Inc. in October 2026, newest first./),
-      ).toBeVisible();
       expect(screen.getByRole('radio', { name: 'October 2026, 42 articles' })).toBeChecked();
 
       await user.click(screen.getByRole('radio', { name: 'All months' }));
@@ -308,6 +305,76 @@ describe('NewsTab', () => {
     });
   });
 
+  describe('count badges', () => {
+    it('shows a badge on counted chips only, inverted on the chosen one', async () => {
+      monthsApi();
+      show(idle, '/?month=2026-09');
+      await screen.findByText('Month 2026-09');
+      const group = screen.getByRole('radiogroup', { name: 'Filter by month' });
+      const all = within(group).getByRole('radio', { name: 'All months' });
+      expect(all.querySelector('.count-badge')).toBeNull();
+      const oct = within(group).getByRole('radio', { name: 'October 2026, 42 articles' });
+      const sep = within(group).getByRole('radio', { name: 'September 2026, 1 article' });
+      expect(oct.querySelector('.count-badge')).toHaveTextContent('42');
+      expect(oct.querySelector('.count-badge')).toHaveAttribute('data-inverted', 'false');
+      expect(sep.querySelector('.count-badge')).toHaveAttribute('data-inverted', 'true');
+    });
+  });
+
+  describe('intro', () => {
+    it('is one line with a single term', async () => {
+      monthsApi();
+      show();
+      await screen.findByText('All news');
+      expect(screen.getAllByRole('button', { name: /^What is / })).toHaveLength(1);
+      expect(screen.getByRole('button', { name: 'What is a news label?' })).toBeVisible();
+    });
+  });
+
+  describe('month select on a phone', () => {
+    const stubWidth = (phone: boolean) => {
+      vi.stubGlobal(
+        'matchMedia',
+        (query: string): MediaQueryList =>
+          ({
+            matches: phone && query.includes('max-width'),
+            media: query,
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+            addListener: () => undefined,
+            removeListener: () => undefined,
+            dispatchEvent: () => false,
+            onchange: null,
+          }) as MediaQueryList,
+      );
+    };
+
+    it('replaces the chips with a select that sets ?month= and loads that month', async () => {
+      stubWidth(true);
+      const user = userEvent.setup();
+      const seen = monthsApi();
+      show();
+      await screen.findByText('All news');
+      expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('combobox', { name: /Month/ }));
+      expect(screen.getByRole('option', { name: 'All months, 43 articles' })).toBeVisible();
+      await user.click(screen.getByRole('option', { name: 'October 2026, 42 articles' }));
+      expect(await screen.findByText('Month 2026-10')).toBeInTheDocument();
+      expect(screen.getByTestId('search')).toHaveTextContent('?month=2026-10');
+      expect(seen.at(-1)?.search.get('month')).toBe('2026-10');
+      expect(screen.getByRole('combobox', { name: /Month/ })).toHaveTextContent('October 2026');
+    });
+
+    it('keeps the chips and no select at sm and up', async () => {
+      stubWidth(false);
+      monthsApi();
+      show();
+      await screen.findByText('All news');
+      expect(screen.getByRole('radiogroup', { name: 'Filter by month' })).toBeVisible();
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    });
+  });
+
   describe('grouped stories', () => {
     it('expands and collapses the similar stories as links', async () => {
       const user = userEvent.setup();
@@ -340,7 +407,6 @@ describe('NewsTab', () => {
       const button = await screen.findByRole('button', { name: '+2 similar stories' });
       expect(button).toHaveAttribute('aria-expanded', 'false');
       expect(screen.queryByRole('link', { name: 'Same story, outlet B' })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'What is a grouped story?' })).toBeVisible();
 
       await user.click(button);
       expect(button).toHaveAttribute('aria-expanded', 'true');

@@ -3,32 +3,20 @@ import ButtonBase from '@mui/material/ButtonBase';
 import type { Theme } from '@mui/material/styles';
 import { useRef, type KeyboardEvent } from 'react';
 import { segmentedStyles } from '../theme/segmented';
-import { countSx, type Choice } from './Choice';
+import type { Choice } from './Choice';
+import { CountBadge } from './CountBadge';
 
 /** The Newest/Biggest-move look, applied to a group of radio buttons. */
-const groupSx = (scroll: boolean) => (theme: Theme) => {
+const groupSx = (theme: Theme) => {
   const seg = segmentedStyles(theme.palette);
   return {
     ...seg.track,
     display: 'flex',
     gap: 0.5,
     maxWidth: '100%',
-    // A long row scrolls inside its own track instead of widening the page.
-    ...(scroll
-      ? {
-          flexWrap: 'nowrap',
-          overflowX: 'auto',
-          width: 'fit-content',
-          scrollbarWidth: 'none',
-          '&::-webkit-scrollbar': { display: 'none' },
-        }
-      : { flexWrap: 'wrap' }),
+    flexWrap: 'wrap',
     '& .choice': {
-      ...(scroll ? { flexShrink: 0, whiteSpace: 'nowrap' } : {}),
       ...seg.item,
-      display: 'inline-flex',
-      alignItems: 'baseline',
-      gap: 0.75,
       fontSize: '0.9375rem',
       fontWeight: 500,
       '&[aria-checked="true"]': seg.selected,
@@ -48,7 +36,6 @@ export function SegmentedChoice({
   value,
   onChange,
   unit = STOCKS,
-  scroll = false,
 }: {
   label: string;
   choices: Choice[];
@@ -56,8 +43,6 @@ export function SegmentedChoice({
   onChange: (value: string) => void;
   /** What the counts count, singular then plural, for the spoken name ("42 articles"). */
   unit?: readonly [string, string];
-  /** One line that scrolls sideways when it is too long, rather than wrapping. */
-  scroll?: boolean;
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -82,7 +67,7 @@ export function SegmentedChoice({
   };
 
   return (
-    <Box role="radiogroup" aria-label={label} onKeyDown={onKeyDown} sx={groupSx(scroll)}>
+    <Box role="radiogroup" aria-label={label} onKeyDown={onKeyDown} sx={groupSx}>
       {choices.map((c, i) => {
         const checked = c.value === value;
         return (
@@ -104,12 +89,14 @@ export function SegmentedChoice({
               onChange(c.value);
             }}
           >
-            {c.label}
-            {c.count !== undefined && (
-              <Box component="span" sx={countSx}>
-                {c.count}
-              </Box>
-            )}
+            {/* Its own baseline row, so the button can still centre it vertically. */}
+            <Box
+              component="span"
+              sx={{ display: 'inline-flex', alignItems: 'baseline', gap: '6px' }}
+            >
+              {c.label}
+              {c.count !== undefined && <CountBadge count={c.count} inverted={checked} />}
+            </Box>
           </ButtonBase>
         );
       })}
