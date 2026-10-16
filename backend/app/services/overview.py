@@ -1,6 +1,7 @@
 """Watchlist overview: one summary row per symbol, where one bad symbol never spoils the list."""
 
 import asyncio
+from datetime import datetime
 
 from pydantic import BaseModel
 
@@ -35,6 +36,9 @@ class OverviewRow(BaseModel):
     market_cap: float | None  # in ``currency``
     status: State
     status_reason: str | None
+    # When the row's status is not "ok": the oldest ``as_of`` among the inputs that are not ok
+    # (for a stale quote, when the saved quote was fetched). None when ok or unknown.
+    status_as_of: datetime | None = None
 
 
 def _failed(symbol: str, reason: str) -> OverviewRow:
@@ -97,6 +101,7 @@ async def _row(market: MarketDataService, analysis: AnalysisService, symbol: str
         else None
     )
     overall = combine(statuses)
+    stale_stamps = [s.as_of for s in statuses if s.state != "ok" and s.as_of is not None]
     return OverviewRow(
         symbol=symbol,
         name=quote.name,
@@ -111,6 +116,7 @@ async def _row(market: MarketDataService, analysis: AnalysisService, symbol: str
         market_cap=profile.market_cap if profile else None,
         status=overall.state,
         status_reason=overall.reason,
+        status_as_of=min(stale_stamps) if stale_stamps else None,
     )
 
 

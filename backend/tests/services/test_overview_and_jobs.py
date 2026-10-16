@@ -6,14 +6,14 @@ from bson import ObjectId
 from app.db import Database
 from app.jobs.ingest import refresh_exchange
 from app.jobs.scheduler import build_scheduler, schedule_startup_discover
-from app.providers.errors import TransientProviderError
+from app.providers.errors import RateLimitedError, TransientProviderError
 from app.providers.models import Bar, Interval
 from app.providers.quota import current_priority
 from app.repositories.cache import CacheRepository
 from app.repositories.watchlists import WatchlistsRepository
 from app.services.container import Services
 from app.services.overview import build_overview
-from tests.services.fakes import CLOSED_NOW, FakeMarketData
+from tests.services.fakes import CLOSED_NOW, FakeClock, FakeMarketData
 
 pytestmark = pytest.mark.integration
 
@@ -198,3 +198,54 @@ async def test_overview_failing_profile_still_gives_an_ok_row_with_empty_fields(
     assert row.status == "ok"
     assert row.last_price is not None
     assert (row.country, row.sector, row.market_cap) == (None, None, None)
+
+
+async def test_overview_ok_row_has_no_status_as_of(services: Services) -> None:
+    (row,) = await build_overview(services.market, services.analysis, ["AAPL"])
+
+    assert row.status == "ok"
+    assert row.status_as_of is None
+
+
+async def test_overview_stale_quote_row_reports_when_the_saved_quote_was_fetched(
+    services: Services, clock: FakeClock, provider: FakeMarketData
+) -> None:
+    quote, _ = await services.market.quote("AAPL")
+    await services.market.daily_history("AAPL")
+    clock.now = CLOSED_NOW + timedelta(hours=2)
+    provider.fail_with = RateLimitedError("yahoo")
+
+    (row,) = await build_overview(services.market, services.analysis, ["AAPL"])
+
+    assert row.status != "ok"
+    assert row.status_as_of == quote.as_of
+
+
+async def test_overview_failed_row_has_no_status_as_of(
+    services: Services, provider: FakeMarketData
+) -> None:
+    provider.fail_symbols["MSFT"] = TransientProviderError("yahoo", "down")
+
+    (row,) = await build_overview(services.market, services.analysis, ["MSFT"])
+
+    assert row.status == "unavailable"
+    assert row.status_as_of is None
+
+
+async def test_overview_stale_history_and_quote_report_the_oldest_saved_copy(
+    services: Services, clock: FakeClock, provider: FakeMarketData
+) -> None:
+    clock.now = CLOSED_NOW
+    _, history_status = await services.market.daily_history("AAPL")
+    older = history_status.as_of
+    assert older is not None
+    clock.now = CLOSED_NOW + timedelta(hours=1)
+    quote, _ = await services.market.quote("AAPL")
+    assert quote.as_of > older
+    clock.now = CLOSED_NOW + timedelta(days=4)
+    provider.fail_with = RateLimitedError("yahoo")
+
+    (row,) = await build_overview(services.market, services.analysis, ["AAPL"])
+
+    assert row.status != "ok"
+    assert row.status_as_of == older
