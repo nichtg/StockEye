@@ -51,6 +51,17 @@ describe('AppShell navigation', () => {
     expect(watchlist).not.toHaveAttribute('aria-current');
   });
 
+  it('gives the active link the same font weight as an inactive one, so the row does not shift', async () => {
+    stubViewport(false);
+    renderShell('/discover');
+    const nav = await screen.findByRole('navigation', { name: 'Main', hidden: true });
+    const active = within(nav).getByRole('link', { name: 'Discover', hidden: true });
+    const idle = within(nav).getByRole('link', { name: 'Watchlist', hidden: true });
+    expect(active).toHaveAttribute('aria-current', 'page');
+    expect(getComputedStyle(active).fontWeight).toBe('500');
+    expect(getComputedStyle(idle).fontWeight).toBe(getComputedStyle(active).fontWeight);
+  });
+
   it('keeps the links out of the account menu on a wide screen, so the arrow keys reach Log out', async () => {
     stubViewport(false);
     const user = userEvent.setup();
