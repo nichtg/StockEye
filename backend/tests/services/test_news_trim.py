@@ -9,7 +9,7 @@ import pytest
 
 from app.db import Database
 from app.domain.macro import is_price_recap
-from app.domain.news import is_low_value
+from app.domain.news import LOW_VALUE_VERSION, is_low_value
 from app.providers.models import NewsItem, NewsQuery
 from app.repositories.news import ARTICLES, SIMILAR_CAP, STATE, dedupe_key
 from app.repositories.news_maintenance import (
@@ -195,6 +195,68 @@ async def test_backfill_flags_marks_old_documents_and_is_idempotent(db: Database
     assert docs["Apple Inc. $AAPL Holdings Trimmed by Birch Capital"]["is_low_value"] is True
     assert docs["Apple unveils new MacBook lineup"]["is_recap"] is False
     assert docs["Apple unveils new MacBook lineup"]["is_low_value"] is False
+
+
+async def test_backfill_flags_reflags_documents_stamped_with_an_older_rule_version(
+    db: Database,
+) -> None:
+    title = "Apple Inc. $AAPL Stock Bought by PFW Advisors LLC"
+    await seed(db, "AAPL", title, DAY)
+    await db[ARTICLES].update_many(
+        {}, {"$set": {"is_recap": False, "is_low_value": False, "low_value_version": 1}}
+    )
+
+    first = await backfill_stored_news(db)
+    second = await backfill_stored_news(db)
+
+    doc = await db[ARTICLES].find_one({"title": title})
+    assert doc is not None
+    assert doc["is_low_value"] is True
+    assert doc["low_value_version"] == LOW_VALUE_VERSION
+    assert (first.flagged, second.flagged) == (1, 0)
+
+
+async def test_backfill_flags_first_deploy_flags_and_stamps_unversioned_documents(
+    db: Database,
+) -> None:
+    filing = "Apple Inc. $AAPL Stock Sold by Denver PWM LLC"
+    news = "Apple unveils new MacBook lineup"
+    await seed(db, "AAPL", filing, DAY)
+    await seed(db, "AAPL", news, DAY)
+    # Both flags present, no stamp: what production holds before this change.
+    await db[ARTICLES].update_many({}, {"$set": {"is_recap": False, "is_low_value": False}})
+
+    flagged = await NewsMaintenanceRepository(db).backfill_flags()
+
+    docs = {d["title"]: d async for d in db[ARTICLES].find({})}
+    assert flagged == 2
+    assert docs[filing]["is_low_value"] is True
+    assert docs[news]["is_low_value"] is False
+    assert {d["low_value_version"] for d in docs.values()} == {LOW_VALUE_VERSION}
+
+
+async def test_backfill_flags_unflags_what_the_rule_now_keeps_and_refolds_its_symbols(
+    db: Database,
+) -> None:
+    news = "Apple unveils new MacBook lineup"
+    await seed(db, "AAPL", news, DAY)
+    await seed(db, "MSFT", "Microsoft unveils new Surface lineup", DAY)
+    await db[ARTICLES].update_many(
+        {"title": news},
+        {"$set": {"is_recap": False, "is_low_value": True, "low_value_version": 1}},
+    )
+    await db[STATE].insert_many(
+        [{"symbol": "AAPL", "dedupe_version": 1}, {"symbol": "MSFT", "dedupe_version": 1}]
+    )
+
+    await NewsMaintenanceRepository(db).backfill_flags()
+
+    doc = await db[ARTICLES].find_one({"title": news})
+    assert doc is not None
+    assert doc["is_low_value"] is False
+    assert doc["low_value_version"] == LOW_VALUE_VERSION
+    marked = {d["symbol"] async for d in db[STATE].find({"dedupe_version": {"$exists": True}})}
+    assert marked == {"MSFT"}  # only the symbol that gained a visible article is re-folded
 
 
 async def test_backfill_flags_never_raises(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:

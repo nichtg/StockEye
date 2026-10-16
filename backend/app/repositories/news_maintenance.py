@@ -12,7 +12,7 @@ from pymongo import ASCENDING, UpdateOne
 
 from app.db import Database, Document
 from app.domain.macro import is_price_recap
-from app.domain.news import is_low_value
+from app.domain.news import LOW_VALUE_VERSION, is_low_value
 from app.providers.models import NewsItem
 from app.repositories.news import ARTICLES, SHOWABLE, SIMILAR_CAP, STATE, dedupe_key
 
@@ -101,21 +101,42 @@ class NewsMaintenanceRepository:
         return result.modified_count
 
     async def backfill_flags(self) -> int:
-        """Set ``is_recap`` / ``is_low_value`` on documents that lack either; returns the count.
+        """(Re)set ``is_recap`` / ``is_low_value`` on documents that lack either flag or were
+        flagged under an older ``LOW_VALUE_VERSION``; returns the count.
 
-        Idempotent: updated documents leave the filter, so each pass takes the next batch and
-        a second run finds nothing. Documents flagged low-value stay stored.
+        Idempotent: updated documents carry the current version and leave the filter, so each
+        pass takes the next batch and a second run finds nothing. Documents flagged low-value
+        stay stored. A document flipped from low-value to showable may be a duplicate the fold
+        skipped while it was hidden, so its symbols lose their ``dedupe_version`` marker and the
+        startup fold that follows runs over them again.
         """
         missing: Document = {
-            "$or": [{"is_recap": {"$exists": False}}, {"is_low_value": {"$exists": False}}]
+            "$or": [
+                {"is_recap": {"$exists": False}},
+                {"is_low_value": {"$exists": False}},
+                {"low_value_version": {"$not": {"$gte": LOW_VALUE_VERSION}}},
+            ]
         }
         done = 0
         while True:
             docs = [
-                doc async for doc in self._articles.find(missing, {"title": 1}, limit=FLAG_BATCH)
+                doc
+                async for doc in self._articles.find(
+                    missing, {"title": 1, "is_low_value": 1, "symbols": 1}, limit=FLAG_BATCH
+                )
             ]
             if not docs:
                 return done
+            exposed = {
+                symbol
+                for doc in docs
+                if doc.get("is_low_value") is True and not is_low_value(doc["title"])
+                for symbol in doc.get("symbols", [])
+            }
+            if exposed:  # before the flags change, so a crash in between cannot lose the reset
+                await self._state.update_many(
+                    {"symbol": {"$in": sorted(exposed)}}, {"$unset": {"dedupe_version": ""}}
+                )
             await self._articles.bulk_write(
                 [
                     UpdateOne(
@@ -124,6 +145,7 @@ class NewsMaintenanceRepository:
                             "$set": {
                                 "is_recap": is_price_recap(doc["title"]),
                                 "is_low_value": is_low_value(doc["title"]),
+                                "low_value_version": LOW_VALUE_VERSION,
                             }
                         },
                     )

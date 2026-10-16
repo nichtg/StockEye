@@ -21,7 +21,7 @@ from pymongo import ASCENDING, DESCENDING, UpdateOne
 
 from app.db import Database, Document
 from app.domain.macro import ScoredArticle, is_price_recap
-from app.domain.news import Story, is_low_value
+from app.domain.news import LOW_VALUE_VERSION, Story, is_low_value
 from app.providers.models import NewsItem
 
 ARTICLES = "news_articles"
@@ -162,6 +162,7 @@ class NewsRepository:
                         "model_version": None,
                         "is_recap": is_price_recap(item.title),
                         "is_low_value": is_low_value(item.title),
+                        "low_value_version": LOW_VALUE_VERSION,
                     },
                 },
                 upsert=True,

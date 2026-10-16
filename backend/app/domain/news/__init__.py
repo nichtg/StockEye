@@ -1,12 +1,13 @@
 """News helpers that need no I/O: near-duplicate stories, low-value headlines, the month filter."""
 
 from app.domain.news.dedupe import Story, fold_near_duplicates
-from app.domain.news.low_value import is_low_value
+from app.domain.news.low_value import LOW_VALUE_VERSION, is_low_value
 from app.domain.news.months import InvalidMonthError, month_window
 from app.domain.news.names import core_name, ignore_tokens, shared_words
 from app.domain.news.similarity import cluster_stories
 
 __all__ = [
+    "LOW_VALUE_VERSION",
     "InvalidMonthError",
     "Story",
     "cluster_stories",
