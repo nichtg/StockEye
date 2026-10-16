@@ -12,7 +12,7 @@ Before storing, no-news items and same-day near-duplicates are trimmed (``servic
 
 import asyncio
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
@@ -25,6 +25,7 @@ from app.providers.base import NewsProvider
 from app.providers.errors import ProviderError, QuotaExhaustedError
 from app.providers.google_news import monthly_windows
 from app.providers.models import NewsItem, NewsQuery
+from app.providers.quota import scheduled_calls
 from app.repositories.news import (
     ArticleText,
     IngestState,
@@ -181,14 +182,21 @@ class NewsService:
             tasks = [self._tasks[symbol]] if symbol in self._tasks else []
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    def backfill_flags(self) -> None:
-        """Start the one-off tidy of stored news (flags, folding) in the background; idempotent.
+    def backfill_flags(self, company_name: Callable[[str], Awaitable[str]] | None = None) -> None:
+        """Start the one-off tidy of stored news in the background; idempotent, never raises.
 
-        Never blocks or raises; ``shutdown`` cancels it. The caller can go once every deployment
-        has run it.
+        ``company_name`` is the feed's lookup. ``shutdown`` cancels it; drop the caller once
+        every deployment has run it.
         """
         if self._backfill_task is None or self._backfill_task.done():
-            self._backfill_task = asyncio.create_task(backfill_stored_news(self._db))
+            # The task copies this context: its name lookups are background work, so they use
+            # the scheduled quota share and never crowd out users after a restart.
+            with scheduled_calls():
+                self._backfill_task = asyncio.create_task(
+                    backfill_stored_news(
+                        self._db, company_name=company_name, is_running=self._running
+                    )
+                )
 
     async def shutdown(self) -> None:
         tasks: list[asyncio.Task[None] | asyncio.Task[object]] = list(self._tasks.values())

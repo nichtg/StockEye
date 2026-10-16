@@ -67,6 +67,10 @@ NEWS = [
     "Intel stake cut by US government",
     "The stakes raised by Apple's antitrust trial",
     "Apple (AAPL) adds 5,000 shares of buyback",
+    "$TSLA shares sold by Elon Musk",
+    "Microsoft raises its stake in OpenAI to 49% ($MSFT)",
+    "Exxon (XOM) sells shares of Imperial Oil (IMO)",
+    "Toyota stake in Denso reduced by Toyota Industries Corp",
 ]
 
 

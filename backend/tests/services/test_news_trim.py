@@ -496,3 +496,53 @@ async def test_service_backfill_runs_in_the_background_and_shutdown_cancels_it(
     # Either it finished before the cancel or it was cancelled cleanly; it never raises.
     doc = await db[ARTICLES].find_one({})
     assert doc is not None
+
+
+async def test_feed_hides_a_stored_similar_entry_that_is_its_own_row_on_the_page(
+    db: Database, services: Services
+) -> None:
+    other = "Apple opens a flagship store in Mumbai"
+    await seed(db, "AAPL", FOLDABLE, DAY)
+    await seed(db, "AAPL", other, DAY - timedelta(days=3))  # shared with another symbol
+    entry = {
+        "title": other,
+        "url": "https://news.example.com/o",
+        "source": "Wire",
+        "published_at": DAY - timedelta(days=3),
+    }
+    await db[ARTICLES].update_one(
+        {"dedupe_key": dedupe_key(FOLDABLE, "Wire")}, {"$set": {"similar": [entry]}}
+    )
+
+    page = await services.news_feed.page("AAPL")
+
+    by_title = {a.title: a for a in page.articles}
+    assert set(by_title) == {FOLDABLE, other}
+    assert by_title[FOLDABLE].similar == []  # the story is already its own row
+
+
+async def test_backfill_skips_and_does_not_mark_a_symbol_being_ingested(db: Database) -> None:
+    await seed(db, "AAPL", FOLDABLE, DAY)
+    await seed(db, "AAPL", FOLDABLE_ALT, DAY + timedelta(hours=1))
+
+    summary = await backfill_stored_news(db, is_running=lambda symbol: symbol == "AAPL")
+
+    assert summary.folded == 0
+    assert await db[ARTICLES].count_documents({}) == 2
+    assert await db[STATE].count_documents({"dedupe_version": {"$exists": True}}) == 0
+
+
+async def test_backfill_uses_the_real_company_name_when_one_is_known(db: Database) -> None:
+    # The pair shares stock, market and outlook (3 tokens) once the company name is ignored.
+    await seed(db, "AAPL", "Apple stock market outlook brightens", DAY)
+    await seed(db, "AAPL", "Apple stock market outlook improves", DAY + timedelta(hours=1))
+    names: list[str] = []
+
+    async def name(symbol: str) -> str:
+        names.append(symbol)
+        return "Apple Inc."
+
+    summary = await backfill_stored_news(db, company_name=name)
+
+    assert names == ["AAPL"]
+    assert summary.folded == 1  # real name ignored; stock, market, outlook still match

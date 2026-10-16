@@ -86,7 +86,7 @@ def create_app(
         # One-off tidy of stored news (flags, retroactive near-duplicate folding). Runs in the
         # background, owned by the news service (cancelled by ``services.aclose``). Once every
         # deployment has been through it, this call can go.
-        services.news.backfill_flags()
+        services.news.backfill_flags(services.market.company_name)
         log.info("startup_complete", database=settings.mongodb_db)
         try:
             yield

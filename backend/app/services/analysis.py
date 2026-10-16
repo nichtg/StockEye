@@ -232,6 +232,8 @@ class AnalysisService:
         # flag only pre-filters in Mongo, and checking here keeps the study right while the
         # startup backfill runs and whenever the detector is updated.
         articles = [a for a in exclude_price_recaps(stored) if not is_low_value(a.title)]
+        # A report cached while the startup dedupe backfill runs may hold a few duplicates; it
+        # expires within the cache TTL, so we accept that rather than thread backfill state in.
         if stored and not articles and news_status.state == "ok":
             news_status = ok(news_status.as_of, RECAP_ONLY_REASON)
         report: MacroReportOut | None = None

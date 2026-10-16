@@ -38,12 +38,15 @@ _MARK = r"(?:\$[A-Z]{1,5}\b|\((?:[A-Z]+:\s*)?[A-Z0-9]{1,5}(?:\.[A-Z]{1,2})?\))"
 _TICKER_MARK = re.compile(_MARK)
 # Insider-trade format ("... Sells 7,000 Shares of Nebius Group (NASDAQ:NBIS) Stock") is news.
 _INSIDER_FORMAT = re.compile(r"\)\s+(?:company\s+)?stock\s*$", _FLAGS)
-# An institution as the actor: "... Cut by Denali Advisors LLC", "Purchased by Swedbank AB".
-_INSTITUTION = re.compile(
-    r"\b(?:LLC|L\.?P\.?|Inc\.?|Ltd\.?|Corp\.?|Co\.?|AB|AG|SA|N\.?V\.?|PLC|FSB|Management|Advisors?"
-    r"|Advisory|Capital|Partners|Trust|Bank|Wealth|Investments?|Financial|Group|Fund|Asset"
-    r"|Securities|Associates|Planning)\b"
+# A fund-type actor: "... Cut by Denali Advisors LLC". Deliberately narrow: "Toyota Industries
+# Corp" or "Elon Musk" are not funds.
+_FUND_WORDS = (
+    r"LLC|L\.?P\.?|FSB|Advisors?|Advisory|Management|Capital|Wealth|Partners|Trust|Assets?"
+    r"|Securities|Investments?|Funds?"
 )
+_INSTITUTION = re.compile(rf"\b(?:{_FUND_WORDS})\b")
+# A person ("Elon Musk", "Warren E. Buffett"): not a fund, whatever the headline template.
+_PERSON = re.compile(r"\s*[A-Z][a-z]+(?:\s+[A-Z]\.)?\s+[A-Z][a-z]+(?:\s+(?:Jr|Sr|II|III)\.?)?\s*")
 
 _CHANGED = (
     r"(?:boosted|raised|lifted|lowered|cut|trimmed|reduced|lessened|increased|decreased"
@@ -84,11 +87,17 @@ _VERB_LED: tuple[re.Pattern[str], ...] = (
         rf"(?:in\s+)?(?:stock\s+)?{_HOLDING}\s+in\b",
         _FLAGS,
     ),
-    # "Main Street Research Trims Costco (NASDAQ: COST) Stock Position by 1,093 Shares to 62,366".
-    re.compile(
-        rf"\b{_ACT}\s+[^,;|]{{1,60}}?\b(?:stock\s+)?{_HOLDING}\s+by\s+\d[\d,]*\s+shares\b",
-        _FLAGS,
-    ),
+)
+# "Main Street Research Trims Costco (NASDAQ: COST) Stock Position by 1,093 Shares to 62,366":
+# the mark sits inside the match, after the verb.
+_POSITION_BY_SHARES = re.compile(
+    rf"\b{_ACT}\s+[^,;|]{{1,60}}?\b(?:stock\s+)?{_HOLDING}\s+by\s+\d[\d,]*\s+shares\b",
+    _FLAGS,
+)
+# What must follow a verb-led match: the target company, then its ticker mark, then the end
+# ("... Lowers Stake in Apple Inc. $AAPL"). Anything else ("... to 49% ($MSFT)") is prose.
+_TARGET_THEN_MARK = re.compile(
+    rf"\s*(?:(?:in|of)\s+)?(?:\d[\d,]*\s+)?[^()$]{{1,60}}?\s*{_MARK}\s*$"
 )
 # "101,516 Shares of Apple Inc. $AAPL Purchased by Yukon Wealth Management": the mark sits
 # inside the match.
@@ -129,9 +138,25 @@ _QUOTE_DOLLAR = re.compile(
 _QUOTE_PAGE = re.compile(r"\bstock\s+price,\s+news,\s+quote\b", _FLAGS)
 
 
-def _after_mark(rule: re.Pattern[str], title: str) -> bool:
-    """The rule matches and a ticker mark appears at or after the match's start."""
-    return any(_TICKER_MARK.search(title, m.start()) for m in rule.finditer(title))
+def _verb_filing(rule: re.Pattern[str], title: str) -> bool:
+    """The rule matches with no ticker mark before it (the actor) and the target ends the title.
+
+    "Exxon (XOM) sells shares of Imperial Oil (IMO)" has a mark before the verb: a company's
+    own deal, not a fund's filing.
+    """
+    return any(
+        _TICKER_MARK.search(title, 0, m.start()) is None
+        and _TARGET_THEN_MARK.fullmatch(title, m.end()) is not None
+        for m in rule.finditer(title)
+    )
+
+
+def _position_by_shares(title: str) -> bool:
+    return any(
+        _TICKER_MARK.search(title, 0, m.start()) is None
+        and _TICKER_MARK.search(title, m.start()) is not None
+        for m in _POSITION_BY_SHARES.finditer(title)
+    )
 
 
 def _filing(title: str) -> bool:
@@ -139,14 +164,19 @@ def _filing(title: str) -> bool:
         marked_before = _TICKER_MARK.search(title, 0, match.start()) is not None
         if marked_before or _INSTITUTION.search(title, match.end()):
             return True
-    if _CASHTAG_SHARES_BY.search(title):
+    # The cashtag template is specific enough; only a person as the buyer or seller is news.
+    if (m := _CASHTAG_SHARES_BY.search(title)) and (
+        _INSTITUTION.search(title, m.end()) or not _PERSON.fullmatch(title, m.end())
+    ):
         return True
     if _INSIDER_FORMAT.search(title):
         return False
     if _SHARES_BOUGHT_BY.search(title) and _TICKER_MARK.search(title):
         return True
-    return _MARK_COLON_STYLE.search(title) is not None or any(
-        _after_mark(rule, title) for rule in _VERB_LED
+    return (
+        _MARK_COLON_STYLE.search(title) is not None
+        or any(_verb_filing(rule, title) for rule in _VERB_LED)
+        or _position_by_shares(title)
     )
 
 

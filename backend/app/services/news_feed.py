@@ -123,7 +123,7 @@ def _month_outs(counts: dict[str, int]) -> list[NewsMonthOut]:
     ]
 
 
-def _group_out(members: list[RecentArticle]) -> NewsArticleOut:
+def _group_out(members: list[RecentArticle], page_keys: frozenset[str]) -> NewsArticleOut:
     """One item for a group (newest first): the main article plus its look-alikes.
 
     The look-alikes are the other stored members of the group (read-time grouping) merged with
@@ -140,8 +140,11 @@ def _group_out(members: list[RecentArticle]) -> NewsArticleOut:
         similar.setdefault(member.dedupe_key, _similar_out(member))
     for member in members:
         for entry in member.similar:
+            key = dedupe_key(entry.title, entry.source)
+            if key in page_keys:  # an article shared with another symbol, shown as its own row
+                continue
             similar.setdefault(
-                dedupe_key(entry.title, entry.source),
+                key,
                 SimilarArticleOut(
                     title=entry.title,
                     url=entry.url,
@@ -179,7 +182,8 @@ def _grouped(articles: list[RecentArticle], ignore: set[str], tz: ZoneInfo) -> l
     so a story can split across a page edge; that is accepted rather than paying for look-ahead.
     """
     items = [(a.published_at.astimezone(tz).date(), a.title) for a in articles]
-    return [_group_out([articles[i] for i in g]) for g in cluster_stories(items, ignore)]
+    page_keys = frozenset(a.dedupe_key for a in articles)
+    return [_group_out([articles[i] for i in g], page_keys) for g in cluster_stories(items, ignore)]
 
 
 @dataclass(frozen=True)
