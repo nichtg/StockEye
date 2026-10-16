@@ -1,12 +1,32 @@
+import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { overviewKey, watchlistKey, watchlistRootKey } from '../../api/keys';
 import type { OverviewRow, WatchlistOut } from '../../api/types';
 
+const STALE_REFETCH_MS = 30_000;
+const STALE_REFETCH_MAX = 3;
+
+/**
+ * Stale rows usually clear once the background refresh finishes, so quietly refetch every ~30 s,
+ * at most 3 times in a row. Background refetches keep the previous data, so nothing flickers.
+ */
 export function useWatchlistOverview() {
+  // dataUpdateCount when the current run of stale responses began.
+  const staleSince = useRef<number | null>(null);
   return useQuery({
     queryKey: overviewKey,
     queryFn: ({ signal }) => api.get<OverviewRow[]>('/watchlist/overview', { signal }),
+    refetchInterval: (query) => {
+      if (!query.state.data?.some((r) => r.status === 'stale')) {
+        staleSince.current = null;
+        return false;
+      }
+      staleSince.current ??= query.state.dataUpdateCount;
+      return query.state.dataUpdateCount - staleSince.current >= STALE_REFETCH_MAX
+        ? false
+        : STALE_REFETCH_MS;
+    },
   });
 }
 

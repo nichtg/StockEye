@@ -600,6 +600,8 @@ export interface components {
       status: 'ok' | 'stale' | 'partial' | 'unavailable';
       /** Status Reason */
       status_reason: string | null;
+      /** Status As Of */
+      status_as_of?: string | null;
       /** Pe Ratio */
       pe_ratio: number | null;
       /** Avg Traded Value */
@@ -910,6 +912,8 @@ export interface components {
       status: 'ok' | 'stale' | 'partial' | 'unavailable';
       /** Status Reason */
       status_reason: string | null;
+      /** Status As Of */
+      status_as_of?: string | null;
     };
     /** PatternStatsOut */
     PatternStatsOut: {
