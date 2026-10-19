@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.db import Database
-from app.providers.errors import TransientProviderError
+from app.providers.errors import ProviderDataError, TransientProviderError
 from app.providers.models import ScreenMatch, ScreenQuery
 from app.providers.quota import current_priority
 from app.repositories.cache import COLLECTION, CacheRepository
@@ -331,3 +331,157 @@ async def test_a_marker_older_than_six_hours_no_longer_blocks_the_startup_build(
     clock.now += timedelta(hours=7)
 
     assert await services.discover.needs_startup_build()
+
+
+# --- an empty screener reply is a failure, and a failed build is retried -------------------------
+
+
+def _record_retries(services: Services) -> list[datetime | None]:
+    calls: list[datetime | None] = []
+    services.discover.set_retry_hook(calls.append)
+    return calls
+
+
+async def test_empty_screen_keeps_the_previous_rows_as_stale(
+    services: Services, provider: FakeMarketData, clock: FakeClock
+) -> None:
+    await services.discover.refresh()
+    provider.screen_fail = ProviderDataError("yahoo", "the screener returned no results")
+    clock.now += timedelta(hours=24)
+
+    await services.discover.refresh()
+
+    page = await services.discover.lists()
+    assert all(lst.rows and lst.status.state == "stale" for lst in page.lists)
+
+
+async def test_empty_screen_with_no_previous_rows_is_unavailable_never_ok(
+    services: Services, provider: FakeMarketData
+) -> None:
+    provider.screen_fail = ProviderDataError("yahoo", "the screener returned no results")
+
+    await services.discover.refresh()
+
+    page = await services.discover.lists()
+    assert all(lst.rows == [] and lst.status.state == "unavailable" for lst in page.lists)
+    assert page.data_status.state == "unavailable"
+
+
+async def test_failed_build_queues_one_retry_45_minutes_later(
+    services: Services, provider: FakeMarketData, clock: FakeClock
+) -> None:
+    calls = _record_retries(services)
+    provider.screen_fail = TransientProviderError("yahoo", "down")
+
+    await services.discover.refresh()
+
+    assert calls == [clock.now + timedelta(minutes=45)]
+
+
+async def test_retries_stop_after_three_per_scheduled_build(
+    services: Services, provider: FakeMarketData
+) -> None:
+    calls = _record_retries(services)
+    provider.screen_fail = TransientProviderError("yahoo", "down")
+
+    await services.discover.refresh()
+    for _ in range(4):
+        await services.discover.retry()
+
+    assert [c is not None for c in calls] == [True, True, True, False, False]
+
+
+async def test_a_new_scheduled_build_gets_a_fresh_retry_allowance(
+    services: Services, provider: FakeMarketData
+) -> None:
+    calls = _record_retries(services)
+    provider.screen_fail = TransientProviderError("yahoo", "down")
+    await services.discover.refresh()
+    for _ in range(3):
+        await services.discover.retry()
+
+    await services.discover.refresh()
+
+    assert calls[-1] is not None
+
+
+async def test_success_after_a_failure_cancels_the_pending_retry(
+    services: Services, provider: FakeMarketData
+) -> None:
+    calls = _record_retries(services)
+    provider.screen_fail = TransientProviderError("yahoo", "down")
+    await services.discover.refresh()
+    provider.screen_fail = None
+
+    await services.discover.retry()
+
+    assert [c is not None for c in calls] == [True, False]
+
+
+async def test_clean_first_build_schedules_no_retry(services: Services) -> None:
+    calls = _record_retries(services)
+
+    await services.discover.refresh()
+
+    assert calls == [None]
+
+
+async def test_build_where_every_list_is_empty_counts_as_failed(
+    services: Services, provider: FakeMarketData
+) -> None:
+    calls = _record_retries(services)
+    screen_returns(provider, us=[], sg=[])
+
+    await services.discover.refresh()
+
+    assert calls[-1] is not None
+
+
+async def test_a_broken_retry_hook_never_breaks_refresh(services: Services) -> None:
+    def boom(_at: datetime | None) -> None:
+        raise RuntimeError("scheduler gone")
+
+    services.discover.set_retry_hook(boom)
+
+    await services.discover.refresh()  # must not raise
+
+
+async def test_startup_build_runs_for_a_stored_page_with_no_rows(
+    services: Services, provider: FakeMarketData, clock: FakeClock
+) -> None:
+    screen_returns(provider, us=[], sg=[])
+    await services.discover.refresh()
+    clock.now += timedelta(hours=7)  # the attempt marker has expired
+
+    assert await services.discover.needs_startup_build()
+
+
+async def test_startup_build_is_skipped_for_a_populated_page(services: Services) -> None:
+    await services.discover.refresh()
+
+    assert not await services.discover.needs_startup_build()
+
+
+async def test_startup_build_is_guarded_by_the_marker_when_the_stored_page_is_empty(
+    services: Services, provider: FakeMarketData
+) -> None:
+    screen_returns(provider, us=[], sg=[])
+    await services.discover.refresh()  # stores an empty page and the attempt marker
+
+    assert not await services.discover.needs_startup_build()
+
+
+async def test_a_skipped_refresh_does_not_reset_the_retry_count(
+    services: Services, provider: FakeMarketData
+) -> None:
+    calls = _record_retries(services)
+    provider.screen_fail = TransientProviderError("yahoo", "down")
+    await services.discover.refresh()
+    for _ in range(2):
+        await services.discover.retry()  # 3 of 3 used
+    async with services.discover._lock:  # a build is running elsewhere
+        await services.discover.refresh()  # skipped: must not refill the allowance
+
+    await services.discover.retry()
+
+    assert [c is not None for c in calls] == [True, True, True, False]

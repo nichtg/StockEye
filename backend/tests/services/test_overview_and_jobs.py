@@ -249,3 +249,47 @@ async def test_overview_stale_history_and_quote_report_the_oldest_saved_copy(
 
     assert row.status != "ok"
     assert row.status_as_of == older
+
+
+async def test_failed_discover_build_queues_one_retry_job_and_a_success_cancels_it(
+    services: Services, db: Database, provider: FakeMarketData
+) -> None:
+    scheduler = build_scheduler(services, db)
+    scheduler.start(paused=True)  # an unstarted scheduler queues duplicates; a started one replaces
+    try:
+        provider.screen_fail = TransientProviderError("yahoo", "down")
+
+        await services.discover.refresh()
+        await services.discover.retry()  # a second failure replaces the job, never stacks one
+
+        retries = [j for j in scheduler.get_jobs() if j.id == "discover_retry"]
+        assert len(retries) == 1
+        assert "date" in str(retries[0].trigger)
+
+        provider.screen_fail = None
+        provider.screen_hits = {"us": ["AAPL"], "sg": []}
+        await services.discover.retry()
+
+        assert scheduler.get_job("discover_retry") is None
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+async def test_discover_retry_and_startup_jobs_tolerate_a_late_start(
+    services: Services, db: Database, provider: FakeMarketData
+) -> None:
+    scheduler = build_scheduler(services, db)
+    scheduler.start(paused=True)
+    try:
+        provider.screen_fail = TransientProviderError("yahoo", "down")
+        await schedule_startup_discover(scheduler, services)  # before any build leaves a marker
+        await services.discover.refresh()  # queues the retry job
+
+        retry = scheduler.get_job("discover_retry")
+        startup = scheduler.get_job("discover_startup")
+
+        assert retry is not None and startup is not None
+        assert retry.misfire_grace_time == 3600
+        assert startup.misfire_grace_time == 3600
+    finally:
+        scheduler.shutdown(wait=False)
