@@ -601,7 +601,15 @@ Branches, each from `main`:
   news). `LOW_VALUE_VERSION` is stamped on every article, and the startup pass re-flags older stamps, so changing the
   rule means bumping it (#60). Locally 350 → 374 flagged, none un-flagged.
 - Deployed 2026-10-16: backend image `f7e5df4` (#52, #56, #60), live health ok; Pages has #53–#59.
+- [x] Discover after an empty screener reply (2026-10-19). On 2026-10-16 Yahoo's screener returned an empty reply for
+  every list, which was stored as three "ok" empty lists ("Nothing matches"). Now an empty reply is a provider failure,
+  so the last good lists are kept. A failed build retries 45 minutes later (at most 3 times a night), an all-empty page
+  rebuilds at startup, and `python -m app.cli refresh-discover` rebuilds on demand (#62, deployed 2026-10-19).
 - Follow-ups:
+  - `test_quota.py::test_try_consume_concurrent_first_calls_on_fresh_minute_all_allowed` failed once under full-suite
+    load; it passes alone and under parallel load. It may be a rare case where the retry after a lost insert doesn't
+    yet see the winner's document. If it recurs, make `_bump` re-check that the document exists before answering
+    "full".
   - The older, looser "Shares … by" rule in `low_value.py` can still drop real news ("$BABA shares sold by SoftBank",
     "$NVDA shares purchased by Nancy Pelosi's husband"). About 35 stored filings without a fund word depend on it, so
     narrowing it needs its own pass over the data.
