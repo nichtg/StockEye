@@ -44,6 +44,9 @@ BUILD_AT = (22, 30)  # UTC, weekdays: after the US close refresh
 # A page is "overdue" only when the last scheduled build is this old and still has not landed.
 BUILD_GRACE = timedelta(hours=1)
 KEEP_STALE_FOR = timedelta(days=7)  # kept rows older than this are dropped rather than shown
+# A failed build is retried this long afterwards, at most this many times per scheduled build.
+RETRY_DELAY = timedelta(minutes=45)
+MAX_RETRIES = 3
 ROWS_PER_LIST = 10
 SCREEN_SIZE = 25  # the candidate pool: ranked first, then built in rank order until 10 rows
 EMPTY_REASON = "Discover lists are being prepared. Check back in a few minutes."
@@ -180,10 +183,24 @@ class DiscoverService:
         self._analysis = analysis
         self._clock = clock
         self._lock = asyncio.Lock()  # one build at a time: a startup build can meet the cron job
+        self._retry_hook: Callable[[datetime | None], None] | None = None
+        self._retries = 0  # retries used since the last scheduled (non-retry) build
+
+    def set_retry_hook(self, hook: Callable[[datetime | None], None]) -> None:
+        """Let the scheduler own the retry job: called with a run time, or None to cancel it.
+
+        A hook keeps this service free of any scheduler import, and keeps the retry bookkeeping
+        (how many, how long to wait) here.
+        """
+        self._retry_hook = hook
 
     async def needs_startup_build(self) -> bool:
-        """True when nothing is stored and no build was attempted lately (crash-loop guard)."""
-        if await self._stored() is not None:
+        """True when nothing useful is stored and no build was attempted lately (crash-loop guard).
+
+        A stored page with no rows in any list counts as nothing: an empty build must not stick.
+        """
+        stored = await self._stored()
+        if stored is not None and any(lst.rows for lst in stored.lists):
             return False
         marker = await self._cache.lookup(ATTEMPT_KEY)  # also returns expired entries
         return marker is None or not marker.is_fresh(self._clock())
@@ -197,29 +214,63 @@ class DiscoverService:
         """Rebuild every list and store the page. Never raises; a second call while one runs skips.
 
         A preset that fails keeps its previous rows, marked stale, and the others still update.
-        Vendor calls draw on the quota reserved for scheduled work.
+        Vendor calls draw on the quota reserved for scheduled work. A build where any list failed
+        (or every list came out empty) queues a retry; see ``retry``.
         """
+        self._retries = 0
+        await self._run_build()
+
+    async def retry(self) -> None:
+        """A follow-up build after a failed one; at most ``MAX_RETRIES`` per scheduled build."""
+        await self._run_build()
+
+    async def _run_build(self) -> None:
         if self._lock.locked():
             log.info("discover_refresh_skipped", reason="a build is already running")
             return
         async with self._lock:
             with scheduled_calls():
                 try:
-                    await self._refresh()
+                    healthy = await self._refresh()
                 except Exception:
                     log.exception("discover_refresh_failed")
+                    healthy = False
+            self._plan_retry(healthy)
 
-    async def _refresh(self) -> None:
+    def _plan_retry(self, healthy: bool) -> None:
+        """Cancel any pending retry after a good build; else queue the next, up to the cap."""
+        if self._retry_hook is None:
+            return
+        try:
+            if healthy:
+                self._retry_hook(None)
+            elif self._retries < MAX_RETRIES:
+                self._retries += 1
+                self._retry_hook(self._clock() + RETRY_DELAY)
+            else:
+                self._retry_hook(None)
+                log.warning("discover_retries_exhausted", retries=MAX_RETRIES)
+        except Exception:  # the scheduler must never break a build
+            log.exception("discover_retry_schedule_failed")
+
+    async def _refresh(self) -> bool:
+        """Build and store the page; True when every list built and at least one has rows."""
         now = self._clock()
         await self._cache.put(ATTEMPT_KEY, {"at": now.isoformat()}, ATTEMPT_TTL, now)
         previous = await self._stored()
         old = {lst.id: lst for lst in previous.lists} if previous else {}
-        lists = [await self._build(preset, old.get(preset.id), now) for preset in PRESETS]
+        lists: list[DiscoverList] = []
+        failed = False
+        for preset in PRESETS:
+            built, built_ok = await self._build(preset, old.get(preset.id), now)
+            lists.append(built)
+            failed = failed or not built_ok
         page = DiscoverOut(
             lists=lists, updated_at=now, data_status=combine([lst.status for lst in lists])
         )
         await self._cache.put(CACHE_KEY, page.model_dump(mode="json"), CACHE_TTL, now)
         log.info("discover_refresh_finished", rows=[len(lst.rows) for lst in lists])
+        return not failed and any(lst.rows for lst in lists)
 
     async def lists(self) -> DiscoverOut:
         """The stored page. Reads the cache only: it never calls a vendor."""
@@ -239,7 +290,10 @@ class DiscoverService:
         entry = await self._cache.lookup(CACHE_KEY)
         return entry.parse(DiscoverOut) if entry is not None else None
 
-    async def _build(self, preset: Preset, old: DiscoverList | None, now: datetime) -> DiscoverList:
+    async def _build(
+        self, preset: Preset, old: DiscoverList | None, now: datetime
+    ) -> tuple[DiscoverList, bool]:
+        """The list to store, and whether building it worked (False: old rows kept, or none)."""
         try:
             rows, complete = await self._rows(preset)
         except Exception as exc:
@@ -252,11 +306,11 @@ class DiscoverService:
                 )
             else:
                 log.exception("discover_preset_failed", preset=preset.id)
-            return _kept(preset, old, now)
+            return _kept(preset, old, now), False
         status = (
             ok(now) if complete else DataStatus(state="stale", as_of=now, reason=_PARTIAL_REASON)
         )
-        return DiscoverList(
+        built = DiscoverList(
             id=preset.id,
             title=preset.title,
             description=preset.description,
@@ -264,6 +318,7 @@ class DiscoverService:
             rows=rows,
             status=status,
         )
+        return built, True
 
     async def _rows(self, preset: Preset) -> tuple[list[DiscoverRow], bool]:
         """The top ``ROWS_PER_LIST`` hits by the preset's own order; and whether none was lost.

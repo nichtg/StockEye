@@ -1,7 +1,9 @@
 """APScheduler wiring: weekday refreshes after each close, then the nightly Discover rebuild."""
 
-from datetime import timedelta
+from contextlib import suppress
+from datetime import datetime, timedelta
 
+from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -21,6 +23,7 @@ DISCOVER_AT = BUILD_AT
 PRUNE_JOB_ID = "prune_market_data"
 DISCOVER_JOB_ID = "discover_refresh"
 STARTUP_DISCOVER_JOB_ID = "discover_startup"
+DISCOVER_RETRY_JOB_ID = "discover_retry"
 STARTUP_DISCOVER_DELAY = timedelta(seconds=60)
 
 
@@ -48,6 +51,7 @@ def build_scheduler(services: Services, db: Database) -> AsyncIOScheduler:
         misfire_grace_time=3600,
         replace_existing=True,
     )
+    services.discover.set_retry_hook(lambda at: _set_discover_retry(scheduler, services, at))
     scheduler.add_job(
         prune_orphan_market_data,
         CronTrigger(day_of_week="sun", hour=3, minute=0, timezone="UTC"),
@@ -59,6 +63,24 @@ def build_scheduler(services: Services, db: Database) -> AsyncIOScheduler:
         replace_existing=True,
     )
     return scheduler
+
+
+def _set_discover_retry(
+    scheduler: AsyncIOScheduler, services: Services, at: datetime | None
+) -> None:
+    """Queue (or, with None, cancel) the one Discover retry job; a fixed id so they never stack."""
+    if at is None:
+        with suppress(JobLookupError):
+            scheduler.remove_job(DISCOVER_RETRY_JOB_ID)
+        return
+    scheduler.add_job(
+        services.discover.retry,
+        DateTrigger(run_date=at, timezone="UTC"),
+        id=DISCOVER_RETRY_JOB_ID,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
 
 
 async def schedule_startup_discover(scheduler: AsyncIOScheduler, services: Services) -> bool:

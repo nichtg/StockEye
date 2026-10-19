@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app import cli
@@ -52,3 +54,39 @@ def test_create_admin_rejects_weak_password(
 
     assert code == 2
     assert "at least 12" in capsys.readouterr().err
+
+
+def test_refresh_discover_runs_one_build_and_prints_the_counts(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    refreshed: list[str] = []
+    closed: list[str] = []
+
+    class FakeDiscover:
+        async def refresh(self) -> None:
+            refreshed.append("x")
+
+        async def lists(self) -> SimpleNamespace:
+            def one(list_id: str, n: int) -> SimpleNamespace:
+                return SimpleNamespace(id=list_id, rows=[object()] * n)
+
+            return SimpleNamespace(lists=[one("us_small_movers", 10), one("sg_under_radar", 0)])
+
+    class FakeServices:
+        discover = FakeDiscover()
+
+        async def aclose(self) -> None:
+            closed.append("x")
+
+    async def fake_build(_settings: Settings, _db: Database) -> FakeServices:
+        return FakeServices()
+
+    monkeypatch.setattr(cli, "build_services", fake_build)
+
+    code = cli.main(["refresh-discover"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert (len(refreshed), len(closed)) == (1, 1)
+    assert "us_small_movers: 10 rows" in out
+    assert "sg_under_radar: 0 rows" in out

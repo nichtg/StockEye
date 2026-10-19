@@ -7,7 +7,7 @@ import pytest
 import yfinance as yf
 from yfinance.exceptions import YFRateLimitError
 
-from app.providers.errors import RateLimitedError
+from app.providers.errors import ProviderDataError, RateLimitedError
 from app.providers.models import ScreenQuery
 from app.providers.yahoo import YahooMarketData
 
@@ -65,7 +65,7 @@ def _operands(capture: Capture) -> list[dict[str, Any]]:
 async def test_screen_builds_the_query_with_region_exchanges_cap_and_volume(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    capture = _use(monkeypatch, [])
+    capture = _use(monkeypatch, [_quote()])
 
     await YahooMarketData().screen(_query())
 
@@ -84,7 +84,7 @@ async def test_screen_builds_the_query_with_region_exchanges_cap_and_volume(
 async def test_screen_pe_limit_also_requires_a_positive_pe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    capture = _use(monkeypatch, [])
+    capture = _use(monkeypatch, [_quote()])
 
     await YahooMarketData().screen(_query(max_pe=15.0))
 
@@ -96,7 +96,7 @@ async def test_screen_pe_limit_also_requires_a_positive_pe(
 async def test_screen_singapore_restricts_to_the_sgx_exchange(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    capture = _use(monkeypatch, [])
+    capture = _use(monkeypatch, [_quote()])
 
     await YahooMarketData().screen(_query(region="sg"))
 
@@ -170,3 +170,29 @@ async def test_screen_vendor_rate_limit_maps_to_the_taxonomy(
 def test_screen_query_size_is_capped_at_25() -> None:
     with pytest.raises(ValueError, match="size"):
         _query(size=26)
+
+
+@pytest.mark.parametrize("reply", [{}, {"quotes": []}, {"quotes": None}, {"total": 0, "count": 0}])
+async def test_screen_empty_or_malformed_reply_raises_a_data_error(
+    monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]
+) -> None:
+    monkeypatch.setattr(yf, "screen", lambda *_a, **_k: reply)
+
+    with pytest.raises(ProviderDataError):
+        await YahooMarketData().screen(_query())
+
+
+async def test_screen_normal_reply_returns_its_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use(monkeypatch, [_quote(symbol="AAA"), _quote(symbol="BBB")])
+
+    result = await YahooMarketData().screen(_query())
+
+    assert [m.symbol for m in result] == ["AAA", "BBB"]
+
+
+async def test_screen_reply_of_only_otc_quotes_is_a_legitimate_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use(monkeypatch, [_quote(symbol="REEMF", exchange="OQB")])
+
+    assert await YahooMarketData().screen(_query()) == []

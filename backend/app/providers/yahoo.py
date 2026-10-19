@@ -161,7 +161,20 @@ class YahooMarketData:
                 sortField=query.sort_field,
                 sortAsc=query.sort_asc,
             )
-            return _matches_of(result.get("quotes") or [])
+            quotes = result.get("quotes") if isinstance(result, dict) else None
+            # Every query StockEye sends is broad, so a reply with no quotes at all means the
+            # source failed (it did once, silently, for a whole night), not that the market is
+            # empty. Raising lets callers keep their last good data instead of storing nothing.
+            if not isinstance(quotes, list) or not quotes:
+                reply: dict[str, Any] = result if isinstance(result, dict) else {}
+                log.warning(
+                    "yahoo_screen_empty_reply",
+                    keys=sorted(reply),
+                    total=reply.get("total"),
+                    count=reply.get("count"),
+                )
+                raise ProviderDataError(self.name, "the screener returned no results")
+            return _matches_of(quotes)
 
         return await self._run(work)
 
