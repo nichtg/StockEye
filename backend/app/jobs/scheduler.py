@@ -79,6 +79,7 @@ def _set_discover_retry(
         id=DISCOVER_RETRY_JOB_ID,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=3600,  # the 1 s default would silently drop a slightly late retry
         replace_existing=True,
     )
 
@@ -96,6 +97,7 @@ async def schedule_startup_discover(scheduler: AsyncIOScheduler, services: Servi
         id=STARTUP_DISCOVER_JOB_ID,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=3600,
         replace_existing=True,
     )
     return True

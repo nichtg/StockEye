@@ -469,3 +469,19 @@ async def test_startup_build_is_guarded_by_the_marker_when_the_stored_page_is_em
     await services.discover.refresh()  # stores an empty page and the attempt marker
 
     assert not await services.discover.needs_startup_build()
+
+
+async def test_a_skipped_refresh_does_not_reset_the_retry_count(
+    services: Services, provider: FakeMarketData
+) -> None:
+    calls = _record_retries(services)
+    provider.screen_fail = TransientProviderError("yahoo", "down")
+    await services.discover.refresh()
+    for _ in range(2):
+        await services.discover.retry()  # 3 of 3 used
+    async with services.discover._lock:  # a build is running elsewhere
+        await services.discover.refresh()  # skipped: must not refill the allowance
+
+    await services.discover.retry()
+
+    assert [c is not None for c in calls] == [True, True, True, False]

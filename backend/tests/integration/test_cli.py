@@ -56,9 +56,9 @@ def test_create_admin_rejects_weak_password(
     assert "at least 12" in capsys.readouterr().err
 
 
-def test_refresh_discover_runs_one_build_and_prints_the_counts(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def _fake_discover(
+    monkeypatch: pytest.MonkeyPatch, counts: dict[str, int]
+) -> tuple[list[str], list[str]]:
     refreshed: list[str] = []
     closed: list[str] = []
 
@@ -68,9 +68,12 @@ def test_refresh_discover_runs_one_build_and_prints_the_counts(
 
         async def lists(self) -> SimpleNamespace:
             def one(list_id: str, n: int) -> SimpleNamespace:
-                return SimpleNamespace(id=list_id, rows=[object()] * n)
+                state = "ok" if n else "unavailable"
+                return SimpleNamespace(
+                    id=list_id, rows=[object()] * n, status=SimpleNamespace(state=state)
+                )
 
-            return SimpleNamespace(lists=[one("us_small_movers", 10), one("sg_under_radar", 0)])
+            return SimpleNamespace(lists=[one(k, v) for k, v in counts.items()])
 
     class FakeServices:
         discover = FakeDiscover()
@@ -82,11 +85,29 @@ def test_refresh_discover_runs_one_build_and_prints_the_counts(
         return FakeServices()
 
     monkeypatch.setattr(cli, "build_services", fake_build)
+    return refreshed, closed
+
+
+def test_refresh_discover_runs_one_build_and_prints_counts_and_states(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    refreshed, closed = _fake_discover(monkeypatch, {"us_small_movers": 10, "sg_under_radar": 0})
 
     code = cli.main(["refresh-discover"])
 
     out = capsys.readouterr().out
     assert code == 0
     assert (len(refreshed), len(closed)) == (1, 1)
-    assert "us_small_movers: 10 rows" in out
-    assert "sg_under_radar: 0 rows" in out
+    assert "us_small_movers: 10 rows (ok)" in out
+    assert "sg_under_radar: 0 rows (unavailable)" in out
+
+
+def test_refresh_discover_exits_1_when_no_list_has_rows(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _fake_discover(monkeypatch, {"us_small_movers": 0, "sg_under_radar": 0})
+
+    code = cli.main(["refresh-discover"])
+
+    assert code == 1
+    assert "0 rows (unavailable)" in capsys.readouterr().out

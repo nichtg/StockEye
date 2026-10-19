@@ -2,7 +2,9 @@
 
 - ``python -m app.cli create-admin --email you@example.com``: create or promote an admin.
 - ``python -m app.cli refresh-discover``: rebuild the Discover lists now, in the foreground, and
-  print how many rows each list got. Use it after a night when the lists came out empty.
+  print each list's row count and status, and exit 1 when no list has rows. Use it after a night
+  when the lists came out empty. It can overlap the API's own build (the last write wins, which is
+  harmless); best run outside 22:30 to 01:00 UTC.
 """
 
 import argparse
@@ -35,8 +37,8 @@ async def create_admin(email: str, password: str) -> str:
         await client.close()
 
 
-async def refresh_discover() -> list[tuple[str, int]]:
-    """Run one Discover build with the app's own service wiring; (list id, row count) per list."""
+async def refresh_discover() -> list[tuple[str, int, str]]:
+    """Run one Discover build with the app's own service wiring; (id, row count, state) per list."""
     settings = get_settings()
     client = create_client(settings.mongodb_uri.get_secret_value())
     try:
@@ -47,7 +49,7 @@ async def refresh_discover() -> list[tuple[str, int]]:
             page = await services.discover.lists()
         finally:
             await services.aclose()
-        return [(lst.id, len(lst.rows)) for lst in page.lists]
+        return [(lst.id, len(lst.rows), lst.status.state) for lst in page.lists]
     finally:
         await client.close()
 
@@ -61,9 +63,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "refresh-discover":
-        for list_id, count in asyncio.run(refresh_discover()):
-            print(f"{list_id}: {count} rows")
-        return 0
+        results = asyncio.run(refresh_discover())
+        for list_id, count, state in results:
+            print(f"{list_id}: {count} rows ({state})")
+        return 0 if any(count for _, count, _ in results) else 1
 
     password = os.environ.get("STOCKEYE_ADMIN_PASSWORD") or getpass.getpass("Password: ")
     try:  # fail fast, before any database I/O; the account module re-checks as the real gate

@@ -45,6 +45,7 @@ BUILD_AT = (22, 30)  # UTC, weekdays: after the US close refresh
 BUILD_GRACE = timedelta(hours=1)
 KEEP_STALE_FOR = timedelta(days=7)  # kept rows older than this are dropped rather than shown
 # A failed build is retried this long afterwards, at most this many times per scheduled build.
+# A retry rebuilds all three lists, not just the failed ones: bounded (3 retries) and accepted.
 RETRY_DELAY = timedelta(minutes=45)
 MAX_RETRIES = 3
 ROWS_PER_LIST = 10
@@ -217,18 +218,19 @@ class DiscoverService:
         Vendor calls draw on the quota reserved for scheduled work. A build where any list failed
         (or every list came out empty) queues a retry; see ``retry``.
         """
-        self._retries = 0
-        await self._run_build()
+        await self._run_build(reset=True)
 
     async def retry(self) -> None:
         """A follow-up build after a failed one; at most ``MAX_RETRIES`` per scheduled build."""
-        await self._run_build()
+        await self._run_build(reset=False)
 
-    async def _run_build(self) -> None:
+    async def _run_build(self, *, reset: bool) -> None:
         if self._lock.locked():
             log.info("discover_refresh_skipped", reason="a build is already running")
             return
         async with self._lock:
+            if reset:  # only once the build really runs: a skipped call must not refill the cap
+                self._retries = 0
             with scheduled_calls():
                 try:
                     healthy = await self._refresh()
