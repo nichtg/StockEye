@@ -11,7 +11,7 @@ RUN uv sync --locked --no-dev
 # Bake the FinBERT ONNX model into the image so containers start without network access.
 RUN uv run --no-dev python scripts/download_finbert.py --dest models/finbert
 
-FROM python:3.13-slim-bookworm@sha256:5024f48ba9441d4b13a95d3945abc6365538e3a31109833367a1923523c6efed
+FROM python:3.15-slim-bookworm@sha256:4e03260adeeebafccd084f3584e6b84823aba5651cfb53ef8a078ed441ddf9cd
 WORKDIR /app
 RUN useradd --create-home --uid 10001 stockeye
 COPY --from=build --chown=stockeye:stockeye /app /app
